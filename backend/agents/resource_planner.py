@@ -67,12 +67,12 @@ class ResourcePlannerAgent(BaseAgent):
         # Load from shared memory
         self.student_profile = (
             task.get("student_profile") or
-            self.read_shared_memory("student_profile", {})
+            await self.read_shared_memory("student_profile", {})
         )
         self.knowledge_structure = (
             task.get("knowledge_structure") or
             self.knowledge_structure or
-            self.read_shared_memory("knowledge_structure", {})
+            await self.read_shared_memory("knowledge_structure", {})
         )
 
         return await self._plan_learning_path(
@@ -171,7 +171,7 @@ class ResourcePlannerAgent(BaseAgent):
             return {"error": "Failed to parse learning path", "raw": result["content"]}
 
         # Store in shared memory
-        self.update_shared_memory("learning_path_plan", data)
+        await self.update_shared_memory("learning_path_plan", data)
 
         # Notify resource generation agents
         resource_plan = {

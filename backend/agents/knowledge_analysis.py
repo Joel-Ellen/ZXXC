@@ -59,7 +59,7 @@ class KnowledgeAnalysisAgent(BaseAgent):
 
         # Use student context from shared memory if available
         student_profile = task.get("student_profile") or self.student_context or \
-                         self.read_shared_memory("student_profile", {})
+                         await self.read_shared_memory("student_profile", {})
 
         if mode == "full_analysis":
             return await self._full_analysis(course_name, student_profile)
@@ -149,8 +149,8 @@ class KnowledgeAnalysisAgent(BaseAgent):
             return {"error": "Failed to parse knowledge analysis", "raw": result["content"]}
 
         # Store in shared memory
-        self.update_shared_memory("knowledge_structure", data)
-        self.update_shared_memory(f"knowledge_{course_name}", data)
+        await self.update_shared_memory("knowledge_structure", data)
+        await self.update_shared_memory(f"knowledge_{course_name}", data)
 
         # Notify dependent agents
         self.send_message("ResourcePlanner", data, "knowledge_structure")

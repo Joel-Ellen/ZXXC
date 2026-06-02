@@ -63,7 +63,7 @@ class LearningCoachAgent(BaseAgent):
         self.state.current_task = f"Tutoring: {context_type}"
 
         # Load student profile
-        self.student_profile = self.read_shared_memory("student_profile", {})
+        self.student_profile = await self.read_shared_memory("student_profile", {})
 
         student_context = f"""## 学生画像
 - 知识水平：{self.student_profile.get('knowledge_level', {}).get('label', '未知')}

@@ -84,7 +84,7 @@
 <script setup>
 import { ref, nextTick } from 'vue'
 import { tutoringAPI } from '../api'
-import { marked } from 'marked'
+import { renderChatMessage } from '../composables/useContentRenderer'
 import mermaid from 'mermaid'
 
 const chatMessages = ref([])
@@ -111,7 +111,7 @@ const quickQuestions = [
   '如何理解时间复杂度和空间复杂度？',
 ]
 
-function renderMarkdown(text) { if (!text) return ''; try { return marked(text) } catch (e) { return text } }
+function renderMarkdown(text) { return renderChatMessage(text) }
 
 async function renderMermaidDiagram(code) {
   try { const { svg } = await mermaid.render('tutor-mermaid-' + Date.now(), code); return svg } catch (e) { return null }

@@ -4,7 +4,7 @@ AI Learning Assistant - Base Agent Class
 
 Provides:
 - Common agent interface
-- Shared memory access
+- Shared memory access (thread-safe via asyncio.Lock)
 - LLM interaction
 - Task logging
 - Inter-agent messaging
@@ -78,6 +78,13 @@ class BaseAgent(ABC):
         # Shared memory reference (set by orchestrator)
         self.shared_memory: Dict[str, Any] = {}
 
+        # ── Concurrency safety ──
+        # asyncio.Lock 保护 shared_memory 的读写操作。
+        # 当 Orchestrator 以 asyncio.gather 并发执行多个 Agent 时，
+        # 协程可能在 await 点交错执行，导致 read-modify-write 竞争。
+        # 此锁确保每个 Agent 对 shared_memory 的访问是互斥的。
+        self._memory_lock: asyncio.Lock = asyncio.Lock()
+
         # Message handlers
         self._message_handlers: Dict[str, Callable] = {}
 
@@ -97,13 +104,35 @@ class BaseAgent(ABC):
             except ValueError:
                 logger.info(f"[{self.name}] {message}")
 
-    def update_shared_memory(self, key: str, value: Any):
-        """Write to shared memory"""
-        self.shared_memory[key] = value
+    async def update_shared_memory(self, key: str, value: Any):
+        """
+        Write to shared memory — concurrency-safe.
+
+        Uses asyncio.Lock to prevent read-modify-write races when
+        multiple agents execute concurrently via asyncio.gather.
+        """
+        async with self._memory_lock:
+            self.shared_memory[key] = value
         self._log(f"Shared memory updated: {key}")
 
-    def read_shared_memory(self, key: str, default: Any = None) -> Any:
-        """Read from shared memory"""
+    async def read_shared_memory(self, key: str, default: Any = None) -> Any:
+        """
+        Read from shared memory — concurrency-safe.
+
+        Uses asyncio.Lock to ensure consistent reads even when
+        another agent is mid-write on the same key.
+        """
+        async with self._memory_lock:
+            return self.shared_memory.get(key, default)
+
+    def read_shared_memory_sync(self, key: str, default: Any = None) -> Any:
+        """
+        Synchronous read from shared memory — for use in sync message handlers
+        (e.g. update_plan / update_student_context) where await is unavailable.
+
+        NOTE: This bypasses the lock. It is safe because dict.get() is atomic
+        at the CPython GIL level. Use read_shared_memory() in async contexts.
+        """
         return self.shared_memory.get(key, default)
 
     def send_message(

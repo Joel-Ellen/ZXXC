@@ -64,9 +64,9 @@ class EvaluationAgent(BaseAgent):
 
         # Load from shared memory
         student_profile = task.get("student_profile") or \
-                         self.read_shared_memory("student_profile", {})
+                         await self.read_shared_memory("student_profile", {})
         learning_path = task.get("learning_path") or \
-                       self.read_shared_memory("learning_path_plan", {})
+                       await self.read_shared_memory("learning_path_plan", {})
 
         return await self._generate_report(
             course_name, period_days, quiz_records, study_logs,
@@ -202,7 +202,7 @@ class EvaluationAgent(BaseAgent):
 
         # Store evaluation in shared memory
         if data:
-            self.update_shared_memory("latest_evaluation", data)
+            await self.update_shared_memory("latest_evaluation", data)
             # Send to LearningCoach for follow-up
             self.send_message(
                 "LearningCoach",

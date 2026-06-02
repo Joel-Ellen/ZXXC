@@ -92,7 +92,7 @@
 <script setup>
 import { ref, watch, onMounted } from 'vue'
 import { resourcesAPI } from '../api'
-import { marked } from 'marked'
+import { renderChatMessage, useContentRenderer } from '../composables/useContentRenderer'
 import mermaid from 'mermaid'
 import dayjs from 'dayjs'
 
@@ -115,7 +115,7 @@ const currentContent = ref(null)
 const renderedMermaid = ref('')
 const myResources = ref([])
 
-function renderMarkdown(text) { if (!text) return ''; try { return marked(text) } catch (e) { return text } }
+function renderMarkdown(text) { return renderChatMessage(text) }
 function formatDate(date) { return dayjs(date).format('MM-DD HH:mm') }
 function typeBadgeClass(type) {
   if (type === 'exercise' || type === 'project') return 'warning'

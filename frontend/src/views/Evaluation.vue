@@ -127,7 +127,7 @@
 <script setup>
 import { ref, nextTick } from 'vue'
 import { evaluationAPI } from '../api'
-import { marked } from 'marked'
+import { renderChatMessage } from '../composables/useContentRenderer'
 import * as echarts from 'echarts'
 
 const courses = ['人工智能', '机器学习', '深度学习', '数据结构', '操作系统', '计算机网络', '大模型应用开发']
@@ -137,7 +137,7 @@ const evaluating = ref(false)
 const report = ref(null)
 const radarChart = ref(null)
 
-function renderMarkdown(text) { if (!text) return ''; try { return marked(text) } catch (e) { return text } }
+function renderMarkdown(text) { return renderChatMessage(text) }
 
 async function generateReport() {
   evaluating.value = true

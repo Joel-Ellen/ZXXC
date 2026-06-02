@@ -104,7 +104,7 @@
 import { ref, nextTick, onMounted } from 'vue'
 import { profileAPI } from '../api'
 import { useUserStore } from '../stores/user'
-import { marked } from 'marked'
+import { renderChatMessage } from '../composables/useContentRenderer'
 import dayjs from 'dayjs'
 
 const userStore = useUserStore()
@@ -122,7 +122,7 @@ const dimNames = {
   interest_direction: '兴趣方向', career_goal: '职业目标',
 }
 
-function renderMarkdown(text) { if (!text) return ''; return marked(text) }
+function renderMarkdown(text) { return renderChatMessage(text) }
 function formatDate(date) { return dayjs(date).format('YYYY-MM-DD HH:mm') }
 
 async function sendMessage() {
@@ -143,7 +143,8 @@ async function sendMessage() {
     const res = await profileAPI.build(text, sessionId)
     if (res.success && res.data) {
       const data = res.data
-      const responseText = data.profile_update?.summary || data.next_question || '画像已更新！'
+      // ── New standardized format ──
+      const responseText = data.summary_markdown || data.next_question || '画像已更新！'
       messages.value.push({ role: 'assistant', content: responseText })
       if (data.profile_update?.dimensions) {
         profile.value = {

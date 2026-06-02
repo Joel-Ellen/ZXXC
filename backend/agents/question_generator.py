@@ -39,8 +39,8 @@ class QuestionGeneratorAgent(BaseAgent):
 
     def update_plan(self, plan: Dict):
         self.plan = plan
-        # Extract weak points from shared memory
-        profile = self.read_shared_memory("student_profile", {})
+        # Extract weak points from shared memory (sync context — use sync read)
+        profile = self.read_shared_memory_sync("student_profile", {})
         weak = profile.get("weak_points", {})
         self.student_weak_points = weak.get("description", "").split("，") if weak else []
         self._log(f"Plan received, weak points: {self.student_weak_points}")
@@ -117,6 +117,6 @@ class QuestionGeneratorAgent(BaseAgent):
 
         # Store quiz in shared memory for evaluation
         if data:
-            self.update_shared_memory(f"quiz_{knowledge_point}", data)
+            await self.update_shared_memory(f"quiz_{knowledge_point}", data)
 
         return data or {"error": "Failed to generate questions", "raw": result["content"]}

@@ -126,8 +126,8 @@ class StudentProfilerAgent(BaseAgent):
             return {"error": "Failed to parse profile", "raw": result["content"]}
 
         # Update shared memory
-        self.update_shared_memory("student_profile", data.get("profile_update", {}))
-        self.update_shared_memory("student_summary", data.get("summary", ""))
+        await self.update_shared_memory("student_profile", data.get("profile_update", {}))
+        await self.update_shared_memory("student_summary", data.get("summary", ""))
 
         # Send update to dependent agents
         self.send_message(

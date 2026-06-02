@@ -64,16 +64,364 @@ async def get_current_user(
         logger.warning("[Auth] 401 — Token payload missing 'sub' field")
         raise HTTPException(status_code=401, detail="Invalid token payload")
 
-    # Query user from database
-    from sqlalchemy import select
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
+    # Query user from database — wrapped in try/except for resilience
+    from sqlalchemy import select, exc as sa_exc
+    try:
+        result = await db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+    except sa_exc.OperationalError as e:
+        logger.error(f"[Auth] Database operational error: {e}")
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable")
+    except sa_exc.TimeoutError as e:
+        logger.error(f"[Auth] Database query timed out: {e}")
+        raise HTTPException(status_code=503, detail="Request timed out, please retry")
+    except Exception as e:
+        logger.error(f"[Auth] Unexpected database error: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail="Internal authentication error")
+
     if not user:
         logger.warning(f"[Auth] 401 — User not found in DB: {user_id}")
         raise HTTPException(status_code=401, detail="User not found")
 
     logger.debug(f"[Auth] User authenticated: {user.username} ({user.id})")
     return user
+
+
+# ============================================================
+# Content Normalization Helpers
+# 将 Agent 原始输出统一规范化为 MarkdownContent 或 StructuredXxx，
+# 消除所有 `json.dumps(...) if isinstance(...) else str(...)` 模糊处理。
+# ============================================================
+
+def _ensure_markdown(raw: Any) -> str:
+    """Ensure raw agent output becomes a clean Markdown string."""
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, dict):
+        # If the dict has a 'full_markdown' or 'markdown' field, return that
+        for key in ("full_markdown", "markdown", "report_content", "content"):
+            if key in raw and isinstance(raw[key], str) and len(raw[key]) > 50:
+                return raw[key]
+        # Otherwise pretty-print the dict as a Markdown code block
+        return "```json\n" + json.dumps(raw, ensure_ascii=False, indent=2) + "\n```"
+    return str(raw)
+
+
+def _build_markdown_response(raw: Any, title: Optional[str] = None) -> Dict[str, Any]:
+    """Build a standardized MarkdownContent response dict."""
+    md = _ensure_markdown(raw)
+    result: Dict[str, Any] = {
+        "content_type": "markdown",
+        "markdown": md,
+    }
+    if title:
+        result["title"] = title
+    if isinstance(raw, dict):
+        # Pass through relevant metadata keys
+        meta = {}
+        for k in ("course_name", "topic", "difficulty", "slide_count",
+                   "estimated_duration_minutes", "usage", "model"):
+            if k in raw:
+                meta[k] = raw[k]
+        if meta:
+            result["metadata"] = meta
+    return result
+
+
+def _build_mindmap_response(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Build a standardized StructuredMindMap response dict."""
+    mermaid_code = raw.get("mermaid_code", "")
+    # Parse Mermaid mindmap to build a simple recursive node tree
+    root_node = _parse_mermaid_to_tree(mermaid_code, raw.get("topic", "中心主题"))
+
+    return {
+        "content_type": "structured",
+        "content_subtype": "mindmap",
+        "title": raw.get("title", ""),
+        "topic": raw.get("topic", ""),
+        "mermaid_code": mermaid_code,
+        "root": root_node,
+        "key_concepts": raw.get("key_concepts", []),
+        "total_nodes": raw.get("structure_summary", {}).get("total_nodes", 0) if isinstance(raw.get("structure_summary"), dict) else 0,
+        "max_depth": raw.get("structure_summary", {}).get("max_depth", 3) if isinstance(raw.get("structure_summary"), dict) else 3,
+        "usage_tips": raw.get("usage_tips", ""),
+        "metadata": {
+            "course_name": raw.get("course_name", ""),
+        },
+    }
+
+
+def _parse_mermaid_to_tree(mermaid: str, root_label: str) -> Optional[Dict[str, Any]]:
+    """
+    Parse Mermaid mindmap syntax into a recursive MindMapNode tree.
+    Mermaid mindmap uses indentation (2 spaces per level) to denote hierarchy.
+
+    Example input:
+        mindmap
+          root((中心主题))
+            分支A
+              子节点A1
+              子节点A2
+            分支B
+              子节点B1
+
+    Returns: {"id": "root", "label": "中心主题", "children": [...]}
+    """
+    if not mermaid:
+        return {"id": "root", "label": root_label, "children": []}
+
+    lines = mermaid.strip().split("\n")
+    # Skip the "mindmap" header line if present
+    if lines and lines[0].strip() == "mindmap":
+        lines = lines[1:]
+
+    # Build a stack-based tree parser
+    import re
+    node_id_counter = [0]
+
+    def new_id() -> str:
+        node_id_counter[0] += 1
+        return f"node_{node_id_counter[0]}"
+
+    root: Dict[str, Any] = {"id": new_id(), "label": root_label, "children": []}
+    stack: List[Dict[str, Any]] = [root]  # stack[0] = root, stack[1] = level-1 parent, etc.
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # Calculate indent level (2 spaces = 1 level in Mermaid mindmap)
+        indent = len(line) - len(line.lstrip(" "))
+        level = indent // 2 + 1  # level 1 = first indent under root
+
+        # Clean node label: remove Mermaid syntax markers
+        label = re.sub(r'[\(\)\[\]\{\}]+', '', stripped).strip()
+        # Remove icon emojis in the form ::icon(...)
+        label = re.sub(r'::icon\([^)]*\)', '', label).strip()
+        if not label:
+            continue
+
+        node: Dict[str, Any] = {"id": new_id(), "label": label, "children": []}
+
+        # Pop stack until we find the parent at the correct level
+        while len(stack) > level:
+            stack.pop()
+        # Ensure stack has enough entries for this level
+        while len(stack) < level:
+            # If missing intermediate levels, use the last node as parent
+            if len(stack) >= 2:
+                stack.append(stack[-1])
+            else:
+                stack.append(root)
+
+        parent = stack[level - 1] if level - 1 < len(stack) else root
+        parent["children"].append(node)
+        # Push this node as the potential parent for the next line
+        if len(stack) <= level:
+            stack.append(node)
+        else:
+            stack[level] = node
+
+        # Trim stack to current level + 1
+        stack = stack[:level + 1]
+
+    return root
+
+
+def _build_quiz_response(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Build a standardized StructuredQuiz response dict."""
+    quiz_meta = raw.get("quiz_metadata", {}) if isinstance(raw.get("quiz_metadata"), dict) else {}
+    questions_raw = raw.get("questions", []) if isinstance(raw.get("questions"), list) else []
+
+    typed_questions = []
+    for q in questions_raw:
+        if not isinstance(q, dict):
+            continue
+        typed_questions.append({
+            "id": q.get("id", f"Q{len(typed_questions)+1:03d}"),
+            "type": q.get("type", "choice"),
+            "difficulty": q.get("difficulty", "basic"),
+            "points": float(q.get("points", 10)),
+            "question_text": q.get("question", ""),
+            "options": q.get("options"),
+            "correct_answer": q.get("correct_answer"),
+            "explanation": q.get("explanation"),
+            "knowledge_tested": q.get("knowledge_tested", []) if isinstance(q.get("knowledge_tested"), list) else [],
+            "hints": q.get("hints", []) if isinstance(q.get("hints"), list) else [],
+        })
+
+    return {
+        "content_type": "structured",
+        "content_subtype": "quiz",
+        "title": quiz_meta.get("knowledge_point", raw.get("topic", "")),
+        "course_name": quiz_meta.get("course_name", raw.get("course_name", "")),
+        "knowledge_point": quiz_meta.get("knowledge_point", ""),
+        "total_questions": quiz_meta.get("total_questions", len(typed_questions)),
+        "total_score": float(quiz_meta.get("total_score", 100)),
+        "estimated_time_minutes": int(quiz_meta.get("estimated_time_minutes", 30)),
+        "difficulty": quiz_meta.get("difficulty", "basic"),
+        "questions": typed_questions,
+        "metadata": {
+            "quiz_meta": quiz_meta,
+        },
+    }
+
+
+def _build_learning_path_response(raw: Dict[str, Any], roadmap_mermaid: Optional[str] = None) -> Dict[str, Any]:
+    """Build a standardized StructuredLearningPath response dict."""
+    plan_overview = raw.get("plan_overview", {}) if isinstance(raw.get("plan_overview"), dict) else {}
+    stages_raw = raw.get("stages", []) if isinstance(raw.get("stages"), list) else []
+
+    typed_stages = []
+    for s in stages_raw:
+        if not isinstance(s, dict):
+            continue
+        weekly_plan_raw = s.get("weekly_plan", []) if isinstance(s.get("weekly_plan"), list) else []
+        typed_weekly = []
+        for wp in weekly_plan_raw:
+            if isinstance(wp, dict):
+                typed_weekly.append({
+                    "week": wp.get("week", 0),
+                    "focus": wp.get("focus", ""),
+                    "tasks": wp.get("tasks", []) if isinstance(wp.get("tasks"), list) else [],
+                    "milestone": wp.get("milestone"),
+                })
+
+        typed_stages.append({
+            "stage_id": s.get("stage_id", 0),
+            "stage_name": s.get("stage_name", ""),
+            "weeks": s.get("weeks", ""),
+            "description": s.get("description", ""),
+            "goals": s.get("goals", []) if isinstance(s.get("goals"), list) else [],
+            "topics": s.get("topics", []) if isinstance(s.get("topics"), list) else [],
+            "weekly_plan": typed_weekly,
+            "assessment": s.get("assessment"),
+        })
+
+    # Build overview markdown from plan_overview
+    overview_parts = [
+        f"## {raw.get('course_name', '')} 学习路径",
+        "",
+        f"- **总周数**：{plan_overview.get('total_weeks', 0)} 周",
+        f"- **每周学时**：{plan_overview.get('weekly_hours', 0)} 小时",
+        f"- **目标水平**：{plan_overview.get('target_level', '')}",
+        f"- **起始水平**：{plan_overview.get('start_level', '')}",
+        f"- **学习策略**：{plan_overview.get('learning_strategy', '')}",
+    ]
+
+    return {
+        "content_type": "structured",
+        "content_subtype": "learning_path",
+        "course_name": raw.get("course_name", ""),
+        "total_weeks": plan_overview.get("total_weeks", 0),
+        "target_level": plan_overview.get("target_level", "advanced"),
+        "overview_markdown": "\n".join(overview_parts),
+        "stages": typed_stages,
+        "roadmap_mermaid": roadmap_mermaid or raw.get("roadmap_mermaid"),
+        "personalized_tips": raw.get("personalized_tips", []) if isinstance(raw.get("personalized_tips"), list) else [],
+        "metadata": {
+            "resource_strategy": raw.get("resource_recommendation_strategy"),
+        },
+    }
+
+
+def _build_tutoring_response(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Build a standardized TutoringStructuredResponse dict.
+
+    The LearningCoach agent returns various answer_types. This normalizer
+    always produces a `markdown_body` field (for the main readable content)
+    plus type-specific fields for frontend component rendering.
+    """
+    answer_type = raw.get("answer_type", "general_tutoring")
+
+    # Build a rich markdown body from all text fields
+    md_parts = []
+
+    if raw.get("core_definition"):
+        md_parts.append(f"### 💡 核心定义\n\n{raw['core_definition']}")
+
+    if raw.get("analogy"):
+        md_parts.append(f"### 🔗 生活化类比\n\n{raw['analogy']}")
+
+    if raw.get("detailed_explanation"):
+        md_parts.append(f"### 📖 详细解释\n\n{raw['detailed_explanation']}")
+
+    if raw.get("response"):
+        md_parts.append(raw["response"])
+
+    if raw.get("answer"):
+        md_parts.append(raw["answer"])
+
+    if raw.get("analysis"):
+        md_parts.append(f"### 📊 学习分析\n\n{raw['analysis']}")
+
+    if raw.get("error_analysis"):
+        md_parts.append(f"### 🔍 错误分析\n\n{raw['error_analysis']}")
+
+    if raw.get("root_cause"):
+        md_parts.append(f"> **根本原因**：{raw['root_cause']}")
+
+    if raw.get("fix_guidance"):
+        md_parts.append(f"### 🛠️ 修复引导\n\n{raw['fix_guidance']}")
+
+    if raw.get("review_strategy"):
+        md_parts.append(f"### 📝 复习策略\n\n{raw['review_strategy']}")
+
+    if raw.get("cheat_sheet"):
+        md_parts.append(f"### 📋 速记要点\n\n{raw['cheat_sheet']}")
+
+    # Collect hints, mistakes, extension questions into the body
+    hints = raw.get("hints") if isinstance(raw.get("hints"), list) else []
+    if hints:
+        md_parts.append("### 💭 提示\n" + "\n".join(f"- {h}" for h in hints))
+
+    mistakes = raw.get("common_mistakes") if isinstance(raw.get("common_mistakes"), list) else []
+    if mistakes:
+        md_parts.append("### ⚠️ 常见误区\n" + "\n".join(f"- {m}" for m in mistakes))
+
+    ext_qs = raw.get("extension_questions") if isinstance(raw.get("extension_questions"), list) else []
+    if ext_qs:
+        md_parts.append("### 🤔 延伸思考\n" + "\n".join(f"- {q}" for q in ext_qs))
+
+    advice_list = raw.get("advice") if isinstance(raw.get("advice"), list) else []
+    if advice_list:
+        md_parts.append("### 🎯 学习建议\n" + "\n".join(f"- {a}" for a in advice_list))
+
+    key_topics = raw.get("key_topics") if isinstance(raw.get("key_topics"), list) else []
+    if key_topics:
+        md_parts.append("### ⭐ 重点主题\n" + "\n".join(f"- {t}" for t in key_topics))
+
+    suggestions = raw.get("suggestions") if isinstance(raw.get("suggestions"), list) else []
+    if suggestions:
+        md_parts.append("### 📌 建议\n" + "\n".join(f"- {s}" for s in suggestions))
+
+    fallback = raw.get("content", "")
+    if not md_parts and isinstance(fallback, str):
+        md_parts.append(fallback)
+
+    if not md_parts:
+        md_parts.append(json.dumps(raw, ensure_ascii=False, indent=2))
+
+    markdown_body = "\n\n".join(md_parts)
+
+    return {
+        "content_type": "structured",
+        "content_subtype": "tutoring",
+        "answer_type": answer_type,
+        "markdown_body": markdown_body,
+        "diagram": raw.get("diagram"),
+        "code_example": raw.get("code_example") or raw.get("improved_code_snippet"),
+        "hints": hints,
+        "common_mistakes": mistakes,
+        "extension_questions": ext_qs,
+        "references": raw.get("references") if isinstance(raw.get("references"), list) else [],
+        "metadata": {
+            "course_name": raw.get("course_name", ""),
+            "fact_check": raw.get("fact_check"),
+            "learning_tip": raw.get("learning_tip"),
+        },
+    }
 
 
 # ============================================================
@@ -246,7 +594,7 @@ async def build_profile(
             message_type="text",
         )
         db.add(conv)
-        # Also save assistant response
+        # Save assistant response — serialize result as clean JSON
         assistant_msg = ConversationHistory(
             id=str(uuid.uuid4()),
             user_id=user.id,
@@ -258,12 +606,23 @@ async def build_profile(
         db.add(assistant_msg)
         await db.commit()
 
+    # ── Standardized response ──
+    # summary_markdown: Markdown text for chat bubble rendering
+    # dimensions: structured profile dimensions for the profile card
+    summary_md = result.get("summary", "")
+    if not summary_md and result.get("next_question"):
+        summary_md = f"💬 {result['next_question']}"
+
     return APIResponse(
         success=True,
         message="Profile updated",
         data={
-            "profile_update": result,
+            "content_type": "structured",
+            "content_subtype": "profile_update",
+            "summary_markdown": summary_md,
             "next_question": result.get("next_question"),
+            "profile_update": result.get("profile_update", {}),
+            "missing_info": result.get("missing_info", []),
             "agent_activity": orchestrator.get_all_agent_statuses(),
         }
     )
@@ -364,11 +723,17 @@ async def generate_learning_path(
 
         await db.commit()
 
+    # ── Standardized structured learning path response ──
+    normalized_path = _build_learning_path_response(
+        learning_path_data,
+        roadmap_mermaid=learning_path_data.get("roadmap_mermaid"),
+    )
+
     return APIResponse(
         success=True,
         message="Learning path generated",
         data={
-            "learning_path": learning_path_data,
+            "learning_path": normalized_path,
             "agent_workflow": orchestrator.get_agent_workflow_diagram(),
         }
     )
@@ -441,15 +806,31 @@ async def generate_resource(
         }
     )
 
+    # ── Classify & normalize output ──
+    resource_type = req.resource_type
+    title = result.get("title", req.topic) if isinstance(result, dict) else req.topic
+
+    if resource_type == "mindmap":
+        normalized = _build_mindmap_response(result) if isinstance(result, dict) else _build_markdown_response(result, title)
+    elif resource_type in ("exercise",):
+        normalized = _build_quiz_response(result) if isinstance(result, dict) else _build_markdown_response(result, title)
+    elif resource_type in ("lecture_note", "ppt", "study_note", "video_script", "project"):
+        normalized = _build_markdown_response(result, title)
+    else:
+        normalized = _build_markdown_response(result, title)
+
+    # Serialize for DB storage — always use clean JSON
+    db_content = json.dumps(result, ensure_ascii=False) if isinstance(result, dict) else str(result)
+
     # Save generated resource
     resource = GeneratedResource(
         id=str(uuid.uuid4()),
         user_id=user.id,
-        resource_type=req.resource_type,
-        title=result.get("title", req.topic) if isinstance(result, dict) else req.topic,
+        resource_type=resource_type,
+        title=title,
         course_name=req.course_name,
         knowledge_points=req.knowledge_points,
-        content=json.dumps(result, ensure_ascii=False) if isinstance(result, dict) else str(result),
+        content=db_content,
         difficulty=req.difficulty,
         agent_generated=agent_name,
         resource_metadata=result.get("metadata") if isinstance(result, dict) else None,
@@ -459,11 +840,11 @@ async def generate_resource(
 
     return APIResponse(
         success=True,
-        message=f"{req.resource_type} generated successfully",
+        message=f"{resource_type} generated successfully",
         data={
             "resource_id": resource.id,
-            "resource_type": req.resource_type,
-            "content": result,
+            "resource_type": resource_type,
+            "content": normalized,
         }
     )
 
@@ -495,11 +876,36 @@ async def generate_all_resources(
         user_id=user.id,
     )
 
+    # ── Normalize each agent's result ──
+    raw_results = results.get("results", {})
+    normalized_results = {}
+    for agent_name, agent_result in raw_results.items():
+        if not isinstance(agent_result, dict):
+            normalized_results[agent_name] = _build_markdown_response(agent_result)
+            continue
+        # Classify by agent type
+        if agent_name == "MindMapGenerator":
+            normalized_results[agent_name] = _build_mindmap_response(agent_result)
+        elif agent_name == "QuestionGenerator":
+            normalized_results[agent_name] = _build_quiz_response(agent_result)
+        elif agent_name == "KnowledgeAnalysis":
+            normalized_results[agent_name] = {
+                "content_type": "structured",
+                "content_subtype": "knowledge_analysis",
+                "data": agent_result,
+            }
+        elif agent_name == "ResourcePlanner":
+            normalized_results[agent_name] = _build_learning_path_response(agent_result)
+        else:
+            # PPTGenerator, VideoScript, CodingPractice → Markdown
+            title = agent_result.get("title", "") if isinstance(agent_result, dict) else ""
+            normalized_results[agent_name] = _build_markdown_response(agent_result, title)
+
     return APIResponse(
         success=True,
         message="All resources generated",
         data={
-            "results": results.get("results", {}),
+            "results": normalized_results,
             "agent_statuses": orchestrator.get_all_agent_statuses(),
         }
     )
@@ -580,13 +986,15 @@ async def ask_tutor(
             [c for c in claims if c],
             context=result.get("detailed_explanation", ""),
         )
-
         result["fact_check"] = verification
+
+    # ── Standardized tutoring response ──
+    normalized = _build_tutoring_response(result) if isinstance(result, dict) else _build_markdown_response(result)
 
     return APIResponse(
         success=True,
         data={
-            "tutoring_result": result,
+            "tutoring_result": normalized,
         }
     )
 
@@ -684,9 +1092,40 @@ async def generate_evaluation_report(
         db.add(report)
         await db.commit()
 
+    # ── Normalize evaluation report ──
+    if isinstance(report_data, dict):
+        report_md = report_data.get("report_content", "")
+        if not report_md:
+            # Fallback: build markdown summary from structured data
+            lines = [f"# {report_data.get('report_metadata', {}).get('course_name', '')} 学习评估报告"]
+            overall = report_data.get("report_metadata", {})
+            if overall:
+                lines.append(f"- **综合评级**：{overall.get('overall_grade', 'N/A')}")
+                lines.append(f"- **综合评分**：{overall.get('overall_score', 'N/A')}")
+            metrics = report_data.get("metrics", {})
+            if metrics:
+                lines.append("\n## 学习指标")
+                for k, v in metrics.items():
+                    lines.append(f"- **{k}**：{v}")
+            report_md = "\n".join(lines)
+
+        normalized_report = _build_markdown_response(
+            {"full_markdown": report_md, "report_content": report_md,
+             "title": report_data.get("report_metadata", {}).get("course_name", "") + " 评估报告"},
+        )
+        normalized_report["content_subtype"] = "evaluation_report"
+        normalized_report["content_type"] = "structured"
+        normalized_report["metrics"] = report_data.get("metrics", {})
+        normalized_report["suggestions"] = report_data.get("suggestions", [])
+        normalized_report["weak_areas"] = report_data.get("weak_areas", [])
+        normalized_report["strengths"] = report_data.get("strengths", [])
+        normalized_report["radar_chart_data"] = report_data.get("radar_chart_data")
+    else:
+        normalized_report = _build_markdown_response(report_data)
+
     return APIResponse(
         success=True,
-        data={"report": report_data}
+        data={"report": normalized_report}
     )
 
 

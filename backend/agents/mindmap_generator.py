@@ -66,7 +66,7 @@ class MindMapGeneratorAgent(BaseAgent):
 
         # Get knowledge structure from shared memory
         knowledge_structure = task.get("knowledge_structure") or \
-                              self.read_shared_memory("knowledge_structure", {})
+                              await self.read_shared_memory("knowledge_structure", {})
 
         prompt = f"""请为「{course_name}」课程的「{topic}」主题生成Mermaid思维导图。
 
