@@ -18,6 +18,22 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+// Response interceptor: handle 401 globally
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      // Token invalid or expired — clear stored auth and redirect to home
+      localStorage.removeItem('ai_learning_user')
+      // Only redirect if not already on the home page
+      if (window.location.pathname !== '/') {
+        window.location.href = '/'
+      }
+    }
+    return Promise.reject(error)
+  }
+)
+
 // Auth API
 export const authAPI = {
   login: (username, password) => api.post('/auth/login', { username, password }).then(r => r.data),

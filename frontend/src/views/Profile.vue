@@ -128,6 +128,13 @@ function formatDate(date) { return dayjs(date).format('YYYY-MM-DD HH:mm') }
 async function sendMessage() {
   const text = inputMessage.value.trim()
   if (!text || processing.value) return
+
+  // Auth guard — prevent unauthenticated API calls
+  if (!userStore.isAuthenticated) {
+    messages.value.push({ role: 'assistant', content: '⚠️ 请先登录后再使用画像构建功能。' })
+    return
+  }
+
   messages.value.push({ role: 'user', content: text })
   inputMessage.value = ''
   processing.value = true
@@ -151,7 +158,12 @@ async function sendMessage() {
         }
       }
     }
-  } catch (e) { messages.value.push({ role: 'assistant', content: '抱歉，处理出现错误，请重试。' }) }
+  } catch (e) {
+    const msg = e.response?.status === 401
+      ? '登录已过期，请刷新页面重新登录。'
+      : '抱歉，处理出现错误，请重试。'
+    messages.value.push({ role: 'assistant', content: msg })
+  }
   processing.value = false
   await nextTick(); scrollToBottom()
 }
