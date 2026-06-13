@@ -241,22 +241,22 @@ class CognitiveStyleDistribution(BaseModel):
 
 每次推送资源时，从各风格的 Beta 分布中进行随机采样，选取采样值 θ 最大的风格作为推送策略：
 
-$$\theta_{\text{style}} \sim \text{Beta}(\alpha_{\text{style}}, \beta_{\text{style}})$$
+![](https://latex.codecogs.com/svg.image?\large&space;\theta_{\text{style}}\sim\text{Beta}(\alpha_{\text{style}},\beta_{\text{style}}))
 
-- 交互正向埋点时执行：$\alpha_{\text{style}} = \alpha_{\text{style}} + \text{reward}$
-- 负向埋点时执行：$\beta_{\text{style}} = \beta_{\text{style}} + (1 - \text{reward})$
+- 交互正向埋点时执行：![](https://latex.codecogs.com/svg.image?\alpha_{\text{style}}=\alpha_{\text{style}}+\text{reward})
+- 负向埋点时执行：![](https://latex.codecogs.com/svg.image?\beta_{\text{style}}=\beta_{\text{style}}+(1-\text{reward}))
 
 #### 4.5.2 快变维度（知识掌握度）干预更新方程
 
-$$K_i^{(t)} = \max \left( K_{\text{floor}}, \lambda \cdot \left( K_i^{(t-1)} \cdot e^{-\frac{\Delta t}{S_i}} \right) + (1 - \lambda) \cdot \Delta E_v \cdot \gamma \right)$$
+![](https://latex.codecogs.com/svg.image?\large&space;K_i^{(t)}=\max\left(K_{\text{floor}},\lambda\cdot\left(K_i^{(t-1)}\cdot&space;e^{-\frac{\Delta&space;t}{S_i}}\right)+(1-\lambda)\cdot\Delta&space;E_v\cdot\gamma\right))
 
-$$\gamma = \begin{cases} 1 & \text{if } C_{\text{fail}} < 3 \\ \theta \cdot \text{cognitive\_shift}() & \text{if } C_{\text{fail}} \ge 3 \end{cases}$$
+![](https://latex.codecogs.com/svg.image?\large&space;\gamma=\begin{cases}1&&\text{if&space;}C_{\text{fail}}<3\\\theta\cdot\text{cognitive\_shift}()&&\text{if&space;}C_{\text{fail}}\ge&space;3\end{cases})
 
-- $\Delta t$：遗忘衰减时间
-- $\Delta E_v$：即时测试得分
-- $C_{\text{fail}}$：连续失败计数器
-- $K_{\text{floor}} = 0.15$：最低掌握度保底
-- 当 $C_{\text{fail}} \ge 3$ 时，门控 $\gamma$ 强行触发 `cognitive_shift()`，临时将资源切向非当前风格
+- ![](https://latex.codecogs.com/svg.image?\Delta&space;t)：遗忘衰减时间
+- ![](https://latex.codecogs.com/svg.image?\Delta&space;E_v)：即时测试得分
+- ![](https://latex.codecogs.com/svg.image?C_{\text{fail}})：连续失败计数器
+- ![](https://latex.codecogs.com/svg.image?K_{\text{floor}}=0.15)：最低掌握度保底
+- 当 ![](https://latex.codecogs.com/svg.image?C_{\text{fail}}\ge&space;3) 时，门控 ![](https://latex.codecogs.com/svg.image?\gamma) 强行触发 `cognitive_shift()`，临时将资源切向非当前风格
 
 ### 4.6 实现细节
 
@@ -288,11 +288,11 @@ class ThompsonSampler:
 
 #### 4.6.2 EbbinghausForgettingEngine 类
 
-遗忘曲线公式：$m(t) = m_0 \cdot e^{-\lambda \cdot \Delta t}$，其中 $\lambda = 1/S$（S 为记忆强度）。
+遗忘曲线公式：![](https://latex.codecogs.com/svg.image?m(t)=m_0\cdot&space;e^{-\lambda\cdot\Delta&space;t})，其中 ![](https://latex.codecogs.com/svg.image?\lambda=1/S)（S 为记忆强度）。
 
-- 每次成功交互：$S \leftarrow S \times 1.5$
-- 每次失败交互：$S \leftarrow S \times 0.8$
-- S 钳位范围：$[0.5, 20.0]$
+- 每次成功交互：![](https://latex.codecogs.com/svg.image?S\leftarrow&space;S\times1.5)
+- 每次失败交互：![](https://latex.codecogs.com/svg.image?S\leftarrow&space;S\times0.8)
+- S 钳位范围：![](https://latex.codecogs.com/svg.image?[0.5,20.0])
 
 ```python
 class EbbinghausForgettingEngine:
@@ -350,15 +350,15 @@ class EbbinghausForgettingEngine:
 
 #### 5.3.2 拓扑激活路径代价函数
 
-$$Cost(u, v) = \left( 1 - K_u \right) \cdot \text{Prerequisite\_Weight}(u, v) + \omega \cdot \text{Difficulty}(v)$$
+![](https://latex.codecogs.com/svg.image?\large&space;Cost(u,v)=\left(1-K_u\right)\cdot\text{Prerequisite\_Weight}(u,v)+\omega\cdot\text{Difficulty}(v))
 
-- $K_u$：前置节点 $u$ 的画像掌握度
-- 当 $K_u \to 1$（已掌握）时，前置激活代价趋近于 0
+- ![](https://latex.codecogs.com/svg.image?K_u)：前置节点 ![](https://latex.codecogs.com/svg.image?u) 的画像掌握度
+- 当 ![](https://latex.codecogs.com/svg.image?K_u\to&space;1)（已掌握）时，前置激活代价趋近于 0
 - 若未掌握，引入认知阻力开销，迫使 Path Planner 生成树状激活序列
 
 #### 5.3.3 PathPlanner 核心实现
 
-**Kahn 拓扑排序** ($O(V+E)$)：
+**Kahn 拓扑排序** (![](https://latex.codecogs.com/svg.image?O(V+E)))：
 ```python
 def compute_topological_order(self):
     indegree = dict(self._indegree)
@@ -376,7 +376,7 @@ def compute_topological_order(self):
     return topo
 ```
 
-**DAG 单源最短路径** ($O(V+E)$)：
+**DAG 单源最短路径** (![](https://latex.codecogs.com/svg.image?O(V+E)))：
 ```python
 def _dag_sssp(self, source_id, weight_fn):
     topo = self.compute_topological_order()
@@ -499,24 +499,24 @@ def sanitize_behavior_stream(x1, x2, x3, x4):
 
 | 控制论概念 | 对应学习系统变量 |
 |-----------|----------------|
-| 设定点 (Setpoint) $r(t)$ | 目标掌握度 = 1.0 |
-| 过程变量 (PV) $y(t)$ | 实际掌握度 $\in [0, 1]$ |
-| 误差 (Error) $e(t)$ | $r(t) - y(t)$ |
-| 控制输出 (CO) $u(t)$ | 难度系数 / 资源粒度 / 步长 |
+| 设定点 (Setpoint) ![](https://latex.codecogs.com/svg.image?r(t)) | 目标掌握度 = 1.0 |
+| 过程变量 (PV) ![](https://latex.codecogs.com/svg.image?y(t)) | 实际掌握度 ![](https://latex.codecogs.com/svg.image?\in[0,1]) |
+| 误差 (Error) ![](https://latex.codecogs.com/svg.image?e(t)) | ![](https://latex.codecogs.com/svg.image?r(t)-y(t)) |
+| 控制输出 (CO) ![](https://latex.codecogs.com/svg.image?u(t)) | 难度系数 / 资源粒度 / 步长 |
 
 #### 6.4.2 PID 核心公式
 
 定义当前清洗后的即时表现增量与历史画像掌握度之间的系统误差：
 
-$$\text{Error}^{(t)} = \Delta E_v^{(t)} - K_i^{(t-1)}$$
+![](https://latex.codecogs.com/svg.image?\large&space;\text{Error}^{(t)}=\Delta&space;E_v^{(t)}-K_i^{(t-1)})
 
 计算经过比例、积分、微分平滑后的掌握度调整控制增量：
 
-$$\Delta K_{\text{smooth}} = K_p \cdot \text{Error}^{(t)} + K_i \cdot \sum_{j=0}^{t} \text{Error}^{(j)} + K_d \cdot \left( \text{Error}^{(t)} - \text{Error}^{(t-1)} \right)$$
+![](https://latex.codecogs.com/svg.image?\large&space;\Delta&space;K_{\text{smooth}}=K_p\cdot\text{Error}^{(t)}+K_i\cdot\sum_{j=0}^{t}\text{Error}^{(j)}+K_d\cdot\left(\text{Error}^{(t)}-\text{Error}^{(t-1)}\right))
 
-$$K_i^{(t)} = K_i^{(t-1)} + \Delta K_{\text{smooth}}$$
+![](https://latex.codecogs.com/svg.image?\large&space;K_i^{(t)}=K_i^{(t-1)}+\Delta&space;K_{\text{smooth}})
 
-**阻尼防震荡机制**：$K_d$（微分项）计算误差的变化率，当发生偶然性考满分或挂科时，$K_d$ 产生强力的反向阻尼制动，平滑掉突变噪音。只有当累积的 $\Delta K_{\text{smooth}}$ 连续 $N$ 次滑出置信阈值边界时，系统才正式触发全局重寻路。
+**阻尼防震荡机制**：![](https://latex.codecogs.com/svg.image?K_d)（微分项）计算误差的变化率，当发生偶然性考满分或挂科时，![](https://latex.codecogs.com/svg.image?K_d) 产生强力的反向阻尼制动，平滑掉突变噪音。只有当累积的 ![](https://latex.codecogs.com/svg.image?\Delta&space;K_{\text{smooth}}) 连续 ![](https://latex.codecogs.com/svg.image?N) 次滑出置信阈值边界时，系统才正式触发全局重寻路。
 
 #### 6.4.3 五大工程特性
 
@@ -605,7 +605,7 @@ LangGraph Node 在每次 step 后通过 `sync_pid_state_to_agent_state()` 将 PI
 
 计算相邻文本块的语义嵌入余弦相似度：
 
-$$\text{Threshold} = \mu \cdot \text{Mean}(Sim) - \alpha \cdot \text{Std}(Sim)$$
+![](https://latex.codecogs.com/svg.image?\large&space;\text{Threshold}=\mu\cdot\text{Mean}(Sim)-\alpha\cdot\text{Std}(Sim))
 
 低于动态阈值时执行切片。
 
@@ -622,11 +622,11 @@ $$\text{Threshold} = \mu \cdot \text{Mean}(Sim) - \alpha \cdot \text{Std}(Sim)$$
 
 #### Step 1: 层次树实体消解
 
-将大模型抽取的技术概念 $(u, v)$ 结合教材目录路径距离进行空间重合度解算：
+将大模型抽取的技术概念 ![](https://latex.codecogs.com/svg.image?(u,v)) 结合教材目录路径距离进行空间重合度解算：
 
-$$\text{Alignment}(u, v) = w_1 \cdot \text{Cosine\_Sim}(\vec{E}_u, \vec{E}_v) + w_2 \cdot e^{-\| \text{Path}(u) - \text{Path}(v) \|}$$
+![](https://latex.codecogs.com/svg.image?\large&space;\text{Alignment}(u,v)=w_1\cdot\text{Cosine\_Sim}(\vec{E}_u,\vec{E}_v)+w_2\cdot&space;e^{-\|\text{Path}(u)-\text{Path}(v)\|})
 
-当 $\text{Alignment} > 0.85$ 时在图谱中强行合并。
+当 ![](https://latex.codecogs.com/svg.image?\text{Alignment}>0.85) 时在图谱中强行合并。
 
 #### Step 2: Tarjan SCC 环检测与消除
 
@@ -638,7 +638,7 @@ $$\text{Alignment}(u, v) = w_1 \cdot \text{Cosine\_Sim}(\vec{E}_u, \vec{E}_v) + 
 #### Step 3: 传递闭包剪枝 (Transitive Reduction)
 
 基于 BFS 的冗余边检测与移除：
-- 若存在边 $A \to C$ 且存在路径 $A \to B \to C$，则 $A \to C$ 为冗余依赖边
+- 若存在边 ![](https://latex.codecogs.com/svg.image?A\to&space;C) 且存在路径 ![](https://latex.codecogs.com/svg.image?A\to&space;B\to&space;C)，则 ![](https://latex.codecogs.com/svg.image?A\to&space;C) 为冗余依赖边
 - 剪枝后保留最精简的 DAG 结构
 
 ### 7.6 Elasticsearch 混合检索
@@ -647,7 +647,7 @@ $$\text{Alignment}(u, v) = w_1 \cdot \text{Cosine\_Sim}(\vec{E}_u, \vec{E}_v) + 
 
 **核心特性**：
 - **混合检索**：BM25（关键词匹配）+ HNSW（语义搜索）双路召回
-- **RRF 融合**：Reciprocal Rank Fusion ($k=60$) 合并双路排序
+- **RRF 融合**：Reciprocal Rank Fusion (![](https://latex.codecogs.com/svg.image?k=60)) 合并双路排序
 - **字段级加权**：`content^4 > title_path^3 > headers^2`
 - **双嵌入器**：HashingTextEmbedder（确定性、零依赖）和 SentenceTransformerEmbedder（BAAI/bge-small-zh-v1.5）
 
@@ -678,15 +678,15 @@ $$\text{Alignment}(u, v) = w_1 \cdot \text{Cosine\_Sim}(\vec{E}_u, \vec{E}_v) + 
 
 #### 第二极（带重叠区滑动窗口的异步 NLI 推理）
 
-内容上屏的同时，后台启动带 64 Token 重叠区的滑动窗口（256 token 窗口），将文本句法完整切分后送入 NLI 模型，与知识库中的原始参考源 $C_r$ 进行蕴含度度量：
+内容上屏的同时，后台启动带 64 Token 重叠区的滑动窗口（256 token 窗口），将文本句法完整切分后送入 NLI 模型，与知识库中的原始参考源 ![](https://latex.codecogs.com/svg.image?C_r) 进行蕴含度度量：
 
-$$Score(p_j) = P(\text{Entailment} \mid p_j, C_r) + 0.5 \cdot P(\text{Neutral} \mid p_j, C_r) - 2.0 \cdot P(\text{Contradiction} \mid p_j, C_r)$$
+![](https://latex.codecogs.com/svg.image?\large&space;\text{Score}(p_j)=P(\text{Entailment}\mid&space;p_j,C_r)+0.5\cdot&space;P(\text{Neutral}\mid&space;p_j,C_r)-2.0\cdot&space;P(\text{Contradiction}\mid&space;p_j,C_r))
 
 #### 差异化控制与退避
 
 | 内容轨道 | 校验策略 | 阈值 |
 |---------|---------|------|
-| 学术事实轨（公式、参数） | NLI 严格蕴含度 | $Score \ge 0.85$ |
+| 学术事实轨（公式、参数） | NLI 严格蕴含度 | ![](https://latex.codecogs.com/svg.image?\text{Score}\ge&space;0.85) |
 | 教学表述轨（通俗比喻、修辞） | 放宽至向量相似度 | 较低阈值 |
 
 **幻觉修复流程**：
@@ -759,7 +759,7 @@ def handle_cold_start_interaction(user_input, current_state_vector):
 ### 9.7 贝叶斯先验融合
 
 当 c_epoch ≥ 3 且槽位未满时，激活贝叶斯降级融合：
-- 使用条件概率表 (CPT) 推断缺失维度：$P(\text{background} \mid \text{cognitive\_style})$、$P(\text{education} \mid \text{cognitive\_style})$ 等
+- 使用条件概率表 (CPT) 推断缺失维度：![](https://latex.codecogs.com/svg.image?P(\text{background}\mid\text{cognitive\_style}))、![](https://latex.codecogs.com/svg.image?P(\text{education}\mid\text{cognitive\_style})) 等
 - MAP 估计 + 归一化
 - 赋予较高的不确定性方差，在后续学习中逐步修正
 
@@ -795,8 +795,8 @@ def handle_cold_start_interaction(user_input, current_state_vector):
 算法不等待用户点击"下一步"才启动生成。核心机制：
 
 1. **转移矩阵**：利用全站历史路径转移日志训练轻量级马尔可夫状态转移矩阵
-2. **Top-1 预测**：$P(v \mid u) \propto e^{-2.0 \cdot \text{edge\_cost}(u,v)}$
-3. **影子预生成**：利用服务器闲置算力和常规异步队列的 30% 闲置令牌，在后台隐式启动对 $V_{k+1}$ 节点的重型富媒体资源的**影子预生成**
+2. **Top-1 预测**：![](https://latex.codecogs.com/svg.image?P(v\mid&space;u)\propto&space;e^{-2.0\cdot\text{edge\_cost}(u,v)})
+3. **影子预生成**：利用服务器闲置算力和常规异步队列的 30% 闲置令牌，在后台隐式启动对 ![](https://latex.codecogs.com/svg.image?V_{k+1}) 节点的重型富媒体资源的**影子预生成**
 4. **缓存策略**：压入 Redis 局部高速缓存，LRU + TTL 淘汰
 5. **毫秒级弹出**：学生点击切换时，资源卡片从缓存瞬间呈现
 
@@ -1009,14 +1009,14 @@ Tutor Node 内建 Mermaid 语法守护：
 
 ### 14.3 迟滞环策略控制器
 
-双阈值带设计（$T_{\text{low}} = 0.40$，$T_{\text{high}} = 0.75$），防止策略频繁抖动：
+双阈值带设计（![](https://latex.codecogs.com/svg.image?T_{\text{low}}=0.40)，![](https://latex.codecogs.com/svg.image?T_{\text{high}}=0.75)），防止策略频繁抖动：
 
 | 当前状态 | 触发条件 | 目标状态 |
 |---------|---------|---------|
-| STANDARD_PATH | $A_{\text{mix}} < 0.40$ AND $C_{\text{fail}} \ge 2$ | SCAFFOLD_HELP |
+| STANDARD_PATH | ![](https://latex.codecogs.com/svg.image?A_{\text{mix}}<0.40) AND ![](https://latex.codecogs.com/svg.image?C_{\text{fail}}\ge&space;2) | SCAFFOLD_HELP |
 | STANDARD_PATH | boundary_miss EMA 连续 3 次上升 | EDGE_CASE_DRILL |
-| SCAFFOLD_HELP | $A_{\text{mix}} > 0.75$ | STANDARD_PATH |
-| EDGE_CASE_DRILL | $A_{\text{mix}} > 0.75$ | STANDARD_PATH |
+| SCAFFOLD_HELP | ![](https://latex.codecogs.com/svg.image?A_{\text{mix}}>0.75) | STANDARD_PATH |
+| EDGE_CASE_DRILL | ![](https://latex.codecogs.com/svg.image?A_{\text{mix}}>0.75) | STANDARD_PATH |
 
 ### 14.4 诊断报告
 
@@ -1138,15 +1138,15 @@ EduAgent/
 
 | 算法 | 实现文件 | 时间复杂度 | 空间复杂度 |
 |------|---------|-----------|-----------|
-| Kahn 拓扑排序 | `path_planner.py` | $O(V+E)$ | $O(V)$ |
-| DAG-SSSP | `path_planner.py` | $O(V+E)$ | $O(V)$ |
-| Tarjan SCC | `graph_builder.py` | $O(V+E)$ | $O(V)$ |
-| 传递闭包剪枝 | `graph_builder.py` | $O(V \cdot (V+E))$ | $O(V^2)$ |
-| 汤普森采样 | `profiler_node.py` | $O(K)$ (K=臂数) | $O(K)$ |
-| PID step | `pid_controller.py` | $O(1)$ | $O(1)$ per node |
-| RRF 融合 | `elasticsearch_knowledge_base.py` | $O(N \log N)$ | $O(N)$ |
-| 滑动窗口 NLI | `validator_node.py` | $O(W)$ (W=窗口数) | $O(W)$ |
-| EMA 更新 | `assessment_node.py` | $O(1)$ per dim | $O(1)$ |
+| Kahn 拓扑排序 | `path_planner.py` | ![](https://latex.codecogs.com/svg.image?O(V+E)) | ![](https://latex.codecogs.com/svg.image?O(V)) |
+| DAG-SSSP | `path_planner.py` | ![](https://latex.codecogs.com/svg.image?O(V+E)) | ![](https://latex.codecogs.com/svg.image?O(V)) |
+| Tarjan SCC | `graph_builder.py` | ![](https://latex.codecogs.com/svg.image?O(V+E)) | ![](https://latex.codecogs.com/svg.image?O(V)) |
+| 传递闭包剪枝 | `graph_builder.py` | ![](https://latex.codecogs.com/svg.image?O(V\cdot(V+E))) | ![](https://latex.codecogs.com/svg.image?O(V^2)) |
+| 汤普森采样 | `profiler_node.py` | ![](https://latex.codecogs.com/svg.image?O(K)) (K=臂数) | ![](https://latex.codecogs.com/svg.image?O(K)) |
+| PID step | `pid_controller.py` | ![](https://latex.codecogs.com/svg.image?O(1)) | ![](https://latex.codecogs.com/svg.image?O(1)) per node |
+| RRF 融合 | `elasticsearch_knowledge_base.py` | ![](https://latex.codecogs.com/svg.image?O(N\log&space;N)) | ![](https://latex.codecogs.com/svg.image?O(N)) |
+| 滑动窗口 NLI | `validator_node.py` | ![](https://latex.codecogs.com/svg.image?O(W)) (W=窗口数) | ![](https://latex.codecogs.com/svg.image?O(W)) |
+| EMA 更新 | `assessment_node.py` | ![](https://latex.codecogs.com/svg.image?O(1)) per dim | ![](https://latex.codecogs.com/svg.image?O(1)) |
 
 ---
 
