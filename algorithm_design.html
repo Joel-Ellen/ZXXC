@@ -1,0 +1,1445 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  @page { size: A4; margin: 1.8cm 2cm; }
+  body {
+    font-family: "Microsoft YaHei", "SimSun", "Noto Sans SC", sans-serif;
+    font-size: 10.5pt; line-height: 1.65; color: #333;
+  }
+  h1 {
+    font-size: 20pt; text-align: center;
+    margin-top: 32px; margin-bottom: 16px;
+    padding-bottom: 8px; border-bottom: 3px solid #1a5276;
+    color: #1a5276;
+  }
+  h2 {
+    font-size: 15pt; margin-top: 26px; margin-bottom: 12px;
+    padding-bottom: 4px; border-bottom: 2px solid #2980b9;
+    color: #2980b9;
+  }
+  h3 { font-size: 13pt; margin-top: 18px; margin-bottom: 8px; color: #2c3e50; }
+  h4 { font-size: 11pt; margin-top: 14px; margin-bottom: 6px; color: #34495e; }
+  p { margin: 5px 0; text-align: justify; }
+  blockquote {
+    margin: 8px 0; padding: 6px 16px;
+    background: #f0f7fb; border-left: 4px solid #2980b9; color: #555;
+  }
+  code {
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 8.5pt; background: #f4f4f4;
+    padding: 1px 3px; border-radius: 2px; color: #c0392b;
+  }
+  pre {
+    background: #f8f8f8; border: 1px solid #ddd;
+    border-radius: 4px; padding: 8px 12px;
+    font-size: 8pt; line-height: 1.4;
+    white-space: pre-wrap; word-wrap: break-word;
+  }
+  pre code { background: none; padding: 0; color: #333; font-size: 8pt; }
+  table {
+    width: 100%; border-collapse: collapse;
+    margin: 10px 0; font-size: 9pt;
+  }
+  th { background: #2980b9; color: white; padding: 6px 8px; text-align: left; }
+  td { border: 1px solid #ddd; padding: 4px 8px; }
+  tr:nth-child(even) { background: #f9f9f9; }
+  ul, ol { margin: 4px 0; padding-left: 1.8em; }
+  li { margin: 2px 0; }
+  a { color: #2980b9; text-decoration: none; }
+  hr { border: none; border-top: 1px solid #ddd; margin: 24px 0; }
+  strong { color: #2c3e50; }
+</style>
+</head>
+<body>
+<h1 id="eduagent">"EduAgent" —— 个性化资源生成与学习多智能体系统 核心技术文档</h1>
+<blockquote>
+<p><strong>第十五届"中国软件杯"大赛 A 组 · 科大讯飞出题</strong></p>
+<p><strong>赛题</strong>：《基于大模型的个性化资源生成与学习多智能体系统开发》</p>
+<p><strong>版本</strong>: v2.0 | <strong>日期</strong>: 2026-06-13 | <strong>作者</strong>: Joel-Ellen</p>
+</blockquote>
+<hr />
+<h2 id="_1">目录</h2>
+<ol>
+<li><a href="#一系统概览与架构总览">系统概览与架构总览</a></li>
+<li><a href="#二技术栈与依赖体系">技术栈与依赖体系</a></li>
+<li><a href="#三多智能体协同网络--langgraph-编排引擎">多智能体协同网络 —— LangGraph 编排引擎</a></li>
+<li><a href="#四核心主算法一profiler-agent--汤普森采样与遗忘曲线画像构建">核心主算法一：Profiler Agent —— 汤普森采样与遗忘曲线画像构建</a></li>
+<li><a href="#五核心主算法二path-planner--content-mesh--拓扑路径规划与异步资源生成">核心主算法二：Path Planner &amp; Content Mesh —— 拓扑路径规划与异步资源生成</a></li>
+<li><a href="#六核心主算法三evaluator-agent--异构流门控清洗与-pid-控制评估">核心主算法三：Evaluator Agent —— 异构流门控清洗与 PID 控制评估</a></li>
+<li><a href="#七底层辅助算法一版面感知切片与知识图谱自动构建">底层辅助算法一：版面感知切片与知识图谱自动构建</a></li>
+<li><a href="#八底层辅助算法二基于双极门控的防幻觉验证">底层辅助算法二：基于双极门控的防幻觉验证</a></li>
+<li><a href="#九底层辅助算法三冷启动情境探针启发式追问">底层辅助算法三：冷启动情境探针启发式追问</a></li>
+<li><a href="#十底层辅助算法四wfq-特权队列与马尔可夫预测性缓存">底层辅助算法四：WFQ 特权队列与马尔可夫预测性缓存</a></li>
+<li><a href="#十一数据层架构--agentstate--neo4j--milvus--elasticsearch">数据层架构 —— AgentState / Neo4j / Milvus / Elasticsearch</a></li>
+<li><a href="#十二llm-集成层--双后端大模型统一客户端">LLM 集成层 —— 双后端大模型统一客户端</a></li>
+<li><a href="#十三加分项一tutor-agent--三轨多模态智能辅导">加分项一：Tutor Agent —— 三轨多模态智能辅导</a></li>
+<li><a href="#十四加分项二assessment-node--ema-能力雷达与迟滞环策略">加分项二：Assessment Node —— EMA 能力雷达与迟滞环策略</a></li>
+<li><a href="#十五测试体系与质量保障">测试体系与质量保障</a></li>
+<li><a href="#十六附录完整文件目录映射">附录：完整文件目录映射</a></li>
+</ol>
+<hr />
+<h2 id="_2">一、系统概览与架构总览</h2>
+<h3 id="11">1.1 项目定位</h3>
+<p>EduAgent 是一个<strong>基于大模型的多智能体协同学习系统</strong>，将学生的完整学习生命周期建模为<strong>闭环反馈控制系统</strong>。系统采用 LangGraph 有向图框架协调 7 个专业化 AI Agent 协同工作，完成从冷启动画像采集 → 路径规划 → 多模态资源生成 → 防幻觉校验 → 学习效果评估 → 动态重寻路的完整闭环。</p>
+<h3 id="12">1.2 核心设计理念</h3>
+<p>本系统采用<strong>前后端分离架构</strong>，核心后端逻辑完全由多智能体协同网络驱动。关键设计原则：</p>
+<ul>
+<li><strong>大模型只做语义感知与内容生成</strong>，路径控制、画像演进和策略刹车全部交给毫秒级的传统确定性算法（图论、控制论、概率论）</li>
+<li><strong>工业级控制论基础</strong>：将学习过程建模为 PID 反馈控制系统，具备抗饱和、无扰切换、自适应增益调度等工程特性</li>
+<li><strong>多模态异步分层生成</strong>：消除富媒体生成的长尾白屏延迟</li>
+<li><strong>双重防幻觉机制</strong>：符号实体硬匹配 + NLI 语义蕴含度并行校验</li>
+</ul>
+<h3 id="13">1.3 系统架构全景图</h3>
+<div class="codehilite"><pre><span></span><code>                           ┌──────────────────────────────────────┐
+                           │          LangGraph StateGraph         │
+                           │         (AgentState 全局上下文)        │
+                           └──────────────────────────────────────┘
+                                              │
+         ┌────────────────────────────────────┼────────────────────────────────────┐
+         │                                    │                                    │
+         v                                    v                                    v
+   ┌───────────┐     ┌───────────┐     ┌───────────┐     ┌───────────┐     ┌───────────┐
+   │ Evaluator │────&gt;│ Profiler  │────&gt;│  Planner  │────&gt;│  Tutor    │────&gt;│  Content  │
+   │  (PID)    │     │  (MAB)    │     │(Dijkstra) │     │ (3-Track) │     │   Mesh    │
+   └───────────┘     └───────────┘     └───────────┘     └───────────┘     └───────────┘
+         ^                                                                       │
+         │                                                                       v
+         │                                                               ┌───────────┐
+         │                                                               │ Validator │
+         │                                                               │ (NLI)     │
+         │                                                               └───────────┘
+         │                                                                       │
+         │                                                                       v
+         └───────────────────────────────────────────────────────────────┌───────────┐
+                            (条件边: re_plan_triggered?)                  │Assessment │
+                                                                         │ (EMA雷达) │
+                                                                         └───────────┘
+</code></pre></div>
+
+<p><strong>7 个 Agent Node 职责</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>Agent</th>
+<th>文件位置</th>
+<th>核心职责</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Evaluator</strong></td>
+<td><code>src/agents/evaluator_node.py</code></td>
+<td>行为非线性门控清洗 + PID 控制平滑评估</td>
+</tr>
+<tr>
+<td><strong>Profiler</strong></td>
+<td><code>src/agents/profiler_node.py</code></td>
+<td>MAB 汤普森采样 + 艾宾浩斯遗忘曲线衰减</td>
+</tr>
+<tr>
+<td><strong>Planner</strong></td>
+<td><code>src/agents/planner_node.py</code></td>
+<td>Neo4j DAG-Dijkstra 最短路径规划</td>
+</tr>
+<tr>
+<td><strong>Tutor</strong></td>
+<td><code>src/agents/tutor_node.py</code></td>
+<td>三轨多模态智能辅导答疑（加分项）</td>
+</tr>
+<tr>
+<td><strong>Content Mesh</strong></td>
+<td><code>src/agents/content_mesh_node.py</code></td>
+<td>WFQ 调度 + 5 类资源卡片生成 + 马尔可夫预生成</td>
+</tr>
+<tr>
+<td><strong>Validator</strong></td>
+<td><code>src/agents/validator_node.py</code></td>
+<td>双极防幻觉校验（AST/LaTeX + NLI）</td>
+</tr>
+<tr>
+<td><strong>Assessment</strong></td>
+<td><code>src/agents/assessment_node.py</code></td>
+<td>EMA 5 维能力雷达 + 迟滞环策略决策（加分项）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="14">1.4 端到端流程</h3>
+<div class="codehilite"><pre><span></span><code><span class="k">[冷启动] → [PID评估] → [MAB画像更新] → [DAG路径规划]</span>
+<span class="w">    </span><span class="na">↓                                           ↓</span>
+<span class="na">[资源卡片生成 (WFQ)] ← [Tutor答疑(可选)] ←───┘</span>
+<span class="w">    </span><span class="na">↓</span>
+<span class="k">[双极防幻觉校验] → [EMA能力评估] → [迟滞环策略决策]</span>
+<span class="w">    </span><span class="na">↓                                    ↓</span>
+<span class="k">[下一轮迭代] ←────────── [重寻路触发?] ──→ [Planner重规划]</span>
+</code></pre></div>
+
+<hr />
+<h2 id="_3">二、技术栈与依赖体系</h2>
+<h3 id="21">2.1 核心技术栈</h3>
+<table>
+<thead>
+<tr>
+<th>层级</th>
+<th>技术选型</th>
+<th>版本</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>多智能体编排</strong></td>
+<td>LangGraph</td>
+<td>≥0.2.0</td>
+<td>有向图驱动的 Agent 协同框架</td>
+</tr>
+<tr>
+<td><strong>LLM 后端（双引擎）</strong></td>
+<td>阿里云 DashScope (Qwen) / 讯飞星火 Spark v4.0</td>
+<td>-</td>
+<td>内容生成、辅导答疑、NLI 推理</td>
+</tr>
+<tr>
+<td><strong>图数据库</strong></td>
+<td>Neo4j</td>
+<td>≥5.20</td>
+<td>专业知识图谱存储与 Cypher 查询</td>
+</tr>
+<tr>
+<td><strong>向量数据库（双引擎）</strong></td>
+<td>Milvus / Elasticsearch</td>
+<td>≥2.3 / ≥8.17</td>
+<td>语义检索、混合检索 (BM25 + HNSW + RRF)</td>
+</tr>
+<tr>
+<td><strong>数据校验</strong></td>
+<td>Pydantic v2</td>
+<td>≥2.5</td>
+<td>全局状态强类型校验</td>
+</tr>
+<tr>
+<td><strong>嵌入模型</strong></td>
+<td>BAAI/bge-small-zh-v1.5 (sentence-transformers)</td>
+<td>≥5.0</td>
+<td>中文文本向量化</td>
+</tr>
+<tr>
+<td><strong>数学计算</strong></td>
+<td>NumPy</td>
+<td>-</td>
+<td>Beta 分布采样、随机数生成</td>
+</tr>
+<tr>
+<td><strong>异步/流式</strong></td>
+<td>aiohttp / sse-starlette / starlette</td>
+<td>≥3.9 / ≥1.8 / ≥0.36</td>
+<td>HTTP 与 SSE 流式输出</td>
+</tr>
+<tr>
+<td><strong>测试框架</strong></td>
+<td>pytest / pytest-asyncio</td>
+<td>≥7.4 / ≥0.21</td>
+<td>单元测试与集成测试</td>
+</tr>
+<tr>
+<td><strong>容错重试</strong></td>
+<td>tenacity</td>
+<td>≥8.2</td>
+<td>API 调用指数退避重试</td>
+</tr>
+<tr>
+<td><strong>文本分割</strong></td>
+<td>langchain-text-splitters</td>
+<td>≥0.3</td>
+<td>Markdown 感知的文档切片</td>
+</tr>
+</tbody>
+</table>
+<h3 id="22-requirementstxt">2.2 依赖清单 (<code>requirements.txt</code>)</h3>
+<div class="codehilite"><pre><span></span><code>langgraph&gt;=0.2.0,&lt;1.0.0
+langchain-core&gt;=0.3.0,&lt;1.0.0
+neo4j&gt;=5.20.0,&lt;6.0.0
+pymilvus&gt;=2.3.0,&lt;3.0.0
+elasticsearch&gt;=8.17.0,&lt;9.0.0
+pydantic&gt;=2.5.0,&lt;3.0.0
+langchain-text-splitters&gt;=0.3.0,&lt;1.0.0
+pytest&gt;=7.4.0,&lt;9.0.0
+pytest-asyncio&gt;=0.21.0,&lt;1.0.0
+aiohttp&gt;=3.9.0,&lt;4.0.0
+sentence-transformers&gt;=5.0.0,&lt;6.0.0
+sse-starlette&gt;=1.8.0,&lt;2.0.0
+starlette&gt;=0.36.0,&lt;1.0.0
+python-dotenv&gt;=1.0.0,&lt;2.0.0
+tenacity&gt;=8.2.0,&lt;9.0.0
+</code></pre></div>
+
+<hr />
+<h2 id="langgraph">三、多智能体协同网络 —— LangGraph 编排引擎</h2>
+<h3 id="31">3.1 编排文件</h3>
+<p><strong>主控文件</strong>: <a href="src/orchestration.py"><code>src/orchestration.py</code></a></p>
+<h3 id="32-eduagentgraph">3.2 EduAgentGraph 类</h3>
+<p><code>EduAgentGraph</code> 是 LangGraph StateGraph 的封装类，负责：</p>
+<ol>
+<li><strong>注册 7 个 Agent Node</strong> 到有向图</li>
+<li><strong>配置条件边</strong>实现智能路由</li>
+<li><strong>LLM 依赖注入</strong>：将真实大模型客户端注入各 Agent Node，替换 Mock 实现</li>
+<li><strong>流式运行</strong>：支持 <code>run()</code> 和 <code>stream()</code> 两种执行模式</li>
+</ol>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">EduAgentGraph</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_evaluator</span> <span class="o">=</span> <span class="n">EvaluatorNode</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_profiler</span> <span class="o">=</span> <span class="n">ProfilerNode</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_planner</span> <span class="o">=</span> <span class="n">PlannerNode</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_tutor</span> <span class="o">=</span> <span class="n">TutorAgentNode</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_mesh</span> <span class="o">=</span> <span class="n">ContentMeshNode</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_validator</span> <span class="o">=</span> <span class="n">ValidatorNode</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_assessment</span> <span class="o">=</span> <span class="n">AssessmentReporterNode</span><span class="p">()</span>
+</code></pre></div>
+
+<h3 id="33">3.3 图拓扑结构</h3>
+<div class="codehilite"><pre><span></span><code><span class="n">START</span> <span class="err">→</span> <span class="n">evaluator</span> <span class="err">→</span> <span class="n">profiler</span> <span class="err">→</span> <span class="n">planner</span> <span class="err">→</span> <span class="p">[</span><span class="err">条件边</span><span class="p">]</span>
+                                              <span class="err">├─</span><span class="p">(</span><span class="n">has</span> <span class="n">tutor_query</span><span class="err">?</span><span class="p">)</span><span class="err">→</span> <span class="n">tutor</span> <span class="err">→</span> <span class="n">content_mesh</span>
+                                              <span class="err">└─</span><span class="p">(</span><span class="n">no</span> <span class="n">query</span><span class="p">)</span><span class="err">→</span> <span class="n">content_mesh</span>
+                                                              <span class="err">↓</span>
+                                                          <span class="n">validator</span>
+                                                              <span class="err">↓</span>
+                                                         <span class="n">assessment</span>
+                                                              <span class="err">↓</span>
+                                                          <span class="p">[</span><span class="err">条件边</span><span class="p">]</span>
+                                              <span class="err">├─</span><span class="p">(</span><span class="n">re_plan</span><span class="p">)</span><span class="err">→</span> <span class="n">planner</span>
+                                              <span class="err">├─</span><span class="p">(</span><span class="n">continue</span><span class="p">)</span><span class="err">→</span> <span class="n">evaluator</span>
+                                              <span class="err">└─</span><span class="p">(</span><span class="n">end</span><span class="p">)</span><span class="err">→</span> <span class="kr">END</span>
+</code></pre></div>
+
+<h3 id="34">3.4 条件路由逻辑</h3>
+<p><strong>Tutor 路由</strong> (<code>_tutor_routing</code>):
+- 若 <code>latest_behavior.tutor_query</code> 非空 → 路由到 Tutor Node 进行答疑
+- 否则 → 直接进入 Content Mesh 资源生成</p>
+<p><strong>重寻路/终止路由</strong> (<code>_route_decision</code>):
+- <code>target_node_id</code> 掌握度 ≥ 0.85 且无重寻路需求 → 终止 (<code>"end"</code>)
+- <code>active_path</code> 为空且无重寻路需求 → 终止 (<code>"end"</code>)
+- <code>iteration ≥ 100</code> → 终止 (<code>"end"</code>)
+- <code>re_plan_triggered == True</code> → 回到 Planner 重寻路 (<code>"replan"</code>)
+- 否则 → 进入下一轮评估 (<code>"continue"</code>)</p>
+<h3 id="35-coldstartorchestrator">3.5 冷启动编排器 (<code>ColdStartOrchestrator</code>)</h3>
+<p>在进入主 LangGraph 图之前，<code>ColdStartOrchestrator</code> 负责：
+1. 调用 <code>handle_cold_start_interaction</code> 逐轮收集 6 维画像
+2. 冷启动完成后触发 Planner 初始路径规划
+3. 将就绪的 AgentState 注入主图</p>
+<hr />
+<h2 id="profiler-agent">四、核心主算法一：Profiler Agent —— 汤普森采样与遗忘曲线画像构建</h2>
+<h3 id="41">4.1 赛题对应要求</h3>
+<p>支持通过自然语言对话自动抽取特征，构建包含不少于 6 个维度的动态学生画像，并支持画像的随学随新。</p>
+<h3 id="42">4.2 算法核心逻辑</h3>
+<p>画像被解耦为<strong>慢变特征空间（贝塔概率分布）</strong>与<strong>快变特征向量（时变状态矩阵）</strong>：
+- <strong>慢变特征</strong>：利用多臂老虎机（MAB）的汤普森采样动态纠偏
+- <strong>快变特征</strong>：通过结合遗忘曲线的增量方程更新，并设置心理学干预门控防止掌握度塌陷的负反馈死循环</p>
+<h3 id="43">4.3 实现文件</h3>
+<p><a href="src/agents/profiler_node.py"><code>src/agents/profiler_node.py</code></a></p>
+<h3 id="44">4.4 核心数据结构</h3>
+<p><strong>CognitiveStyleDistribution</strong> — 认知风格 Beta 分布参数（<code>src/state/agent_state.py</code>）：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">CognitiveStyleDistribution</span><span class="p">(</span><span class="n">BaseModel</span><span class="p">):</span>
+    <span class="n">visual_alpha</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span>      <span class="c1"># 视觉型 α 超参数</span>
+    <span class="n">visual_beta</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span>       <span class="c1"># 视觉型 β 超参数</span>
+    <span class="n">textual_alpha</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span>     <span class="c1"># 文本型 α 超参数</span>
+    <span class="n">textual_beta</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span>      <span class="c1"># 文本型 β 超参数</span>
+    <span class="n">practical_alpha</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span>   <span class="c1"># 实践型 α 超参数</span>
+    <span class="n">practical_beta</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span>    <span class="c1"># 实践型 β 超参数</span>
+</code></pre></div>
+
+<h3 id="45">4.5 核心数学公式</h3>
+<h4 id="451">4.5.1 慢变维度（学习风格）汤普森采样</h4>
+<p>每次推送资源时，从各风格的 Beta 分布中进行随机采样，选取采样值 θ 最大的风格作为推送策略：</p>
+<p>$$\theta_{\text{style}} \sim \text{Beta}(\alpha_{\text{style}}, \beta_{\text{style}})$$</p>
+<ul>
+<li>交互正向埋点时执行：$\alpha_{\text{style}} = \alpha_{\text{style}} + \text{reward}$</li>
+<li>负向埋点时执行：$\beta_{\text{style}} = \beta_{\text{style}} + (1 - \text{reward})$</li>
+</ul>
+<h4 id="452">4.5.2 快变维度（知识掌握度）干预更新方程</h4>
+<p>$$K_i^{(t)} = \max \left( K_{\text{floor}}, \lambda \cdot \left( K_i^{(t-1)} \cdot e^{-\frac{\Delta t}{S_i}} \right) + (1 - \lambda) \cdot \Delta E_v \cdot \gamma \right)$$</p>
+<p>$$\gamma = \begin{cases} 1 &amp; \text{if } C_{\text{fail}} &lt; 3 \ \theta \cdot \text{cognitive_shift}() &amp; \text{if } C_{\text{fail}} \ge 3 \end{cases}$$</p>
+<ul>
+<li>$\Delta t$：遗忘衰减时间</li>
+<li>$\Delta E_v$：即时测试得分</li>
+<li>$C_{\text{fail}}$：连续失败计数器</li>
+<li>$K_{\text{floor}} = 0.15$：最低掌握度保底</li>
+<li>当 $C_{\text{fail}} \ge 3$ 时，门控 $\gamma$ 强行触发 <code>cognitive_shift()</code>，临时将资源切向非当前风格</li>
+</ul>
+<h3 id="46">4.6 实现细节</h3>
+<h4 id="461-thompsonsampler">4.6.1 ThompsonSampler 类</h4>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">ThompsonSampler</span><span class="p">:</span>
+    <span class="n">ARM_NAMES</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;visual&quot;</span><span class="p">,</span> <span class="s2">&quot;textual&quot;</span><span class="p">,</span> <span class="s2">&quot;practical&quot;</span><span class="p">]</span>
+    <span class="n">SUCCESS_THRESHOLD</span> <span class="o">=</span> <span class="mf">0.6</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">sample</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;从各臂的 Beta(α, β) 中采样，选择最大值。&quot;&quot;&quot;</span>
+        <span class="n">samples</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">ARM_NAMES</span><span class="p">:</span>
+            <span class="n">alpha</span><span class="p">,</span> <span class="n">beta</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_params</span><span class="p">[</span><span class="n">name</span><span class="p">]</span>
+            <span class="n">samples</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_rng</span><span class="o">.</span><span class="n">beta</span><span class="p">(</span><span class="n">alpha</span><span class="p">,</span> <span class="n">beta</span><span class="p">))</span>
+        <span class="n">best_style</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">samples</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">samples</span><span class="o">.</span><span class="n">get</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">best_style</span><span class="p">,</span> <span class="n">samples</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">update</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">style</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">reward</span><span class="p">:</span> <span class="nb">float</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;按比例更新 Beta 参数 — reward ≥ 0.6 则 α+=reward，否则 β+=(1-reward)。&quot;&quot;&quot;</span>
+        <span class="n">alpha</span><span class="p">,</span> <span class="n">beta</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_params</span><span class="p">[</span><span class="n">style</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">reward</span> <span class="o">&gt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">SUCCESS_THRESHOLD</span><span class="p">:</span>
+            <span class="n">alpha</span> <span class="o">+=</span> <span class="n">reward</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">beta</span> <span class="o">+=</span> <span class="p">(</span><span class="mf">1.0</span> <span class="o">-</span> <span class="n">reward</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_params</span><span class="p">[</span><span class="n">style</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="nb">max</span><span class="p">(</span><span class="mf">0.01</span><span class="p">,</span> <span class="n">alpha</span><span class="p">),</span> <span class="nb">max</span><span class="p">(</span><span class="mf">0.01</span><span class="p">,</span> <span class="n">beta</span><span class="p">))</span>
+</code></pre></div>
+
+<h4 id="462-ebbinghausforgettingengine">4.6.2 EbbinghausForgettingEngine 类</h4>
+<p>遗忘曲线公式：$m(t) = m_0 \cdot e^{-\lambda \cdot \Delta t}$，其中 $\lambda = 1/S$（S 为记忆强度）。</p>
+<ul>
+<li>每次成功交互：$S \leftarrow S \times 1.5$</li>
+<li>每次失败交互：$S \leftarrow S \times 0.8$</li>
+<li>S 钳位范围：$[0.5, 20.0]$</li>
+</ul>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">EbbinghausForgettingEngine</span><span class="p">:</span>
+    <span class="n">MASTERY_FLOOR</span> <span class="o">=</span> <span class="mf">0.15</span>
+    <span class="n">DEFAULT_STRENGTH</span> <span class="o">=</span> <span class="mf">10.0</span>  <span class="c1"># 约 24 小时半衰期</span>
+    <span class="n">SUCCESS_STRENGTH_MULT</span> <span class="o">=</span> <span class="mf">1.5</span>
+    <span class="n">FAILURE_STRENGTH_MULT</span> <span class="o">=</span> <span class="mf">0.8</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">apply_decay</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">node_id</span><span class="p">,</span> <span class="n">mastery</span><span class="p">,</span> <span class="n">last_updated_ts</span><span class="p">,</span> <span class="n">current_ts</span><span class="p">):</span>
+        <span class="n">elapsed_hours</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">current_ts</span> <span class="o">-</span> <span class="n">last_updated_ts</span><span class="p">)</span> <span class="o">/</span> <span class="mf">3600.0</span>
+        <span class="n">strength</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_strength</span><span class="p">(</span><span class="n">node_id</span><span class="p">)</span>
+        <span class="n">lambd</span> <span class="o">=</span> <span class="mf">1.0</span> <span class="o">/</span> <span class="n">strength</span>
+        <span class="n">decay_factor</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="n">lambd</span> <span class="o">*</span> <span class="n">elapsed_hours</span><span class="p">)</span>
+        <span class="n">decayed_mastery</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">MASTERY_FLOOR</span><span class="p">,</span> <span class="n">mastery</span> <span class="o">*</span> <span class="n">decay_factor</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">ForgettingCurveResult</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+</code></pre></div>
+
+<h4 id="463-profilernode">4.6.3 ProfilerNode 主流程</h4>
+<div class="codehilite"><pre><span></span><code><span class="mf">1.</span><span class="w"> </span><span class="n">从</span><span class="w"> </span><span class="n">AgentState</span><span class="w"> </span><span class="n">加载</span><span class="w"> </span><span class="n">Beta</span><span class="w"> </span><span class="n">先验</span><span class="w"> </span><span class="err">→</span><span class="w"> </span><span class="n">初始化</span><span class="w"> </span><span class="n">MAB</span><span class="w"> </span><span class="n">采样器</span>
+<span class="mf">2.</span><span class="w"> </span><span class="n">检查</span><span class="w"> </span><span class="n">C_fail</span><span class="w"> </span><span class="err">≥</span><span class="w"> </span><span class="mf">3</span><span class="w"> </span><span class="err">→</span><span class="w"> </span><span class="n">触发硬切换干预</span><span class="err">（</span><span class="n">排除当前风格</span><span class="err">，</span><span class="n">强制选择次优</span><span class="err">）</span>
+<span class="mf">3.</span><span class="w"> </span><span class="n">正常汤普森采样</span><span class="w"> </span><span class="err">→</span><span class="w"> </span><span class="n">选择推送风格</span>
+<span class="mf">4.</span><span class="w"> </span><span class="n">根据</span><span class="w"> </span><span class="n">Evaluator</span><span class="w"> </span><span class="n">反馈更新</span><span class="w"> </span><span class="n">Beta</span><span class="w"> </span><span class="n">参数</span><span class="err">（</span><span class="n">reward</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">1</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="err">|</span><span class="n">PID_error</span><span class="err">|）</span>
+<span class="mf">5.</span><span class="w"> </span><span class="n">更新遗忘引擎的记忆强度</span>
+<span class="mf">6.</span><span class="w"> </span><span class="n">对当前知识点应用艾宾浩斯遗忘衰减</span>
+<span class="mf">7.</span><span class="w"> </span><span class="n">将</span><span class="w"> </span><span class="n">MAB</span><span class="w"> </span><span class="n">参数写回</span><span class="w"> </span><span class="n">AgentState</span>
+</code></pre></div>
+
+<hr />
+<h2 id="path-planner-content-mesh">五、核心主算法二：Path Planner &amp; Content Mesh —— 拓扑路径规划与异步资源生成</h2>
+<h3 id="51">5.1 赛题对应要求</h3>
+<p>为学生规划科学、动态的个性化学习路径，明确学习步骤和顺序；由不同角色的智能体协作完成至少 5 种类型的个性化资源生成。</p>
+<h3 id="52">5.2 算法核心逻辑</h3>
+<p>拒绝纯大模型盲目规划路径，将高校课程图谱作为硬性拓扑边界约束。寻路目标重构为"寻找一条覆盖所有未掌握前置节点且全局认知负荷最均衡的拓扑激活序列"。生成层采用两阶段分层流水线，消除富媒体生成带来的长尾白屏延迟。</p>
+<h3 id="53-path-planner">5.3 Path Planner 实现</h3>
+<p><strong>实现文件</strong>: <a href="src/infrastructure/path_planner.py"><code>src/infrastructure/path_planner.py</code></a>
+<strong>Agent 封装</strong>: <a href="src/agents/planner_node.py"><code>src/agents/planner_node.py</code></a></p>
+<h4 id="531">5.3.1 四种路径规划策略</h4>
+<table>
+<thead>
+<tr>
+<th>策略</th>
+<th>枚举值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TOPO_MIN_WEIGHT</td>
+<td><code>topo_min_weight</code></td>
+<td>拓扑约束下的最小总权重路径（Dijkstra on DAG）</td>
+</tr>
+<tr>
+<td>TOPO_MIN_HOPS</td>
+<td><code>topo_min_hops</code></td>
+<td>拓扑约束下的最小跳数路径（BFS on DAG）</td>
+</tr>
+<tr>
+<td>TOPO_BALANCED</td>
+<td><code>topo_balanced</code></td>
+<td>难度方差最小化路径</td>
+</tr>
+<tr>
+<td>COLD_START_HEURISTIC</td>
+<td><code>cold_start_heuristic</code></td>
+<td>冷启动启发式（探索-利用平衡）</td>
+</tr>
+</tbody>
+</table>
+<h4 id="532">5.3.2 拓扑激活路径代价函数</h4>
+<p>$$Cost(u, v) = \left( 1 - K_u \right) \cdot \text{Prerequisite_Weight}(u, v) + \omega \cdot \text{Difficulty}(v)$$</p>
+<ul>
+<li>$K_u$：前置节点 $u$ 的画像掌握度</li>
+<li>当 $K_u \to 1$（已掌握）时，前置激活代价趋近于 0</li>
+<li>若未掌握，引入认知阻力开销，迫使 Path Planner 生成树状激活序列</li>
+</ul>
+<h4 id="533-pathplanner">5.3.3 PathPlanner 核心实现</h4>
+<p><strong>Kahn 拓扑排序</strong> ($O(V+E)$)：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">compute_topological_order</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="n">indegree</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_indegree</span><span class="p">)</span>
+    <span class="n">queue</span> <span class="o">=</span> <span class="n">deque</span><span class="p">(</span><span class="n">nid</span> <span class="k">for</span> <span class="n">nid</span><span class="p">,</span> <span class="n">deg</span> <span class="ow">in</span> <span class="n">indegree</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">deg</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="n">topo</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">while</span> <span class="n">queue</span><span class="p">:</span>
+        <span class="n">u</span> <span class="o">=</span> <span class="n">queue</span><span class="o">.</span><span class="n">popleft</span><span class="p">()</span>
+        <span class="n">topo</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">u</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">v</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_adj</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">u</span><span class="p">,</span> <span class="p">[]):</span>
+            <span class="n">indegree</span><span class="p">[</span><span class="n">v</span><span class="p">]</span> <span class="o">-=</span> <span class="mi">1</span>
+            <span class="k">if</span> <span class="n">indegree</span><span class="p">[</span><span class="n">v</span><span class="p">]</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">queue</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">v</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">topo</span><span class="p">)</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_node_map</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;知识图谱中存在有向环 (非 DAG)！&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">topo</span>
+</code></pre></div>
+
+<p><strong>DAG 单源最短路径</strong> ($O(V+E)$)：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">_dag_sssp</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">source_id</span><span class="p">,</span> <span class="n">weight_fn</span><span class="p">):</span>
+    <span class="n">topo</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">compute_topological_order</span><span class="p">()</span>
+    <span class="n">dist</span> <span class="o">=</span> <span class="p">{</span><span class="n">nid</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="s2">&quot;inf&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">nid</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_node_map</span><span class="p">}</span>
+    <span class="n">pred</span> <span class="o">=</span> <span class="p">{</span><span class="n">nid</span><span class="p">:</span> <span class="kc">None</span> <span class="k">for</span> <span class="n">nid</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_node_map</span><span class="p">}</span>
+    <span class="n">dist</span><span class="p">[</span><span class="n">source_id</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.0</span>
+    <span class="n">start_idx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_topo_rank</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">source_id</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">start_idx</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">topo</span><span class="p">)):</span>
+        <span class="n">u</span> <span class="o">=</span> <span class="n">topo</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+        <span class="k">if</span> <span class="n">dist</span><span class="p">[</span><span class="n">u</span><span class="p">]</span> <span class="o">==</span> <span class="nb">float</span><span class="p">(</span><span class="s2">&quot;inf&quot;</span><span class="p">):</span>
+            <span class="k">continue</span>
+        <span class="k">for</span> <span class="n">v</span><span class="p">,</span> <span class="n">base_w</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_adj</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">u</span><span class="p">,</span> <span class="p">[]):</span>
+            <span class="n">w</span> <span class="o">=</span> <span class="n">weight_fn</span><span class="p">(</span><span class="n">u</span><span class="p">,</span> <span class="n">v</span><span class="p">,</span> <span class="n">base_w</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">dist</span><span class="p">[</span><span class="n">v</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">dist</span><span class="p">[</span><span class="n">u</span><span class="p">]</span> <span class="o">+</span> <span class="n">w</span><span class="p">:</span>
+                <span class="n">dist</span><span class="p">[</span><span class="n">v</span><span class="p">]</span> <span class="o">=</span> <span class="n">dist</span><span class="p">[</span><span class="n">u</span><span class="p">]</span> <span class="o">+</span> <span class="n">w</span>
+                <span class="n">pred</span><span class="p">[</span><span class="n">v</span><span class="p">]</span> <span class="o">=</span> <span class="n">u</span>
+    <span class="k">return</span> <span class="n">dist</span><span class="p">,</span> <span class="n">pred</span>
+</code></pre></div>
+
+<p><strong>路径计算主流程</strong> (<code>compute_path</code>):</p>
+<div class="codehilite"><pre><span></span><code><span class="mf">1.</span><span class="w"> </span><span class="n">计算拓扑序</span><span class="w"> </span><span class="err">→</span><span class="w"> </span><span class="n">校验</span><span class="w"> </span><span class="n">DAG</span><span class="w"> </span><span class="n">合法性</span>
+<span class="mf">2.</span><span class="w"> </span><span class="n">剪枝已掌握节点</span><span class="w"> </span><span class="p">(</span><span class="n">mastery</span><span class="w"> </span><span class="err">≥</span><span class="w"> </span><span class="n">threshold</span><span class="p">)</span>
+<span class="mf">3.</span><span class="w"> </span><span class="n">确定源节点</span><span class="err">（</span><span class="n">current_node_id</span><span class="w"> </span><span class="n">或拓扑序第一个未掌握节点</span><span class="err">）</span>
+<span class="mf">4.</span><span class="w"> </span><span class="n">自动选择策略</span><span class="err">（</span><span class="n">冷启动阶段强制</span><span class="w"> </span><span class="n">COLD_START_HEURISTIC</span><span class="err">）</span>
+<span class="mf">5.</span><span class="w"> </span><span class="n">运行</span><span class="w"> </span><span class="n">DAG</span><span class="o">-</span><span class="n">SSSP</span>
+<span class="mf">6.</span><span class="w"> </span><span class="n">路径回溯</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">长度</span><span class="o">/</span><span class="n">时间预算截断</span>
+<span class="mf">7.</span><span class="w"> </span><span class="n">可行性校验</span><span class="err">（</span><span class="n">确保所有前置依赖已满足</span><span class="err">）</span>
+</code></pre></div>
+
+<h4 id="534-neo4j">5.3.4 Neo4j 图谱集成</h4>
+<p><strong>实现文件</strong>: <a href="src/graph/neo4j_client.py"><code>src/graph/neo4j_client.py</code></a></p>
+<ul>
+<li>节点：<code>KnowledgeNode</code> (node_id, title, difficulty, estimated_hours, category)</li>
+<li>边：<code>PREREQUISITE</code> 关系 (dependency_type: strict/recommended/optional, weight)</li>
+<li>用户掌握度：<code>MASTERED</code> 关系 (mastery score, timestamp)</li>
+<li>子图提取：支持 K-hop 邻域查询（上游/下游/双向）</li>
+</ul>
+<h3 id="54-content-mesh">5.4 Content Mesh 实现</h3>
+<p><strong>实现文件</strong>: <a href="src/agents/content_mesh_node.py"><code>src/agents/content_mesh_node.py</code></a></p>
+<h4 id="541">5.4.1 两阶段异步分层生成流</h4>
+<p><strong>第一阶段（结构骨架流式输出）</strong>：
+- 总控 Supervisor 统一注入全局对齐变量
+- Doc Agent 与 Mind Agent 优先并发启动
+- 1~2 秒内通过 WebSocket 将 Markdown 文本流与 Mermaid 导图源码推送到前端流式渲染</p>
+<p><strong>第二阶段（富媒体卡片异步注入 / Hydration）</strong>：
+- Quiz Agent、Code Agent、多模态 Video Agent 进入异步长轮询队列
+- 前端骨架屏展现"生成进度追踪"
+- 任何卡片若在 Validator 校验中连续 2 次重生成失败 → 启动降级策略，提取本地知识库标准预置模版</p>
+<h4 id="542-5">5.4.2 5 种资源卡片类型</h4>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">ResourceCard</span><span class="p">(</span><span class="n">BaseModel</span><span class="p">):</span>
+    <span class="n">resource_id</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">node_id</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">card_type</span><span class="p">:</span> <span class="nb">str</span>  <span class="c1"># concept_map | code_snippet | interactive_exercise | video_summary | diagnostic_quiz</span>
+    <span class="n">content</span><span class="p">:</span> <span class="nb">str</span>    <span class="c1"># Markdown 格式</span>
+    <span class="n">difficulty</span><span class="p">:</span> <span class="nb">float</span>
+    <span class="n">cognitive_style</span><span class="p">:</span> <span class="nb">str</span>  <span class="c1"># visual | textual | practical</span>
+</code></pre></div>
+
+<hr />
+<h2 id="evaluator-agent-pid">六、核心主算法三：Evaluator Agent —— 异构流门控清洗与 PID 控制评估</h2>
+<h3 id="61">6.1 赛题对应要求</h3>
+<p>实时跟踪学生的学习行为、练习测试情况、资源使用反馈等数据；依托大模型实现对学生学习效果的多维度、精准评估；并据此动态调整推送策略。</p>
+<h3 id="62">6.2 算法核心逻辑</h3>
+<p>构建包含作答正确率、代码通过率、交互时长比、提问频次的异构行为特征向量。经过非线性门控清洗剔除"挂机伪造时长"与"抄袭秒杀作弊"噪音。引入工业级 PID（比例-积分-微分）平滑控制器消除偶发性成绩波动带来的系统频繁重寻路震荡（Thrashing）。</p>
+<h3 id="63-evaluator-node">6.3 Evaluator Node 实现</h3>
+<p><strong>实现文件</strong>: <a href="src/agents/evaluator_node.py"><code>src/agents/evaluator_node.py</code></a></p>
+<h4 id="631">6.3.1 行为特征的非线性门控清洗</h4>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">sanitize_behavior_stream</span><span class="p">(</span><span class="n">x1</span><span class="p">,</span> <span class="n">x2</span><span class="p">,</span> <span class="n">x3</span><span class="p">,</span> <span class="n">x4</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    x1: 答题正确率, x2: 代码运行通过率, </span>
+<span class="sd">    x3: 实际时长/预估时长, x4: 智能导师提问次数</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># 门控一：挂机刷课噪音拦截</span>
+    <span class="k">if</span> <span class="n">x3</span> <span class="o">&gt;</span> <span class="mf">3.0</span><span class="p">:</span> 
+        <span class="n">x3</span> <span class="o">=</span> <span class="mf">1.0</span>  <span class="c1"># 强制折算为标准常态时长</span>
+
+    <span class="c1"># 门控二：抄袭秒杀作弊清洗</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">x1</span> <span class="o">&gt;</span> <span class="mf">0.9</span> <span class="ow">or</span> <span class="n">x2</span> <span class="o">&gt;</span> <span class="mf">0.9</span><span class="p">)</span> <span class="ow">and</span> <span class="n">x3</span> <span class="o">&lt;</span> <span class="mf">0.05</span><span class="p">:</span>
+        <span class="c1"># 正确率极高但交互时间极短 → 复制粘贴作弊</span>
+        <span class="n">x1_clean</span> <span class="o">=</span> <span class="n">x1</span> <span class="o">*</span> <span class="mf">0.1</span>
+        <span class="n">x2_clean</span> <span class="o">=</span> <span class="n">x2</span> <span class="o">*</span> <span class="mf">0.1</span>
+        <span class="n">x4_stealth</span> <span class="o">=</span> <span class="n">x4</span> <span class="o">+</span> <span class="mf">3.0</span>  <span class="c1"># 隐性调高辅导阻碍系数</span>
+        <span class="k">return</span> <span class="n">x1_clean</span><span class="p">,</span> <span class="n">x2_clean</span><span class="p">,</span> <span class="n">x3</span><span class="p">,</span> <span class="n">x4_stealth</span>
+
+    <span class="k">return</span> <span class="n">x1</span><span class="p">,</span> <span class="n">x2</span><span class="p">,</span> <span class="n">x3</span><span class="p">,</span> <span class="n">x4</span>
+</code></pre></div>
+
+<h4 id="632-behaviorcleaner">6.3.2 BehaviorCleaner 多维非线性门控</h4>
+<p>实际实现包含 4 类异常检测：
+1. <strong>AFK 挂机检测</strong>：时间比率 &gt; 3.0 → 强制归一化
+2. <strong>抄袭秒杀检测</strong>：正确率 &gt; 0.9 AND 时间比率 &lt; 0.05 → 重度惩罚
+3. <strong>行为矛盾检测</strong>：高正确率 + 高求助次数 → sigmoid 软决策惩罚
+4. <strong>快速猜测检测</strong>：时间比率 &lt; 0.1 AND 正确率 &lt; 0.5 → 摩擦系数降低</p>
+<h3 id="64-pid">6.4 PID 控制器实现</h3>
+<p><strong>实现文件</strong>: <a href="src/infrastructure/pid_controller.py"><code>src/infrastructure/pid_controller.py</code></a></p>
+<h4 id="641">6.4.1 控制论建模</h4>
+<table>
+<thead>
+<tr>
+<th>控制论概念</th>
+<th>对应学习系统变量</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>设定点 (Setpoint) $r(t)$</td>
+<td>目标掌握度 = 1.0</td>
+</tr>
+<tr>
+<td>过程变量 (PV) $y(t)$</td>
+<td>实际掌握度 $\in [0, 1]$</td>
+</tr>
+<tr>
+<td>误差 (Error) $e(t)$</td>
+<td>$r(t) - y(t)$</td>
+</tr>
+<tr>
+<td>控制输出 (CO) $u(t)$</td>
+<td>难度系数 / 资源粒度 / 步长</td>
+</tr>
+</tbody>
+</table>
+<h4 id="642-pid">6.4.2 PID 核心公式</h4>
+<p>定义当前清洗后的即时表现增量与历史画像掌握度之间的系统误差：</p>
+<p>$$\text{Error}^{(t)} = \Delta E_v^{(t)} - K_i^{(t-1)}$$</p>
+<p>计算经过比例、积分、微分平滑后的掌握度调整控制增量：</p>
+<p>$$\Delta K_{\text{smooth}} = K_p \cdot \text{Error}^{(t)} + K_i \cdot \sum_{j=0}^{t} \text{Error}^{(j)} + K_d \cdot \left( \text{Error}^{(t)} - \text{Error}^{(t-1)} \right)$$</p>
+<p>$$K_i^{(t)} = K_i^{(t-1)} + \Delta K_{\text{smooth}}$$</p>
+<p><strong>阻尼防震荡机制</strong>：$K_d$（微分项）计算误差的变化率，当发生偶然性考满分或挂科时，$K_d$ 产生强力的反向阻尼制动，平滑掉突变噪音。只有当累积的 $\Delta K_{\text{smooth}}$ 连续 $N$ 次滑出置信阈值边界时，系统才正式触发全局重寻路。</p>
+<h4 id="643">6.4.3 五大工程特性</h4>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">PIDController</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    1. Anti-Windup (积分抗饱和)</span>
+<span class="sd">       - 条件积分: |e| &gt; threshold 时暂停积分累积</span>
+<span class="sd">       - 输出钳位: 输出超限时反算削减积分项 (Back-Calculation)</span>
+
+<span class="sd">    2. Derivative-on-Measurement (测量微分)</span>
+<span class="sd">       - de/dt = -dy/dt (当 setpoint 恒定时)</span>
+<span class="sd">       - 避免设定点突变引起的&quot;微分冲击&quot;</span>
+
+<span class="sd">    3. Bumpless Transfer (无扰切换)</span>
+<span class="sd">       - 增益调度时平滑过渡</span>
+
+<span class="sd">    4. Adaptive Gain Scheduling (自适应增益调度)</span>
+<span class="sd">       - C_fail &gt;= 3 → K_p *= 1.5^(sqrt(ratio)), K_i *= 2.0^(sqrt(ratio))</span>
+<span class="sd">       - K_d 不变 — 避免对噪声过度敏感</span>
+
+<span class="sd">    5. 滑动窗口误差统计</span>
+<span class="sd">       - 用于在线诊断与增益自动整定</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+</code></pre></div>
+
+<h4 id="644-pidcontroller">6.4.4 PIDController 核心实现</h4>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">step</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">inp</span><span class="p">:</span> <span class="n">PIDStepInput</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">PIDStepResult</span><span class="p">:</span>
+    <span class="c1"># 1. 恢复/初始化内部状态</span>
+    <span class="c1"># 2. 自适应增益调度 (根据 C_fail)</span>
+    <span class="n">kp</span><span class="p">,</span> <span class="n">ki</span><span class="p">,</span> <span class="n">kd</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_compute_adaptive_gains</span><span class="p">(</span><span class="n">inp</span><span class="o">.</span><span class="n">continuous_fail_counter</span><span class="p">)</span>
+    <span class="c1"># 3. 计算误差</span>
+    <span class="n">error</span> <span class="o">=</span> <span class="n">inp</span><span class="o">.</span><span class="n">setpoint</span> <span class="o">-</span> <span class="n">inp</span><span class="o">.</span><span class="n">current_mastery</span>
+    <span class="c1"># 4. 比例项 P = Kp * e(t)</span>
+    <span class="n">p_term</span> <span class="o">=</span> <span class="n">kp</span> <span class="o">*</span> <span class="n">error</span>
+    <span class="c1"># 5. 积分项 I — 条件积分 + 抗饱和钳位</span>
+    <span class="n">i_term</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_compute_integral_term</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">error</span><span class="p">,</span> <span class="n">ki</span><span class="p">,</span> <span class="n">inp</span><span class="o">.</span><span class="n">dt</span><span class="p">)</span>
+    <span class="c1"># 6. 微分项 D — 测量微分 + 一阶低通滤波</span>
+    <span class="n">d_term</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_compute_derivative_term</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">inp</span><span class="o">.</span><span class="n">current_mastery</span><span class="p">,</span> <span class="n">kd</span><span class="p">,</span> <span class="n">inp</span><span class="o">.</span><span class="n">dt</span><span class="p">)</span>
+    <span class="c1"># 7. 钳位输出</span>
+    <span class="n">control_output</span> <span class="o">=</span> <span class="n">clamp</span><span class="p">(</span><span class="n">p_term</span> <span class="o">+</span> <span class="n">i_term</span> <span class="o">+</span> <span class="n">d_term</span><span class="p">,</span> <span class="n">output_min</span><span class="p">,</span> <span class="n">output_max</span><span class="p">)</span>
+    <span class="c1"># 8. 反算抗饱和</span>
+    <span class="c1"># 9. 更新历史值</span>
+    <span class="c1"># 10. 评估干预触发</span>
+    <span class="c1"># 11. 持久化状态</span>
+</code></pre></div>
+
+<h4 id="645">6.4.5 状态持久化</h4>
+<p>LangGraph Node 在每次 step 后通过 <code>sync_pid_state_to_agent_state()</code> 将 PID 内部状态序列化回 <code>AgentState.dynamic_profile.pid_errors</code> 字典，确保跨轮次的 PID 记忆不丢失。</p>
+<hr />
+<h2 id="_4">七、底层辅助算法一：版面感知切片与知识图谱自动构建</h2>
+<h3 id="71">7.1 赛题对应要求</h3>
+<p>参赛团队需自行构造至少一门完整高校专业课程的初始知识库/文档集作为系统输入。</p>
+<h3 id="72">7.2 实现文件</h3>
+<table>
+<thead>
+<tr>
+<th>模块</th>
+<th>文件</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>版面感知文档切片</td>
+<td><a href="src/infrastructure/document_chunker.py"><code>src/infrastructure/document_chunker.py</code></a></td>
+</tr>
+<tr>
+<td>知识图谱构建</td>
+<td><a href="src/infrastructure/graph_builder.py"><code>src/infrastructure/graph_builder.py</code></a></td>
+</tr>
+<tr>
+<td>Elasticsearch 知识库</td>
+<td><a href="src/vector/elasticsearch_knowledge_base.py"><code>src/vector/elasticsearch_knowledge_base.py</code></a></td>
+</tr>
+<tr>
+<td>Milvus 向量存储</td>
+<td><a href="src/vector/milvus_client.py"><code>src/vector/milvus_client.py</code></a></td>
+</tr>
+</tbody>
+</table>
+<h3 id="73">7.3 核心算法逻辑</h3>
+<p>解决专业教材中公式、代码块易被截断的痛点。通过 Layout-Aware 版面分析标签和语义密度动态划分文档，并利用层次目录树先验与 Tarjan 算法实现图谱的 DAG 化和传递闭包剪枝。</p>
+<h3 id="74">7.4 版面感知切片流程</h3>
+<h4 id="step-1">Step 1: 版面解析</h4>
+<p><code>LayoutParser</code> 识别以下特殊区块并实施硬性禁止截断保护：
+- LaTeX 公式块：<code>$$...$$</code>、<code>$...$</code>、<code>\[...\]</code>
+- 代码围栏：<code>```</code> 代码块
+- Markdown 表格
+- 标题层级</p>
+<h4 id="step-2">Step 2: 语义切片</h4>
+<p>计算相邻文本块的语义嵌入余弦相似度：</p>
+<p>$$\text{Threshold} = \mu \cdot \text{Mean}(Sim) - \alpha \cdot \text{Std}(Sim)$$</p>
+<p>低于动态阈值时执行切片。</p>
+<h4 id="step-3">Step 3: 父子块映射</h4>
+<table>
+<thead>
+<tr>
+<th>块类型</th>
+<th>Token 大小</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>子块 (Child)</td>
+<td>~300 tokens</td>
+<td>高精度向量检索，提升召回率</td>
+</tr>
+<tr>
+<td>父块 (Parent)</td>
+<td>~3000 tokens</td>
+<td>向大模型注入完整章节上下文，消除碎片化幻觉</td>
+</tr>
+</tbody>
+</table>
+<p><strong>检索流程</strong>：Child ANN 搜索 → 收集 parent_ids → Parent Lookup → 合并上下文</p>
+<h3 id="75">7.5 知识图谱自动构建</h3>
+<h4 id="step-1_1">Step 1: 层次树实体消解</h4>
+<p>将大模型抽取的技术概念 $(u, v)$ 结合教材目录路径距离进行空间重合度解算：</p>
+<p>$$\text{Alignment}(u, v) = w_1 \cdot \text{Cosine_Sim}(\vec{E}_u, \vec{E}_v) + w_2 \cdot e^{-| \text{Path}(u) - \text{Path}(v) |}$$</p>
+<p>当 $\text{Alignment} &gt; 0.85$ 时在图谱中强行合并。</p>
+<h4 id="step-2-tarjan-scc">Step 2: Tarjan SCC 环检测与消除</h4>
+<div class="codehilite"><pre><span></span><code><span class="c1"># Tarjan 强连通分量算法 — O(V+E) 线性时间</span>
+<span class="c1"># 检测并消除知识图谱中可能导致寻路死锁的环路</span>
+</code></pre></div>
+
+<h4 id="step-3-transitive-reduction">Step 3: 传递闭包剪枝 (Transitive Reduction)</h4>
+<p>基于 BFS 的冗余边检测与移除：
+- 若存在边 $A \to C$ 且存在路径 $A \to B \to C$，则 $A \to C$ 为冗余依赖边
+- 剪枝后保留最精简的 DAG 结构</p>
+<h3 id="76-elasticsearch">7.6 Elasticsearch 混合检索</h3>
+<p><strong>实现文件</strong>: <a href="src/vector/elasticsearch_knowledge_base.py"><code>src/vector/elasticsearch_knowledge_base.py</code></a></p>
+<p><strong>核心特性</strong>：
+- <strong>混合检索</strong>：BM25（关键词匹配）+ HNSW（语义搜索）双路召回
+- <strong>RRF 融合</strong>：Reciprocal Rank Fusion ($k=60$) 合并双路排序
+- <strong>字段级加权</strong>：<code>content^4 &gt; title_path^3 &gt; headers^2</code>
+- <strong>双嵌入器</strong>：HashingTextEmbedder（确定性、零依赖）和 SentenceTransformerEmbedder（BAAI/bge-small-zh-v1.5）</p>
+<hr />
+<h2 id="_5">八、底层辅助算法二：基于双极门控的防幻觉验证</h2>
+<h3 id="81">8.1 赛题对应要求</h3>
+<p>系统需具备完善的"防幻觉"与内容安全过滤机制，确保生成的学术内容无事实性错误、无敏感违规信息。</p>
+<h3 id="82">8.2 实现文件</h3>
+<p><a href="src/agents/validator_node.py"><code>src/agents/validator_node.py</code></a></p>
+<h3 id="83">8.3 算法核心逻辑</h3>
+<p>解决防幻觉深度校验引发的生成延迟长尾问题。构建<strong>双极过滤门控机制</strong>，将文本解耦为"学术事实轨"与"教学表述轨"独立审计，在保障流式极速响应的前提下实施严密事实核查。</p>
+<h3 id="84">8.4 双极门控机制</h3>
+<h4 id="_6">第一极（符号实体与语法树硬匹配门控）</h4>
+<p>利用正则表达式和抽象语法树（AST）静态解析器，优先核对生成文本中的核心技术实体、专用函数和公式：
+- <strong>LaTeX 语法校验</strong>：检测括号配对、命令合法性
+- <strong>Python AST 解析</strong>：代码块语法正确性校验
+- <strong>通过则直接发放通行证</strong> → 内容流式先行上屏展示（不阻塞 UX）</p>
+<h4 id="nli">第二极（带重叠区滑动窗口的异步 NLI 推理）</h4>
+<p>内容上屏的同时，后台启动带 64 Token 重叠区的滑动窗口（256 token 窗口），将文本句法完整切分后送入 NLI 模型，与知识库中的原始参考源 $C_r$ 进行蕴含度度量：</p>
+<p>$$Score(p_j) = P(\text{Entailment} \mid p_j, C_r) + 0.5 \cdot P(\text{Neutral} \mid p_j, C_r) - 2.0 \cdot P(\text{Contradiction} \mid p_j, C_r)$$</p>
+<h4 id="_7">差异化控制与退避</h4>
+<table>
+<thead>
+<tr>
+<th>内容轨道</th>
+<th>校验策略</th>
+<th>阈值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>学术事实轨（公式、参数）</td>
+<td>NLI 严格蕴含度</td>
+<td>$Score \ge 0.85$</td>
+</tr>
+<tr>
+<td>教学表述轨（通俗比喻、修辞）</td>
+<td>放宽至向量相似度</td>
+<td>较低阈值</td>
+</tr>
+</tbody>
+</table>
+<p><strong>幻觉修复流程</strong>：
+1. 触发严重矛盾（Contradiction）→ 前端对该段文本高亮标记"<em>导师正在校准中...</em>"
+2. 后台触发单点微观修正循环（Refinement Loop），最多 3 轮
+3. 超过 3 轮仍未通过 → 提取本地知识库标准预置模版进行字面组装
+4. 对接科大讯飞内容安全审查接口进行合规性硬阻断</p>
+<hr />
+<h2 id="_8">九、底层辅助算法三：冷启动情境探针启发式追问</h2>
+<h3 id="91">9.1 赛题对应要求</h3>
+<p>支持通过自然语言对话自动抽取特征，构建包含不少于 6 个维度的动态学生画像。</p>
+<h3 id="92">9.2 实现文件</h3>
+<p><a href="src/infrastructure/cold_start.py"><code>src/infrastructure/cold_start.py</code></a></p>
+<h3 id="93">9.3 算法核心逻辑</h3>
+<p>攻克冷启动交互阶段因用户发言极短导致的意图稀疏和画像死锁痛点，避免死循环式的机械问卷查户口，并引入贝叶斯先验自适应融合算法实现软着陆。</p>
+<h3 id="94-6">9.4 6 维画像槽位定义</h3>
+<table>
+<thead>
+<tr>
+<th>维度</th>
+<th>字段</th>
+<th>可选值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>认知风格</td>
+<td>cognitive_style</td>
+<td>visual / textual / practical</td>
+</tr>
+<tr>
+<td>学习动机</td>
+<td>motivation</td>
+<td>academic_exam / skill_certification / project_driven / curiosity</td>
+</tr>
+<tr>
+<td>专业背景</td>
+<td>background</td>
+<td>CS / EE / ME / math / physics / biology / business / liberal_arts / other</td>
+</tr>
+<tr>
+<td>学历层次</td>
+<td>education_level</td>
+<td>high_school / bachelor / master / phd / self_taught</td>
+</tr>
+<tr>
+<td>时间预算</td>
+<td>time_budget_hours_per_week</td>
+<td>0.5 ~ 168.0</td>
+</tr>
+<tr>
+<td>已有知识基础</td>
+<td>knowledge_base</td>
+<td>多选 8 类知识领域</td>
+</tr>
+</tbody>
+</table>
+<h3 id="95">9.5 核心状态机转移逻辑</h3>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">handle_cold_start_interaction</span><span class="p">(</span><span class="n">user_input</span><span class="p">,</span> <span class="n">current_state_vector</span><span class="p">):</span>
+    <span class="n">c_epoch</span> <span class="o">+=</span> <span class="mi">1</span>
+
+    <span class="c1"># 1. 调度 Agent 提取 6 维特征槽位</span>
+    <span class="n">extracted_slots</span> <span class="o">=</span> <span class="n">llm_slot_extract</span><span class="p">(</span><span class="n">user_input</span><span class="p">)</span>
+    <span class="n">current_state_vector</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">extracted_slots</span><span class="p">)</span>
+
+    <span class="c1"># 2. 槽位完整 → 触发正式路径规划</span>
+    <span class="k">if</span> <span class="n">filled_slots</span> <span class="o">&gt;=</span> <span class="mi">6</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">&quot;TRIGGER_MAIN_PATH_PLANNING&quot;</span>
+
+    <span class="c1"># 3. 边界干预：3 轮硬上限 → 贝叶斯降级融合</span>
+    <span class="k">if</span> <span class="n">c_epoch</span> <span class="o">&gt;=</span> <span class="mi">3</span><span class="p">:</span>
+        <span class="n">fallback_profile</span> <span class="o">=</span> <span class="n">load_course_baseline_profile</span><span class="p">(</span><span class="n">context_env</span><span class="p">)</span>
+        <span class="n">final_profile</span> <span class="o">=</span> <span class="n">bayesian_blend_profile</span><span class="p">(</span>
+            <span class="n">current_state_vector</span><span class="p">,</span> <span class="n">fallback_profile</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="s2">&quot;FORCE_ENTER_STUDY_STAGE_WITH_BASELINE&quot;</span>
+
+    <span class="c1"># 4. 未达上限 → 下发技术情境探针</span>
+    <span class="k">return</span> <span class="n">generate_next_situation_probe</span><span class="p">(</span><span class="n">current_state_vector</span><span class="p">)</span>
+</code></pre></div>
+
+<h3 id="96">9.6 技术情境探针设计</h3>
+<p>不直接询问维度名称，而是随机下发技术情境：</p>
+<blockquote>
+<p><em>"假设生产服务器数据库变慢了，你倾向于先看生动的动画演示还是直接调试底层伪代码？"</em></p>
+</blockquote>
+<p><strong>单次回答可同时穿透解算 3 个维度</strong>：知识基础、认知风格、易错偏好。未尽的纠偏任务移交给主算法中的 PID 平滑演进算法，在真实互动中逐步显影。</p>
+<h3 id="97">9.7 贝叶斯先验融合</h3>
+<p>当 c_epoch ≥ 3 且槽位未满时，激活贝叶斯降级融合：
+- 使用条件概率表 (CPT) 推断缺失维度：$P(\text{background} \mid \text{cognitive_style})$、$P(\text{education} \mid \text{cognitive_style})$ 等
+- MAP 估计 + 归一化
+- 赋予较高的不确定性方差，在后续学习中逐步修正</p>
+<hr />
+<h2 id="wfq">十、底层辅助算法四：WFQ 特权队列与马尔可夫预测性缓存</h2>
+<h3 id="101">10.1 赛题对应要求</h3>
+<p>多模态资源生成的响应效率需满足实际学习场景需求，提供"生成进度追踪"或"流式呈现"机制，避免长时间白屏等待。</p>
+<h3 id="102">10.2 实现文件</h3>
+<p><a href="src/agents/content_mesh_node.py"><code>src/agents/content_mesh_node.py</code></a></p>
+<h3 id="103">10.3 算法核心逻辑</h3>
+<p>防止多智能体并行生成至少 5 种个性化资源时，大模型高频并发导致底层 API 限流熔断或线程饥饿死锁。采用加权公平调度与马尔可夫拓扑分支预测，在时间轴上执行完美的削峰填谷。</p>
+<h3 id="104-wfq">10.4 带特权门控的加权公平队列（WFQ）</h3>
+<p>系统将并发网格解耦为两个级别的核心队列：</p>
+<table>
+<thead>
+<tr>
+<th>队列</th>
+<th>令牌配额</th>
+<th>服务对象</th>
+<th>延迟目标</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>特权队列</strong></td>
+<td>70%</td>
+<td>前屏骨架展示所需的轻量级流式资源（讲解文档、Mermaid 导图源码）</td>
+<td>1~2 秒</td>
+</tr>
+<tr>
+<td><strong>常规异步队列</strong></td>
+<td>30%</td>
+<td>大长尾、重资产的多模态教学视频、题库、实操案例</td>
+<td>异步加载</td>
+</tr>
+</tbody>
+</table>
+<p><strong>调度策略</strong>：Virtual Finish Time（虚拟完成时间）调度。在任何全局高并发场景下，核心交互文本以流式绝对优先级输出。前端采用流式占位机制（Streaming Card Hydration）渲染带进度条追踪的卡片外壳。</p>
+<h3 id="105">10.5 基于马尔可夫转移矩阵的预测性缓存预生成</h3>
+<p>算法不等待用户点击"下一步"才启动生成。核心机制：</p>
+<ol>
+<li><strong>转移矩阵</strong>：利用全站历史路径转移日志训练轻量级马尔可夫状态转移矩阵</li>
+<li><strong>Top-1 预测</strong>：$P(v \mid u) \propto e^{-2.0 \cdot \text{edge_cost}(u,v)}$</li>
+<li><strong>影子预生成</strong>：利用服务器闲置算力和常规异步队列的 30% 闲置令牌，在后台隐式启动对 $V_{k+1}$ 节点的重型富媒体资源的<strong>影子预生成</strong></li>
+<li><strong>缓存策略</strong>：压入 Redis 局部高速缓存，LRU + TTL 淘汰</li>
+<li><strong>毫秒级弹出</strong>：学生点击切换时，资源卡片从缓存瞬间呈现</li>
+</ol>
+<p><strong>重规划熔断</strong>：一旦 Evaluator 触发全局路径重规划，调度层立即下发高优先级 <code>KILL_JOB</code> 信令，瞬间强行熔断废弃旧路径上的在途生成任务，回收令牌配额。</p>
+<hr />
+<h2 id="agentstate-neo4j-milvus-elasticsearch">十一、数据层架构 —— AgentState / Neo4j / Milvus / Elasticsearch</h2>
+<h3 id="111-agentstate">11.1 全局状态模型 (AgentState)</h3>
+<p><strong>实现文件</strong>: <a href="src/state/agent_state.py"><code>src/state/agent_state.py</code></a></p>
+<p>AgentState 是 LangGraph StateGraph 中流转的完整全局上下文，所有字段通过 Pydantic v2 严格校验。</p>
+<h4 id="1111">11.1.1 状态结构全景</h4>
+<div class="codehilite"><pre><span></span><code><span class="n">AgentState</span>
+<span class="err">├──</span><span class="w"> </span><span class="n">标识字段</span>
+<span class="err">│</span><span class="w">   </span><span class="err">├──</span><span class="w"> </span><span class="nf">user_id</span><span class="err">:</span><span class="w"> </span><span class="nf">str</span>
+<span class="err">│</span><span class="w">   </span><span class="err">├──</span><span class="w"> </span><span class="nl">course_id</span><span class="p">:</span><span class="w"> </span><span class="nf">str</span>
+<span class="err">│</span><span class="w">   </span><span class="err">├──</span><span class="w"> </span><span class="nl">current_node_id</span><span class="p">:</span><span class="w"> </span><span class="n">Optional</span><span class="o">[</span><span class="n">str</span><span class="o">]</span>
+<span class="err">│</span><span class="w">   </span><span class="err">└──</span><span class="w"> </span><span class="nl">target_node_id</span><span class="p">:</span><span class="w"> </span><span class="n">Optional</span><span class="o">[</span><span class="n">str</span><span class="o">]</span>
+<span class="err">├──</span><span class="w"> </span><span class="nl">static_profile</span><span class="p">:</span><span class="w"> </span><span class="n">StaticProfile</span>
+<span class="err">│</span><span class="w">   </span><span class="err">├──</span><span class="w"> </span><span class="nl">cognitive_style_distribution</span><span class="p">:</span><span class="w"> </span><span class="n">CognitiveStyleDistribution</span>
+<span class="err">│</span><span class="w">   </span><span class="err">│</span><span class="w">   </span><span class="err">├──</span><span class="w"> </span><span class="n">visual_alpha</span><span class="o">/</span><span class="n">beta</span><span class="p">,</span><span class="w"> </span><span class="n">textual_alpha</span><span class="o">/</span><span class="n">beta</span><span class="p">,</span><span class="w"> </span><span class="n">practical_alpha</span><span class="o">/</span><span class="n">beta</span>
+<span class="err">│</span><span class="w">   </span><span class="err">├──</span><span class="w"> </span><span class="nl">motivation</span><span class="p">:</span><span class="w"> </span><span class="nf">str</span><span class="w"> </span><span class="p">(</span><span class="n">academic_exam</span><span class="o">|</span><span class="n">skill_certification</span><span class="o">|</span><span class="n">project_driven</span><span class="o">|</span><span class="n">curiosity</span><span class="p">)</span>
+<span class="err">│</span><span class="w">   </span><span class="err">├──</span><span class="w"> </span><span class="nl">time_budget_hours_per_week</span><span class="p">:</span><span class="w"> </span><span class="nc">float</span>
+<span class="err">│</span><span class="w">   </span><span class="err">└──</span><span class="w"> </span><span class="nl">knowledge_base</span><span class="p">:</span><span class="w"> </span><span class="n">List</span><span class="o">[</span><span class="n">str</span><span class="o">]</span>
+<span class="err">├──</span><span class="w"> </span><span class="nl">dynamic_profile</span><span class="p">:</span><span class="w"> </span><span class="n">DynamicProfile</span>
+<span class="err">│</span><span class="w">   </span><span class="err">├──</span><span class="w"> </span><span class="nl">knowledge_mastery</span><span class="p">:</span><span class="w"> </span><span class="n">Dict</span><span class="o">[</span><span class="n">str, float</span><span class="o">]</span>
+<span class="err">│</span><span class="w">   </span><span class="err">├──</span><span class="w"> </span><span class="nl">knowledge_mastery_records</span><span class="p">:</span><span class="w"> </span><span class="n">Dict</span><span class="o">[</span><span class="n">str, KnowledgeMasteryRecord</span><span class="o">]</span>
+<span class="err">│</span><span class="w">   </span><span class="err">├──</span><span class="w"> </span><span class="nl">error_type_distribution</span><span class="p">:</span><span class="w"> </span><span class="n">ErrorTypeDistribution</span>
+<span class="err">│</span><span class="w">   </span><span class="err">│</span><span class="w">   </span><span class="err">├──</span><span class="w"> </span><span class="n">logic_flaw</span><span class="p">,</span><span class="w"> </span><span class="n">syntax_error</span><span class="p">,</span><span class="w"> </span><span class="n">boundary_miss</span>
+<span class="err">│</span><span class="w">   </span><span class="err">├──</span><span class="w"> </span><span class="nl">continuous_fail_counter</span><span class="p">:</span><span class="w"> </span><span class="nc">int</span>
+<span class="err">│</span><span class="w">   </span><span class="err">├──</span><span class="w"> </span><span class="nl">pid_errors</span><span class="p">:</span><span class="w"> </span><span class="n">Dict</span><span class="o">[</span><span class="n">str, PIDErrorRecord</span><span class="o">]</span>
+<span class="err">│</span><span class="w">   </span><span class="err">├──</span><span class="w"> </span><span class="nl">capability_radar</span><span class="p">:</span><span class="w"> </span><span class="n">List</span><span class="o">[</span><span class="n">float</span><span class="o">]</span><span class="w"> </span><span class="p">(</span><span class="mi">5</span><span class="n">维</span><span class="p">)</span>
+<span class="err">│</span><span class="w">   </span><span class="err">├──</span><span class="w"> </span><span class="nl">diagnostic_report_md</span><span class="p">:</span><span class="w"> </span><span class="nf">str</span>
+<span class="err">│</span><span class="w">   </span><span class="err">└──</span><span class="w"> </span><span class="nl">boundary_miss_ema_sequence</span><span class="p">:</span><span class="w"> </span><span class="n">List</span><span class="o">[</span><span class="n">float</span><span class="o">]</span>
+<span class="err">├──</span><span class="w"> </span><span class="nl">active_path</span><span class="p">:</span><span class="w"> </span><span class="n">List</span><span class="o">[</span><span class="n">str</span><span class="o">]</span>
+<span class="err">├──</span><span class="w"> </span><span class="nl">generated_resources</span><span class="p">:</span><span class="w"> </span><span class="n">Dict</span><span class="o">[</span><span class="n">str, List[ResourceCard</span><span class="o">]</span><span class="err">]</span>
+<span class="err">├──</span><span class="w"> </span><span class="nl">latest_behavior</span><span class="p">:</span><span class="w"> </span><span class="n">Optional</span><span class="o">[</span><span class="n">LatestBehavior</span><span class="o">]</span>
+<span class="err">├──</span><span class="w"> </span><span class="nl">c_epoch</span><span class="p">:</span><span class="w"> </span><span class="nc">int</span>
+<span class="err">├──</span><span class="w"> </span><span class="nl">re_plan_triggered</span><span class="p">:</span><span class="w"> </span><span class="n">bool</span>
+<span class="err">├──</span><span class="w"> </span><span class="nl">pedagogical_strategy</span><span class="p">:</span><span class="w"> </span><span class="nf">str</span>
+<span class="err">├──</span><span class="w"> </span><span class="nl">recommended_resource_style</span><span class="p">:</span><span class="w"> </span><span class="n">Optional</span><span class="o">[</span><span class="n">str</span><span class="o">]</span>
+<span class="err">├──</span><span class="w"> </span><span class="nl">tutor_response</span><span class="p">:</span><span class="w"> </span><span class="n">Optional</span><span class="o">[</span><span class="n">Dict</span><span class="o">]</span>
+<span class="err">├──</span><span class="w"> </span><span class="nl">errors</span><span class="p">:</span><span class="w"> </span><span class="n">List</span><span class="o">[</span><span class="n">str</span><span class="o">]</span>
+<span class="err">├──</span><span class="w"> </span><span class="nl">internal_state</span><span class="p">:</span><span class="w"> </span><span class="n">Dict</span><span class="o">[</span><span class="n">str, Any</span><span class="o">]</span>
+<span class="err">├──</span><span class="w"> </span><span class="nl">session_start</span><span class="p">:</span><span class="w"> </span><span class="nf">str</span>
+<span class="err">└──</span><span class="w"> </span><span class="nl">iteration</span><span class="p">:</span><span class="w"> </span><span class="nc">int</span>
+</code></pre></div>
+
+<h4 id="1112">11.1.2 关键子结构</h4>
+<p><strong>LatestBehavior</strong> — 最近交互行为数据包：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">LatestBehavior</span><span class="p">(</span><span class="n">BaseModel</span><span class="p">):</span>
+    <span class="n">node_id</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>
+    <span class="n">correctness</span><span class="p">:</span> <span class="nb">float</span>        <span class="c1"># 答题正确率 [0, 1]</span>
+    <span class="n">time_spent_ratio</span><span class="p">:</span> <span class="nb">float</span>    <span class="c1"># 实际/预估耗时比</span>
+    <span class="n">error_types</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>     <span class="c1"># 本次错误类型</span>
+    <span class="n">resource_feedback</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span>  <span class="c1"># 资源评分 (1-5)</span>
+    <span class="n">help_request_count</span><span class="p">:</span> <span class="nb">int</span>    <span class="c1"># 求助次数</span>
+    <span class="c1"># 加分项扩展</span>
+    <span class="n">tutor_query</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>  <span class="c1"># Tutor答疑提问</span>
+    <span class="n">accuracy_rate</span><span class="p">:</span> <span class="nb">float</span>       <span class="c1"># 正确率</span>
+    <span class="n">code_pass_rate</span><span class="p">:</span> <span class="nb">float</span>      <span class="c1"># 代码通过率</span>
+    <span class="n">duration_ratio</span><span class="p">:</span> <span class="nb">float</span>      <span class="c1"># 耗时比率</span>
+</code></pre></div>
+
+<p><strong>ResourceCard</strong> — 多模态资源卡片：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">ResourceCard</span><span class="p">(</span><span class="n">BaseModel</span><span class="p">):</span>
+    <span class="n">resource_id</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">node_id</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">card_type</span><span class="p">:</span> <span class="nb">str</span>  <span class="c1"># concept_map|code_snippet|interactive_exercise|video_summary|diagnostic_quiz</span>
+    <span class="n">content</span><span class="p">:</span> <span class="nb">str</span>     <span class="c1"># Markdown 格式</span>
+    <span class="n">difficulty</span><span class="p">:</span> <span class="nb">float</span>
+    <span class="n">cognitive_style</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">parent_chunk_id</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>
+</code></pre></div>
+
+<h3 id="112-neo4j">11.2 Neo4j 知识图谱</h3>
+<p><strong>实现文件</strong>: <a href="src/graph/neo4j_client.py"><code>src/graph/neo4j_client.py</code></a></p>
+<ul>
+<li><strong>KnowledgeNode</strong>：node_id, title, difficulty, estimated_hours, category, metadata</li>
+<li><strong>PREREQUISITE 关系</strong>：dependency_type (strict/recommended/optional), weight</li>
+<li><strong>MASTERED 关系</strong>：mastery score, timestamp（MERGE 语义，upsert）</li>
+<li><strong>子图提取</strong>：K-hop 邻域查询，支持上游/下游/双向</li>
+</ul>
+<h3 id="113-milvus">11.3 Milvus 向量数据库</h3>
+<p><strong>实现文件</strong>: <a href="src/vector/milvus_client.py"><code>src/vector/milvus_client.py</code></a></p>
+<table>
+<thead>
+<tr>
+<th>集合</th>
+<th>用途</th>
+<th>块大小</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Parent Collection</td>
+<td>大上下文块，提供完整学术语境</td>
+<td>1000-2000 tokens</td>
+</tr>
+<tr>
+<td>Child Collection</td>
+<td>小粒度块，高召回率向量检索</td>
+<td>250-500 tokens</td>
+</tr>
+<tr>
+<td>Video Slice Collection</td>
+<td>教学视频时序帧嵌入</td>
+<td>按视频切片</td>
+</tr>
+</tbody>
+</table>
+<p><strong>检索链路</strong>：Child ANN → 收集 parent_ids → Parent Lookup → 合并上下文 → 注入 LLM</p>
+<h3 id="114-elasticsearch">11.4 Elasticsearch 知识库</h3>
+<p><strong>实现文件</strong>: <a href="src/vector/elasticsearch_knowledge_base.py"><code>src/vector/elasticsearch_knowledge_base.py</code></a></p>
+<ul>
+<li><strong>索引映射</strong>：dense_vector (HNSW cosine) + text fields</li>
+<li><strong>混合检索</strong>：BM25 + HNSW → RRF 融合 (k=60)</li>
+<li><strong>字段加权</strong>：content^4, title_path^3, headers^2</li>
+<li><strong>分块器</strong>：MarkdownHeaderTextSplitter + 代码围栏保护 + 自然边界检测</li>
+<li><strong>双嵌入器</strong>：HashingTextEmbedder + SentenceTransformerEmbedder</li>
+</ul>
+<hr />
+<h2 id="llm">十二、LLM 集成层 —— 双后端大模型统一客户端</h2>
+<h3 id="121">12.1 实现文件</h3>
+<p><a href="src/llm/client.py"><code>src/llm/client.py</code></a></p>
+<h3 id="122">12.2 双后端架构</h3>
+<table>
+<thead>
+<tr>
+<th>后端</th>
+<th>提供商</th>
+<th>协议</th>
+<th>认证方式</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DashScope</td>
+<td>阿里云 (Qwen)</td>
+<td>OpenAI 兼容 REST API (<code>/chat/completions</code>)</td>
+<td>Bearer Token</td>
+</tr>
+<tr>
+<td>iFlyTek Spark</td>
+<td>讯飞星火 v4.0</td>
+<td>WebSocket → HTTP 代理</td>
+<td>HMAC-SHA256 (app_id + api_key + api_secret)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="123-llmclient">12.3 LLMClient 统一接口</h3>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">LLMClient</span><span class="p">:</span>
+    <span class="c1"># Content Mesh 注入</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">generate_content</span><span class="p">(</span><span class="n">node_id</span><span class="p">,</span> <span class="n">card_type</span><span class="p">,</span> <span class="n">difficulty</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span>
+
+    <span class="c1"># Tutor (text track) 注入</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">generate_academic_explanation</span><span class="p">(</span><span class="n">query</span><span class="p">,</span> <span class="n">reference_chunks</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span>
+
+    <span class="c1"># Tutor (diagram track) 注入</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">generate_mermaid_graph</span><span class="p">(</span><span class="n">query</span><span class="p">,</span> <span class="n">text_explanation</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span>
+
+    <span class="c1"># Validator (Pole-2) 注入</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">compute_nli_entailment</span><span class="p">(</span><span class="n">text</span><span class="p">,</span> <span class="n">ground_truth</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span>
+</code></pre></div>
+
+<h3 id="124">12.4 注入机制</h3>
+<p>通过 <code>EduAgentGraph.inject_llm()</code> 方法将 LLMClient 统一注入到各 Agent Node：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">inject_llm</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">llm_client</span><span class="p">):</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">_tutor</span> <span class="o">=</span> <span class="n">TutorAgentNode</span><span class="p">(</span>
+        <span class="n">milvus_client</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="n">llm_generator</span><span class="o">=</span><span class="n">llm_client</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">_mesh</span> <span class="o">=</span> <span class="n">ContentMeshNode</span><span class="p">(</span>
+        <span class="n">generate_fn</span><span class="o">=</span><span class="n">llm_client</span><span class="o">.</span><span class="n">generate_content</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">_validator</span> <span class="o">=</span> <span class="n">ValidatorNode</span><span class="p">(</span>
+        <span class="n">nli_fn</span><span class="o">=</span><span class="n">llm_client</span><span class="o">.</span><span class="n">compute_nli_entailment</span><span class="p">,</span>
+    <span class="p">)</span>
+</code></pre></div>
+
+<hr />
+<h2 id="tutor-agent">十三、加分项一：Tutor Agent —— 三轨多模态智能辅导</h2>
+<h3 id="131">13.1 实现文件</h3>
+<p><a href="src/agents/tutor_node.py"><code>src/agents/tutor_node.py</code></a></p>
+<h3 id="132">13.2 触发条件</h3>
+<p>当 <code>AgentState.latest_behavior.tutor_query</code> 非空时，LangGraph 条件边自动路由到 Tutor Node。</p>
+<h3 id="133">13.3 三轨答疑架构</h3>
+<table>
+<thead>
+<tr>
+<th>轨道</th>
+<th>内容</th>
+<th>数据源</th>
+<th>输出格式</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Text Track</strong></td>
+<td>学术概念解释</td>
+<td>Milvus Parent Chunk 检索 + LLM 生成</td>
+<td>Markdown 文本</td>
+</tr>
+<tr>
+<td><strong>Mermaid Diagram Track</strong></td>
+<td>知识关系可视化</td>
+<td>LLM 生成 Mermaid <code>graph TD</code> 源码</td>
+<td>Mermaid 语法</td>
+</tr>
+<tr>
+<td><strong>Video Hydration Track</strong></td>
+<td>时序视频片段推荐</td>
+<td>Milvus Video Slice Collection 时序滑动窗口相似度搜索</td>
+<td>视频片段元数据</td>
+</tr>
+</tbody>
+</table>
+<h3 id="134-mermaidsyntaxguard">13.4 MermaidSyntaxGuard</h3>
+<p>Tutor Node 内建 Mermaid 语法守护：
+- 自动修复未闭合括号 <code>[</code> → <code>]</code>、<code>(</code> → <code>)</code>
+- 过滤非法控制字符
+- 补全缺失的 <code>graph TD</code> 声明</p>
+<hr />
+<h2 id="assessment-node-ema">十四、加分项二：Assessment Node —— EMA 能力雷达与迟滞环策略</h2>
+<h3 id="141">14.1 实现文件</h3>
+<p><a href="src/agents/assessment_node.py"><code>src/agents/assessment_node.py</code></a></p>
+<h3 id="142-5">14.2 5 维能力雷达</h3>
+<table>
+<thead>
+<tr>
+<th>维度</th>
+<th>指标</th>
+<th>更新方式</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>概念理解力</td>
+<td>concept_understanding</td>
+<td>EMA (α=0.2)</td>
+</tr>
+<tr>
+<td>代码工程力</td>
+<td>code_engineering</td>
+<td>EMA (α=0.2)</td>
+</tr>
+<tr>
+<td>逻辑推理力</td>
+<td>logical_reasoning</td>
+<td>EMA (α=0.2)</td>
+</tr>
+<tr>
+<td>错题抗挫力</td>
+<td>error_resilience</td>
+<td>EMA (α=0.2)</td>
+</tr>
+<tr>
+<td>时间管理力</td>
+<td>time_management</td>
+<td>EMA (α=0.2)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="143">14.3 迟滞环策略控制器</h3>
+<p>双阈值带设计（$T_{\text{low}} = 0.40$，$T_{\text{high}} = 0.75$），防止策略频繁抖动：</p>
+<table>
+<thead>
+<tr>
+<th>当前状态</th>
+<th>触发条件</th>
+<th>目标状态</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>STANDARD_PATH</td>
+<td>$A_{\text{mix}} &lt; 0.40$ AND $C_{\text{fail}} \ge 2$</td>
+<td>SCAFFOLD_HELP</td>
+</tr>
+<tr>
+<td>STANDARD_PATH</td>
+<td>boundary_miss EMA 连续 3 次上升</td>
+<td>EDGE_CASE_DRILL</td>
+</tr>
+<tr>
+<td>SCAFFOLD_HELP</td>
+<td>$A_{\text{mix}} &gt; 0.75$</td>
+<td>STANDARD_PATH</td>
+</tr>
+<tr>
+<td>EDGE_CASE_DRILL</td>
+<td>$A_{\text{mix}} &gt; 0.75$</td>
+<td>STANDARD_PATH</td>
+</tr>
+</tbody>
+</table>
+<h3 id="144">14.4 诊断报告</h3>
+<p>自动生成 Markdown 格式《多维度综合评估诊断报告》，包含：
+- 各维度能力评估
+- 学习策略建议
+- 薄弱环节标识</p>
+<hr />
+<h2 id="_9">十五、测试体系与质量保障</h2>
+<h3 id="151">15.1 测试文件地图</h3>
+<table>
+<thead>
+<tr>
+<th>测试文件</th>
+<th>测试对象</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="tests/test_e2e_integration.py"><code>tests/test_e2e_integration.py</code></a></td>
+<td>端到端集成测试（10 阶段完整流程）</td>
+</tr>
+<tr>
+<td><a href="tests/test_evaluator_node.py"><code>tests/test_evaluator_node.py</code></a></td>
+<td>Evaluator Node 单元测试</td>
+</tr>
+<tr>
+<td><a href="tests/test_profiler_node.py"><code>tests/test_profiler_node.py</code></a></td>
+<td>Profiler Node 单元测试</td>
+</tr>
+<tr>
+<td><a href="tests/test_planner_node.py"><code>tests/test_planner_node.py</code></a></td>
+<td>Planner Node 单元测试</td>
+</tr>
+<tr>
+<td><a href="tests/test_tutor_node.py"><code>tests/test_tutor_node.py</code></a></td>
+<td>Tutor Node 单元测试</td>
+</tr>
+<tr>
+<td><a href="tests/test_assessment_node.py"><code>tests/test_assessment_node.py</code></a></td>
+<td>Assessment Node 单元测试</td>
+</tr>
+<tr>
+<td><a href="tests/test_path_planner.py"><code>tests/test_path_planner.py</code></a></td>
+<td>PathPlanner 基础设施测试</td>
+</tr>
+<tr>
+<td><a href="tests/test_pid_controller.py"><code>tests/test_pid_controller.py</code></a></td>
+<td>PIDController 基础设施测试</td>
+</tr>
+<tr>
+<td><a href="tests/test_cold_start.py"><code>tests/test_cold_start.py</code></a></td>
+<td>冷启动引擎测试</td>
+</tr>
+<tr>
+<td><a href="tests/test_document_chunker.py"><code>tests/test_document_chunker.py</code></a></td>
+<td>文档切片器测试</td>
+</tr>
+<tr>
+<td><a href="tests/test_graph_builder.py"><code>tests/test_graph_builder.py</code></a></td>
+<td>图谱构建器测试</td>
+</tr>
+<tr>
+<td><a href="tests/test_elasticsearch_knowledge_base.py"><code>tests/test_elasticsearch_knowledge_base.py</code></a></td>
+<td>ES 知识库测试</td>
+</tr>
+<tr>
+<td><a href="tests/test_e2e_live_llm.py"><code>tests/test_e2e_live_llm.py</code></a></td>
+<td>真实 LLM 集成测试（需 API Key）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="152-e2e-10">15.2 E2E 集成测试覆盖的 10 个阶段</h3>
+<div class="codehilite"><pre><span></span><code>Phase 1:  冷启动画像采集
+Phase 2:  正常学习交互
+Phase 3:  作弊检测（高正确率 + 短时间）
+Phase 4:  PID 阻尼防震荡
+Phase 5:  C_fail 累积（连续失败 ≥ 3）
+Phase 6:  硬切换干预触发
+Phase 7:  全局重寻路触发
+Phase 8:  资源卡片生成
+Phase 9:  Validator 防幻觉校验
+Phase 10: 收敛检测（mastery ≥ 0.85）
+</code></pre></div>
+
+<hr />
+<h2 id="_10">十六、附录：完整文件目录映射</h2>
+<div class="codehilite"><pre><span></span><code>EduAgent/
+│
+├── algorithm_design.md                     # 本文档 — 核心技术规范
+├── DataStructures.md                       # 数据结构课程知识库 (1.17 MB)
+├── requirements.txt                        # Python 依赖清单
+│
+├── scripts/
+│   └── ingest_data_structure_kb.py         # ES 知识库数据注入脚本
+│
+├── src/
+│   ├── orchestration.py                    # LangGraph 主编排器 + 冷启动编排器
+│   │
+│   ├── state/
+│   │   ├── __init__.py                     # 导出 AgentState 及所有子模型
+│   │   └── agent_state.py                  # Pydantic v2 全局状态定义 (含 10+ 子结构)
+│   │
+│   ├── llm/
+│   │   ├── __init__.py                     # 导出 LLMClient, LLMConfig, Provider
+│   │   └── client.py                       # 双后端 LLM (DashScope Qwen + 讯飞星火 Spark)
+│   │
+│   ├── agents/
+│   │   ├── __init__.py                     # 导出全部 7 个 Agent Node
+│   │   ├── evaluator_node.py               # 行为清洗 + PID评估 + 重寻路闸门
+│   │   ├── profiler_node.py                # MAB汤普森采样 + 艾宾浩斯遗忘曲线
+│   │   ├── planner_node.py                 # Neo4j DAG-Dijkstra 路径规划
+│   │   ├── tutor_node.py                   # 三轨多模态智能辅导 (加分项)
+│   │   ├── content_mesh_node.py            # WFQ调度 + 5类资源卡片 + 马尔可夫预生成
+│   │   ├── validator_node.py               # 双极防幻觉校验 (AST/LaTeX + NLI)
+│   │   └── assessment_node.py              # EMA能力雷达 + 迟滞环策略 (加分项)
+│   │
+│   ├── graph/
+│   │   ├── __init__.py
+│   │   └── neo4j_client.py                 # Neo4j CRUD + Cypher + 子图提取
+│   │
+│   ├── infrastructure/
+│   │   ├── __init__.py                     # 导出全部基础设施服务
+│   │   ├── pid_controller.py               # 工业级PID (抗饱和+无扰切换+自适应增益)
+│   │   ├── path_planner.py                 # Kahn拓扑排序 + DAG-SSSP (4种策略)
+│   │   ├── cold_start.py                   # 6维情境探针 + 贝叶斯先验融合
+│   │   ├── document_chunker.py             # Layout-Aware 版面感知父子块切片
+│   │   └── graph_builder.py                # Tarjan SCC + 传递闭包剪枝
+│   │
+│   └── vector/
+│       ├── __init__.py
+│       ├── milvus_client.py                # Parent-Child 双层向量检索
+│       └── elasticsearch_knowledge_base.py # BM25 + HNSW + RRF 混合检索
+│
+├── tests/
+│   ├── test_e2e_integration.py             # 主端到端集成测试 (10阶段)
+│   ├── test_evaluator_node.py
+│   ├── test_profiler_node.py
+│   ├── test_planner_node.py
+│   ├── test_tutor_node.py
+│   ├── test_assessment_node.py
+│   ├── test_path_planner.py
+│   ├── test_pid_controller.py
+│   ├── test_cold_start.py
+│   ├── test_document_chunker.py
+│   ├── test_graph_builder.py
+│   ├── test_elasticsearch_knowledge_base.py
+│   └── test_e2e_live_llm.py
+│
+└── venv/                                   # Python 虚拟环境
+</code></pre></div>
+
+<hr />
+<h2 id="_11">算法复杂度汇总</h2>
+<table>
+<thead>
+<tr>
+<th>算法</th>
+<th>实现文件</th>
+<th>时间复杂度</th>
+<th>空间复杂度</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Kahn 拓扑排序</td>
+<td><code>path_planner.py</code></td>
+<td>$O(V+E)$</td>
+<td>$O(V)$</td>
+</tr>
+<tr>
+<td>DAG-SSSP</td>
+<td><code>path_planner.py</code></td>
+<td>$O(V+E)$</td>
+<td>$O(V)$</td>
+</tr>
+<tr>
+<td>Tarjan SCC</td>
+<td><code>graph_builder.py</code></td>
+<td>$O(V+E)$</td>
+<td>$O(V)$</td>
+</tr>
+<tr>
+<td>传递闭包剪枝</td>
+<td><code>graph_builder.py</code></td>
+<td>$O(V \cdot (V+E))$</td>
+<td>$O(V^2)$</td>
+</tr>
+<tr>
+<td>汤普森采样</td>
+<td><code>profiler_node.py</code></td>
+<td>$O(K)$ (K=臂数)</td>
+<td>$O(K)$</td>
+</tr>
+<tr>
+<td>PID step</td>
+<td><code>pid_controller.py</code></td>
+<td>$O(1)$</td>
+<td>$O(1)$ per node</td>
+</tr>
+<tr>
+<td>RRF 融合</td>
+<td><code>elasticsearch_knowledge_base.py</code></td>
+<td>$O(N \log N)$</td>
+<td>$O(N)$</td>
+</tr>
+<tr>
+<td>滑动窗口 NLI</td>
+<td><code>validator_node.py</code></td>
+<td>$O(W)$ (W=窗口数)</td>
+<td>$O(W)$</td>
+</tr>
+<tr>
+<td>EMA 更新</td>
+<td><code>assessment_node.py</code></td>
+<td>$O(1)$ per dim</td>
+<td>$O(1)$</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<blockquote>
+<p><strong>文档版本</strong>: v2.0<br />
+<strong>最后更新</strong>: 2026-06-13<br />
+<strong>项目仓库</strong>: https://github.com/Joel-Ellen/ZXXC<br />
+<strong>许可证</strong>: 本文档随 EduAgent 项目一同发布。</p>
+</blockquote>
+</body>
+</html>
