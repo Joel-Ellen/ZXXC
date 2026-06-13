@@ -6,7 +6,7 @@ LangGraph 全局网络编排 — 多智能体协同系统主控图
 将全部 Agent Node 通过 StateGraph(AgentState) 进行有向图连接，
 配置条件边逻辑实现智能路由。
 
-多智能体协同网络:
+多智能体协同网络 (含加分项 Tutor + Assessment):
     ┌──────────┐
     │  START   │
     └────┬─────┘
@@ -28,12 +28,24 @@ LangGraph 全局网络编排 — 多智能体协同系统主控图
     │  Planner      │ ← DAG-Dijkstra 路径规划
     └────┬──────────┘
          │
+    ┌────▼──────────┐   (has tutor_query?)
+    │ ┌──────────┐  │──────────────────────┐
+    │ │Condition │  │                      │
+    │ │  Edge    │  │───→ Tutor ──────────┘
+    │ └──────────┘  │   (no query)
+    │                │───→ Content Mesh
+    └────────────────┘
+         │
     ┌────▼──────────┐
     │ Content Mesh  │ ← WFQ 调度 + 资源生成
     └────┬──────────┘
          │
     ┌────▼──────────┐
     │  Validator    │ ← 双极防幻觉校验
+    └────┬──────────┘
+         │
+    ┌────▼──────────┐
+    │  Assessment   │ ← EMA 能力雷达 + 迟滞环策略决策
     └────┬──────────┘
          │
     ┌────▼──────────┐   (re_plan_triggered=True)
@@ -49,7 +61,7 @@ LangGraph 全局网络编排 — 多智能体协同系统主控图
   AI 辅助编码工具：科大讯飞 iFlyCode / 星火大模型辅助生成。
 """
 
-from typing import Dict, Any, Optional, Literal
+from typing import Dict, Any, Optional, Literal, Tuple
 
 from .state.agent_state import AgentState
 from .agents.evaluator_node import (
@@ -61,11 +73,17 @@ from .agents.profiler_node import (
 from .agents.planner_node import (
     PlannerNode, PlannerInput,
 )
+from .agents.tutor_node import (
+    TutorAgentNode, TutorInput,
+)
 from .agents.content_mesh_node import (
     ContentMeshNode, MeshInput,
 )
 from .agents.validator_node import (
     ValidatorNode, ValidatorInput,
+)
+from .agents.assessment_node import (
+    AssessmentReporterNode, AssessmentInput,
 )
 from .infrastructure.cold_start import (
     handle_cold_start_interaction,
@@ -81,28 +99,79 @@ class EduAgentGraph:
 
     使用方式:
         >>> orchestrator = EduAgentGraph()
+        >>> # 注入真实 LLM
+        >>> from src.llm import create_llm_client_from_env
+        >>> llm = create_llm_client_from_env()
+        >>> orchestrator.inject_llm(llm)
         >>> orchestrator.build()
         >>> result = orchestrator.run(initial_state)
     """
 
     def __init__(self) -> None:
         self._graph: Any = None
+        self._llm_client: Any = None
         self._evaluator = EvaluatorNode()
         self._profiler = ProfilerNode()
         self._planner = PlannerNode()
+        self._tutor = TutorAgentNode()
         self._mesh = ContentMeshNode()
         self._validator = ValidatorNode()
+        self._assessment = AssessmentReporterNode()
 
     @property
     def graph(self) -> Any:
         return self._graph
 
     # ------------------------------------------------------------------
+    # LLM 注入
+    # ------------------------------------------------------------------
+
+    def inject_llm(self, llm_client: Any) -> "EduAgentGraph":
+        """注入真实大模型客户端，替换所有 Agent Node 中的 Mock 实现。
+
+        注入的接口方法（LLMClient 需实现）:
+          - generate_content(node_id, card_type, difficulty) -> str
+          - generate_academic_explanation(query, reference_chunks) -> str
+          - generate_mermaid_graph(query, text_explanation) -> str
+          - compute_nli_entailment(text, ground_truth) -> float
+
+        Args:
+            llm_client: LLMClient 实例。
+
+        Returns:
+            self（支持链式调用）。
+        """
+        self._llm_client = llm_client
+
+        # Tutor: 注入 LLM 生成器
+        self._tutor = TutorAgentNode(
+            milvus_client=None,
+            llm_generator=llm_client,
+        )
+
+        # ContentMesh: 注入内容生成函数
+        self._mesh = ContentMeshNode(
+            generate_fn=llm_client.generate_content,
+        )
+
+        # Validator: 注入 NLI 评分函数
+        self._validator = ValidatorNode(
+            nli_fn=llm_client.compute_nli_entailment,
+        )
+
+        return self
+
+    # ------------------------------------------------------------------
     # 图构建
     # ------------------------------------------------------------------
 
     def build(self) -> None:
-        """构建 LangGraph StateGraph 并配置全部节点与条件边。"""
+        """构建 LangGraph StateGraph 并配置全部节点与条件边。
+
+        含加分项节点:
+          - Tutor:  智能辅导答疑（条件触发）
+          - Assessment: 学习效果评估与策略自适应
+        """
         try:
             from langgraph.graph import StateGraph, END
         except ImportError:
@@ -113,12 +182,14 @@ class EduAgentGraph:
         # 创建 StateGraph
         self._graph = StateGraph(AgentState)
 
-        # ---- 注册节点 ----
+        # ---- 注册节点 (含加分项) ----
         self._graph.add_node("evaluator", self._evaluator_node_wrapper)
         self._graph.add_node("profiler", self._profiler_node_wrapper)
         self._graph.add_node("planner", self._planner_node_wrapper)
+        self._graph.add_node("tutor", self._tutor_node_wrapper)
         self._graph.add_node("content_mesh", self._content_mesh_node_wrapper)
         self._graph.add_node("validator", self._validator_node_wrapper)
+        self._graph.add_node("assessment", self._assessment_node_wrapper)
 
         # ---- 设置入口 ----
         self._graph.set_entry_point("evaluator")
@@ -126,12 +197,28 @@ class EduAgentGraph:
         # ---- 普通边 ----
         self._graph.add_edge("evaluator", "profiler")
         self._graph.add_edge("profiler", "planner")
-        self._graph.add_edge("planner", "content_mesh")
+
+        # ---- 条件边: 智能辅导答疑（按需触发） ----
+        self._graph.add_conditional_edges(
+            "planner",
+            self._tutor_routing,
+            {
+                "tutor": "tutor",            # 有答疑请求 → 先走 Tutor
+                "content_mesh": "content_mesh",  # 无答疑请求 → 直接生成资源
+            },
+        )
+        # Tutor 执行完毕后汇入 Content Mesh
+        self._graph.add_edge("tutor", "content_mesh")
+
+        # ---- 普通边 ----
         self._graph.add_edge("content_mesh", "validator")
 
-        # ---- 条件边: 基于 re_plan_triggered 的路由 ----
+        # ---- Assessment 在 Validator 之后，最终路由之前 ----
+        self._graph.add_edge("validator", "assessment")
+
+        # ---- 条件边: 基于 re_plan_triggered 的路由（从 Assessment 出发） ----
         self._graph.add_conditional_edges(
-            "validator",
+            "assessment",
             self._route_decision,
             {
                 "replan": "planner",      # 触发重寻路 → 回到 Planner
@@ -267,6 +354,42 @@ class EduAgentGraph:
         )
         output = self._validator(inp)
         return output.agent_state
+
+    def _tutor_node_wrapper(self, state: AgentState) -> AgentState:
+        """Tutor Agent Node 的 LangGraph 适配器（加分项）。
+
+        仅在 AgentState 的 latest_behavior.tutor_query 非空时被触发。
+        """
+        inp = TutorInput(agent_state=state)
+        output = self._tutor(inp)
+        return output.agent_state
+
+    def _assessment_node_wrapper(self, state: AgentState) -> AgentState:
+        """Assessment Reporter Node 的 LangGraph 适配器（加分项）。
+
+        在 Validator 之后执行，产出能力雷达评估报告并更新教学策略。
+        """
+        inp = AssessmentInput(agent_state=state)
+        output = self._assessment(inp)
+        return output.agent_state
+
+    # ------------------------------------------------------------------
+    # 条件路由
+    # ------------------------------------------------------------------
+
+    def _tutor_routing(
+        self, state: AgentState
+    ) -> Literal["tutor", "content_mesh"]:
+        """判断是否需要触发智能辅导答疑。
+
+        Returns:
+            - "tutor": latest_behavior.tutor_query 非空 → 先答疑
+            - "content_mesh": 无需答疑 → 直接进入资源生成
+        """
+        lb = state.latest_behavior
+        if lb and getattr(lb, "tutor_query", None):
+            return "tutor"
+        return "content_mesh"
 
     # ------------------------------------------------------------------
     # 运行入口

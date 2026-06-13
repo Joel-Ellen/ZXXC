@@ -16,6 +16,15 @@ from .milvus_client import (
     ChildChunk,
     ChunkSearchResult,
 )
+from .elasticsearch_knowledge_base import (
+    ElasticsearchKnowledgeBaseClient,
+    ElasticsearchKnowledgeBaseConfig,
+    ElasticsearchKnowledgeBasePipeline,
+    HashingTextEmbedder,
+    KnowledgeBaseChunk,
+    MarkdownKnowledgeBaseChunker,
+    SentenceTransformerEmbedder,
+)
 
 __all__ = [
     "MilvusClient",
@@ -24,4 +33,11 @@ __all__ = [
     "ParentChunk",
     "ChildChunk",
     "ChunkSearchResult",
+    "ElasticsearchKnowledgeBaseClient",
+    "ElasticsearchKnowledgeBaseConfig",
+    "ElasticsearchKnowledgeBasePipeline",
+    "HashingTextEmbedder",
+    "KnowledgeBaseChunk",
+    "MarkdownKnowledgeBaseChunker",
+    "SentenceTransformerEmbedder",
 ]

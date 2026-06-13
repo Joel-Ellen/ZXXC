@@ -134,7 +134,11 @@ class PIDErrorRecord(BaseModel):
 
 
 class DynamicProfile(BaseModel):
-    """用户动态画像 — 随每次交互实时更新。"""
+    """用户动态画像 — 随每次交互实时更新。
+
+    包含学习效果评估 (Assessment) 加分项所需的 5 维长效能力向量
+    与诊断报告字段。
+    """
 
     knowledge_mastery: Dict[str, float] = Field(
         default_factory=dict,
@@ -157,6 +161,23 @@ class DynamicProfile(BaseModel):
         description="Key=node_id, Value=该知识点的 PID 误差状态"
     )
 
+    # ---- 加分项扩展字段 (Assessment Node) ----
+    capability_radar: List[float] = Field(
+        default_factory=lambda: [0.5, 0.5, 0.5, 0.5, 0.5],
+        description=(
+            "5 维长期能力向量 [概念理解力, 代码工程力, 逻辑推理力, "
+            "错题抗挫力, 时间管理力]，通过 EMA 平滑更新 (学习评估加分项)"
+        )
+    )
+    diagnostic_report_md: str = Field(
+        default="",
+        description="最近一次生成的 Markdown 格式《多维度综合评估诊断报告》 (学习评估加分项)"
+    )
+    boundary_miss_ema_sequence: List[float] = Field(
+        default_factory=list,
+        description="边界遗漏 EMA 历史序列，用于检测连续走高趋势 (学习评估加分项)"
+    )
+
 
 # ---------------------------------------------------------------------------
 # 行为流子结构
@@ -166,6 +187,8 @@ class LatestBehavior(BaseModel):
     """最近一次交互的行为统计数据包。
 
     Planner/Generator 节点读取此结构以决定路径调整与内容重生成策略。
+    支持智能辅导 (Tutor Agent) 与学习评估 (Assessment) 加分项所需的
+    扩展字段。
     """
 
     node_id: Optional[str] = Field(default=None, description="关联的知识点 ID")
@@ -180,6 +203,24 @@ class LatestBehavior(BaseModel):
     timestamp: str = Field(
         default_factory=lambda: datetime.utcnow().isoformat(),
         description="ISO 时间戳"
+    )
+
+    # ---- 加分项扩展字段 ----
+    tutor_query: Optional[str] = Field(
+        default=None,
+        description="学生在 Tutor Agent 中输入的答疑提问文本 (智能辅导加分项)"
+    )
+    accuracy_rate: float = Field(
+        default=0.5, ge=0.0, le=1.0,
+        description="本轮答题正确率 (学习评估加分项)"
+    )
+    code_pass_rate: float = Field(
+        default=0.5, ge=0.0, le=1.0,
+        description="本轮代码通过率 (学习评估加分项)"
+    )
+    duration_ratio: float = Field(
+        default=1.0, ge=0.0,
+        description="本轮实际耗时与标准耗时的比率 (学习评估加分项)"
     )
 
 
@@ -255,6 +296,23 @@ class AgentState(BaseModel):
     re_plan_triggered: bool = Field(
         default=False,
         description="全局路径重新寻路控制闸门"
+    )
+
+    # ---- 加分项扩展字段 ----
+    pedagogical_strategy: str = Field(
+        default="STANDARD_PATH",
+        pattern=r"^(STANDARD_PATH|SCAFFOLD_HELP|EDGE_CASE_DRILL)$",
+        description=(
+            "当前教学法策略控制变量。由 Assessment Node 迟滞环决策树驱动切换，"
+            "直接影响 Content Mesh 的资源生成 Prompt 策略。"
+        )
+    )
+    tutor_response: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description=(
+            "Tutor Agent 生成的多模态答疑响应卡片。包含 text_explanation, "
+            "mermaid_src, video_hydration 三个轨道的输出。"
+        )
     )
 
     # ---- 异常与审计 ----

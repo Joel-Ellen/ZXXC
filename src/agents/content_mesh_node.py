@@ -494,7 +494,7 @@ class ContentMeshNode:
         "concept_map": "# {title}\n\n## 概念图谱\n\n```mermaid\ngraph TD\n{content}\n```\n\n*难度: {difficulty}*",
         "code_snippet": "# {title}\n\n## 代码示例\n\n```python\n{content}\n```\n\n*难度: {difficulty}*",
         "interactive_exercise": "# {title}\n\n## 互动练习\n\n{content}\n\n---\n*难度: {difficulty} | 类型: exercise*",
-        "video_summary": "# {title}\n\n## 视频摘要\n\n📹 {content}\n\n*时长: ~{duration}min | 难度: {difficulty}*",
+        "video_summary": "# {title}\n\n## 视频摘要\n\n[video] {content}\n\n*时长: ~{duration}min | 难度: {difficulty}*",
         "diagnostic_quiz": "# {title}\n\n## 诊断测验\n\n{content}\n\n---\n*题目数: {question_count} | 难度: {difficulty}*",
     }
 

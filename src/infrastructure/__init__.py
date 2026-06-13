@@ -49,6 +49,15 @@ from .cold_start import (
     BayesianPriorFusion,
     handle_cold_start_interaction,
 )
+from ..vector.elasticsearch_knowledge_base import (
+    ElasticsearchKnowledgeBaseClient,
+    ElasticsearchKnowledgeBaseConfig,
+    ElasticsearchKnowledgeBasePipeline,
+    HashingTextEmbedder,
+    KnowledgeBaseChunk,
+    MarkdownKnowledgeBaseChunker,
+    SentenceTransformerEmbedder,
+)
 
 __all__ = [
     # PID 控制
@@ -87,4 +96,11 @@ __all__ = [
     "ProbeFactory",
     "BayesianPriorFusion",
     "handle_cold_start_interaction",
+    "ElasticsearchKnowledgeBaseClient",
+    "ElasticsearchKnowledgeBaseConfig",
+    "ElasticsearchKnowledgeBasePipeline",
+    "HashingTextEmbedder",
+    "KnowledgeBaseChunk",
+    "MarkdownKnowledgeBaseChunker",
+    "SentenceTransformerEmbedder",
 ]

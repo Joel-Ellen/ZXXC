@@ -781,7 +781,9 @@ class EvaluatorNode:
         # 4a. 更新掌握度
         dp.knowledge_mastery[node_id] = updated_mastery
 
-        # 4b. 更新 latest_behavior
+        # 4b. 更新 latest_behavior（保留加分项字段）
+        # 从旧 latest_behavior 中保留 tutor_query（不入 Evaluator 处理范围）
+        prev_lb = state.latest_behavior
         state.latest_behavior = LatestBehavior(
             node_id=node_id,
             correctness=cleaned.effective_correctness,
@@ -789,6 +791,11 @@ class EvaluatorNode:
             error_types=self._classify_errors(cleaned, raw),
             resource_feedback={},
             help_request_count=raw.help_request_count,
+            # 保留加分项字段 (Tutor Agent / Assessment)
+            tutor_query=getattr(prev_lb, "tutor_query", None) if prev_lb else None,
+            accuracy_rate=getattr(prev_lb, "accuracy_rate", cleaned.effective_correctness) if prev_lb else cleaned.effective_correctness,
+            code_pass_rate=getattr(prev_lb, "code_pass_rate", raw.code_pass_rate) if prev_lb else raw.code_pass_rate,
+            duration_ratio=getattr(prev_lb, "duration_ratio", raw.time_spent_ratio) if prev_lb else raw.time_spent_ratio,
         )
 
         # 4c. 更新连续失败计数器 C_fail

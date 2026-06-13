@@ -541,6 +541,156 @@ class MilvusClient:
         return parents
 
     # ------------------------------------------------------------------
+    # 智能辅导加分项 — 父块检索 + 视频时序切片检索
+    # ------------------------------------------------------------------
+
+    def search_parent_chunks(
+        self,
+        query_text: str,
+        current_node_id: str,
+        top_k: Optional[int] = None,
+    ) -> List[ParentChunk]:
+        """检索与查询最相关的父块全文上下文（用于 Tutor Agent 文本轨）。
+
+        流程:
+          1. 在 Child Collection 中执行 ANN 搜索
+          2. 通过 parent_id 反查父块完整学术上下文
+          3. 返回去重后的父块列表
+
+        Args:
+            query_text: 学生的答疑提问文本。
+            current_node_id: 当前知识点 ID，用于范围限定。
+            top_k: 子块召回数量。
+
+        Returns:
+            去重后的父块列表（按相似度降序）。
+        """
+        self._ensure_connected()
+        cfg = self._config
+        k = top_k or cfg.default_top_k
+
+        # Step 1: 向量化查询并在子块层检索
+        query_vector = self.embed_text(query_text)
+        from pymilvus import Collection
+
+        child_col = Collection(name=cfg.child_collection_name, using=cfg.alias)
+        search_params = {
+            "metric_type": cfg.metric_type,
+            "params": {"nprobe": cfg.search_nprobe},
+        }
+
+        # 限定当前知识点范围
+        expr = f'node_id == "{current_node_id}"'
+
+        raw_results = child_col.search(
+            data=[query_vector],
+            anns_field="embedding",
+            param=search_params,
+            limit=k,
+            expr=expr,
+            output_fields=["parent_id"],
+        )
+
+        # Step 2: 收集 parent_id 并去重
+        parent_ids_seen: List[str] = []
+        seen: set = set()
+        for hits in raw_results:
+            for hit in hits:
+                pid = hit.entity.get("parent_id")
+                if pid and pid not in seen:
+                    seen.add(pid)
+                    parent_ids_seen.append(pid)
+
+        # Step 3: 反查父块
+        if not parent_ids_seen:
+            return []
+
+        return self._fetch_parents_by_ids(
+            parent_ids_seen[: cfg.max_parents_per_query]
+        )
+
+    def search_video_temporal_slices(
+        self,
+        query_text: str,
+        top_k: int = 1,
+    ) -> List[Dict[str, Any]]:
+        """时序滑动窗口多模态相似度匹配 — 微课切片索引轨核心。
+
+        模拟将初始微课视频按 5 秒一帧进行多模态特征向量化后，
+        在 Milvus 的 Video Slice Collection 中执行点对点最高相似度检索，
+        动态计算最匹配的画面起点与终点 (Time Range)。
+
+        注：Video Slice Collection 需预先创建并载入视频帧向量 +
+        ASR 转写文本向量。若 Collection 不存在，回退到默认视频。
+
+        Args:
+            query_text: 答疑查询文本（与视频 ASR 文本进行语义匹配）。
+            top_k: 返回的最匹配切片数量。
+
+        Returns:
+            匹配的视频元数据列表，每项包含:
+              - url: 视频 CDN 地址
+              - time_range: 推荐时间片段 (如 "00:30-01:15")
+              - similarity: 余弦相似度分数
+        """
+        self._ensure_connected()
+        from pymilvus import Collection, utility
+
+        cfg = self._config
+        video_collection_name = "edu_video_slices"
+
+        # 若 Video Slice Collection 不存在，回退到默认视频
+        if not utility.has_collection(video_collection_name, using=cfg.alias):
+            return [{
+                "url": "https://default_course_cdn/fallback.mp4",
+                "time_range": "00:00-01:00",
+                "similarity": 0.0,
+            }]
+
+        # 向量化查询
+        query_vector = self.embed_text(query_text)
+
+        col = Collection(name=video_collection_name, using=cfg.alias)
+        search_params = {
+            "metric_type": "COSINE",
+            "params": {"nprobe": cfg.search_nprobe},
+        }
+
+        try:
+            raw_results = col.search(
+                data=[query_vector],
+                anns_field="video_embedding",
+                param=search_params,
+                limit=top_k,
+                output_fields=["url", "start_sec", "end_sec", "asr_text"],
+            )
+        except Exception:
+            return [{
+                "url": "https://default_course_cdn/fallback.mp4",
+                "time_range": "00:00-01:00",
+                "similarity": 0.0,
+            }]
+
+        # 解析结果
+        results: List[Dict[str, Any]] = []
+        for hits in raw_results:
+            for hit in hits:
+                start = hit.entity.get("start_sec", 0)
+                end = hit.entity.get("end_sec", 60)
+                results.append({
+                    "url": hit.entity.get("url", "https://default_course_cdn/fallback.mp4"),
+                    "time_range": f"{int(start)//60:02d}:{int(start)%60:02d}-{int(end)//60:02d}:{int(end)%60:02d}",
+                    "similarity": round(hit.distance, 4),
+                    "asr_text": hit.entity.get("asr_text", ""),
+                })
+
+        return results if results else [{
+            "url": "https://default_course_cdn/fallback.mp4",
+            "time_range": "00:00-01:00",
+            "similarity": 0.0,
+        }]
+
+    # ------------------------------------------------------------------
     # 清空与状态
     # ------------------------------------------------------------------
 

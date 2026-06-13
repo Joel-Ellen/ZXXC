@@ -19,10 +19,15 @@ neo4j>=5.20.0,<6.0.0
 # --- Vector Database ---
 # pymilvus: Milvus 官方 Python SDK (Apache 2.0)
 pymilvus>=2.3.0,<3.0.0
+elasticsearch>=8.17.0,<9.0.0
 
 # --- Data Validation ---
 # Pydantic v2: 强类型校验与序列化
 pydantic>=2.5.0,<3.0.0
+
+# --- Text Splitting ---
+# Used for MarkdownHeaderTextSplitter-based chunking.
+langchain-text-splitters>=0.3.0,<1.0.0
 
 # --- Testing ---
 pytest>=7.4.0,<9.0.0
@@ -36,7 +41,7 @@ aiohttp>=3.9.0,<4.0.0
 # 讯飞星火 Embedding / OpenAI / 本地模型的适配层
 # 按需安装:
 # openai>=1.0.0
-# sentence-transformers>=2.2.0
+sentence-transformers>=5.0.0,<6.0.0
 
 # --- Streaming ---
 # SSE 流式输出支持
