@@ -972,16 +972,16 @@ def handle_cold_start_interaction(
     cold_state: ColdStartState
     cold_start_key = "__cold_start_state__"
 
-    if cold_start_key not in agent_state.generated_resources:
+    if cold_start_key not in agent_state.internal_state:
         # 首次初始化
         engine = ColdStartEngine()
         cold_state = engine.initialize(agent_state.user_id)
-        agent_state.generated_resources[cold_start_key] = cold_state.model_dump()
+        agent_state.internal_state[cold_start_key] = cold_state.model_dump()
         agent_state.c_epoch = 0
     else:
         # 恢复冷启动状态
         engine = ColdStartEngine()
-        cold_state = ColdStartState(**agent_state.generated_resources[cold_start_key])
+        cold_state = ColdStartState(**agent_state.internal_state[cold_start_key])
 
     # ---- 同步 AgentState epoch 到冷启动状态 ----
     cold_state.epoch_counter = agent_state.c_epoch
@@ -1005,13 +1005,13 @@ def handle_cold_start_interaction(
             f"贝叶斯融合维度={list(fused.keys())}"
         )
         agent_state = engine.apply_to_agent_state(cold_state, agent_state)
-        agent_state.generated_resources[cold_start_key] = cold_state.model_dump()
+        agent_state.internal_state[cold_start_key] = cold_state.model_dump()
         return agent_state, None, True
 
     # ---- 检查完成 ----
     if cold_state.current_phase == ColdStartPhase.COMPLETE:
         agent_state = engine.apply_to_agent_state(cold_state, agent_state)
-        agent_state.generated_resources.pop(cold_start_key, None)
+        agent_state.internal_state.pop(cold_start_key, None)
         return agent_state, None, True
 
     # ---- 获取下一轮探针 ----
@@ -1025,11 +1025,11 @@ def handle_cold_start_interaction(
                 f"已收集={cold_state.collected_dimensions}/6"
             )
         agent_state = engine.apply_to_agent_state(cold_state, agent_state)
-        agent_state.generated_resources.pop(cold_start_key, None)
+        agent_state.internal_state.pop(cold_start_key, None)
         return agent_state, None, True
 
     # ---- 持久化冷启动状态 ----
-    agent_state.generated_resources[cold_start_key] = cold_state.model_dump()
+    agent_state.internal_state[cold_start_key] = cold_state.model_dump()
     agent_state.c_epoch = cold_state.epoch_counter
 
     return agent_state, next_probe, False

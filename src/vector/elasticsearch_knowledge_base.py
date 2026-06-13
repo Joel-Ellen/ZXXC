@@ -208,6 +208,14 @@ class _PhysicalSection:
     metadata: Dict[str, str]
 
 
+@dataclass
+class _HeaderSplitDocument:
+    """Minimal fallback document compatible with LangChain splitter output."""
+
+    page_content: str
+    metadata: Dict[str, str]
+
+
 class MarkdownKnowledgeBaseChunker:
     """Header-aware chunker with code-fence protection and metadata inheritance."""
 
@@ -278,17 +286,17 @@ class MarkdownKnowledgeBaseChunker:
 
     def _build_header_splitter(self) -> Any:
         if MarkdownHeaderTextSplitter is None:
-            raise ImportError(
-                "langchain-text-splitters is required. Install it with: "
-                "pip install langchain-text-splitters"
-            )
+            return None
         return MarkdownHeaderTextSplitter(
             headers_to_split_on=self._config.headers_to_split_on,
             strip_headers=False,
         )
 
     def _split_by_headers(self, markdown_text: str) -> List[_PhysicalSection]:
-        documents = self._header_splitter.split_text(markdown_text)
+        if self._header_splitter is None:
+            documents = self._fallback_split_by_headers(markdown_text)
+        else:
+            documents = self._header_splitter.split_text(markdown_text)
         sections: List[_PhysicalSection] = []
         for doc in documents:
             content = getattr(doc, "page_content", "") or ""
@@ -296,6 +304,85 @@ class MarkdownKnowledgeBaseChunker:
             if content.strip():
                 sections.append(_PhysicalSection(content=content, metadata=metadata))
         return sections
+
+    def _fallback_split_by_headers(self, markdown_text: str) -> List[_HeaderSplitDocument]:
+        """Dependency-free header splitter used when LangChain is unavailable."""
+        lines = markdown_text.splitlines(keepends=True)
+        sections: List[_HeaderSplitDocument] = []
+        current_lines: List[str] = []
+        current_metadata: Dict[str, str] = {}
+
+        for line in lines:
+            stripped = line.lstrip()
+            matched_header = False
+            for prefix, key in sorted(
+                self._config.headers_to_split_on,
+                key=lambda item: len(item[0]),
+                reverse=True,
+            ):
+                if stripped.startswith(f"{prefix} "):
+                    if current_lines and self._section_has_meaningful_body(current_lines):
+                        sections.append(
+                            _HeaderSplitDocument(
+                                page_content="".join(current_lines),
+                                metadata=dict(current_metadata),
+                            )
+                        )
+                    current_lines = [line]
+                    current_metadata = self._updated_heading_metadata(
+                        current_metadata,
+                        key,
+                        stripped[len(prefix):].strip(),
+                    )
+                    matched_header = True
+                    break
+
+            if not matched_header:
+                current_lines.append(line)
+
+        if current_lines and self._section_has_meaningful_body(current_lines):
+            sections.append(
+                _HeaderSplitDocument(
+                    page_content="".join(current_lines),
+                    metadata=dict(current_metadata),
+                )
+            )
+
+        return sections
+
+    def _section_has_meaningful_body(self, lines: List[str]) -> bool:
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if any(
+                stripped.startswith(f"{prefix} ")
+                for prefix, _key in self._config.headers_to_split_on
+            ):
+                continue
+            return True
+        return False
+
+    def _updated_heading_metadata(
+        self,
+        metadata: Dict[str, str],
+        header_key: str,
+        header_value: str,
+    ) -> Dict[str, str]:
+        updated = dict(metadata)
+        updated[header_key] = header_value
+
+        # Clear lower-level headings when a higher-level heading changes.
+        header_order = [name for _prefix, name in self._config.headers_to_split_on]
+        try:
+            idx = header_order.index(header_key)
+        except ValueError:
+            return updated
+
+        for lower_key in header_order[idx + 1:]:
+            updated.pop(lower_key, None)
+
+        return updated
 
     def _split_section_with_protection(self, text: str) -> List[str]:
         """Character-window chunking that never slices through code fences."""

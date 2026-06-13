@@ -460,6 +460,9 @@ class PlannerNode:
         self._solver.build_graph(nodes, edges)
         diagnostics["graph_nodes"] = self._solver.node_count
         diagnostics["graph_edges"] = self._solver.edge_count
+        state.internal_state["planner_adjacency"] = {
+            src: list(neighbors) for src, neighbors in self._solver._adj.items()
+        }
 
         # ---- Step 3: 提取掌握度向量 ----
         mastery_map: Dict[str, float] = dict(

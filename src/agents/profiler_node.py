@@ -586,6 +586,7 @@ class ProfilerNode:
         )
 
         # ---- Step 8: 组装输出 ----
+        state.recommended_resource_style = selected_style
         return ProfilerOutput(
             agent_state=state,
             style_result=style_result,

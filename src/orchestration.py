@@ -313,7 +313,7 @@ class EduAgentGraph:
         # 从 Evaluator 的输出中提取信号
         # (在真实的 LangGraph 流转中，这些信息已写入 AgentState)
         c_fail = state.dynamic_profile.continuous_fail_counter
-        current_style = "visual"  # 默认，实际从 AgentState 推断
+        current_style = state.recommended_resource_style or "visual"
 
         inp = ProfilerInput(
             agent_state=state,
@@ -331,6 +331,9 @@ class EduAgentGraph:
         """Planner Node 的 LangGraph 适配器。"""
         inp = PlannerInput(agent_state=state)
         output = self._planner(inp)
+        planner_adj = state.internal_state.get("planner_adjacency", {})
+        if planner_adj:
+            self._mesh.set_adjacency(planner_adj)
         return output.agent_state
 
     def _content_mesh_node_wrapper(self, state: AgentState) -> AgentState:

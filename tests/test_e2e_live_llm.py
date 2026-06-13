@@ -26,6 +26,7 @@ EduAgent 全链路端到端集成测试（真实 LLM 版本）
 import sys
 import os
 import time
+import pytest
 
 # 确保项目根在 sys.path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -63,6 +64,19 @@ from src.agents.content_mesh_node import (
     ContentMeshNode,
     MeshInput,
 )
+
+pytestmark = pytest.mark.skipif(
+    (
+        not os.environ.get("DASHSCOPE_API_KEY")
+        or os.environ.get("RUN_LIVE_LLM_TESTS") != "1"
+    ),
+    reason="Live LLM tests require DASHSCOPE_API_KEY and RUN_LIVE_LLM_TESTS=1.",
+)
+
+
+@pytest.fixture
+def client() -> LLMClient:
+    return create_llm_client_from_env()
 
 
 # ============================================================================

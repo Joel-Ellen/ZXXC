@@ -117,6 +117,7 @@ class Pole2Result(BaseModel):
     overall_entailment: float = Field(default=1.0, ge=0.0, le=1.0)
     refinement_rounds: int = Field(default=0, ge=0)
     content_safety_flagged: bool = Field(default=False)
+    diagnostic: str = Field(default="")
 
 
 class ValidatorInput(BaseModel):
@@ -369,6 +370,7 @@ class Pole2Gate:
         text: str,
         ground_truth: str,
         max_refinement_rounds: int = 3,
+        nli_fn: Optional[Callable[[str, str], float]] = None,
     ) -> Pole2Result:
         """执行第二极 NLI 蕴含度校验。
 
@@ -397,7 +399,7 @@ class Pole2Gate:
         for chunk in chunks:
             # 模拟 NLI 评分（生产环境替换为星火 NLI API）
             score = self._compute_entailment(
-                chunk.content, ground_truth
+                chunk.content, ground_truth, nli_fn=nli_fn
             )
 
             is_halluc = score < self.ENTAILMENT_THRESHOLD
@@ -434,6 +436,10 @@ class Pole2Gate:
             chunk_results=chunk_results,
             overall_entailment=round(overall_score, 4),
             refinement_rounds=0,
+            diagnostic=(
+                f"checked={len(chunks)}, hallucinations={hallucination_count}, "
+                f"overall={round(overall_score, 4)}"
+            ),
         )
 
     def refine(
@@ -474,7 +480,12 @@ class Pole2Gate:
 
         return refined, rounds
 
-    def _compute_entailment(self, text: str, ground_truth: str) -> float:
+    def _compute_entailment(
+        self,
+        text: str,
+        ground_truth: str,
+        nli_fn: Optional[Callable[[str, str], float]] = None,
+    ) -> float:
         """计算文本与基准真值之间的 NLI 蕴含度。
 
         生产环境实现:
@@ -493,6 +504,13 @@ class Pole2Gate:
         Returns:
             蕴含度分数 [0.0, 1.0]。
         """
+        if nli_fn is not None:
+            try:
+                score = float(nli_fn(text, ground_truth))
+                return max(0.0, min(1.0, score))
+            except Exception:
+                pass
+
         # 简化版 TF 余弦相似度
         def tokenize(s: str) -> Dict[str, int]:
             tokens = re.findall(r'[一-鿿]+|[a-zA-Z]+', s.lower())
@@ -631,7 +649,7 @@ class ValidatorNode:
                 continue
 
             p2 = self._pole2.validate(
-                text, ground_truth, inp.max_refinement_rounds
+                text, ground_truth, inp.max_refinement_rounds, nli_fn=self._nli_fn
             )
             pole2_results[card_id] = p2
 

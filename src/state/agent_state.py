@@ -314,11 +314,19 @@ class AgentState(BaseModel):
             "mermaid_src, video_hydration 三个轨道的输出。"
         )
     )
+    recommended_resource_style: Optional[str] = Field(
+        default=None,
+        description="Profiler 推荐给 Content Mesh 的主导资源风格"
+    )
 
     # ---- 异常与审计 ----
     errors: List[str] = Field(
         default_factory=list,
         description="运行过程中收集的异常/警告信息"
+    )
+    internal_state: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="仅供编排层和基础设施使用的内部状态存储"
     )
 
     # ---- 会话元数据 ----

@@ -537,6 +537,9 @@ class ContentMeshNode:
             )
 
         current_node = active_path[0] if active_path else "unknown"
+        planner_adj = state.internal_state.get("planner_adjacency", {})
+        if planner_adj:
+            self.set_adjacency(planner_adj)
 
         # ---- Step 1: 重规划熔断 ----
         if state.re_plan_triggered:
@@ -567,7 +570,7 @@ class ContentMeshNode:
                         node_id=next_node,
                         card_type=CardType.CONCEPT_MAP,
                         queue_class=QueueClass.REGULAR,
-                        cognitive_style=state.static_profile.cognitive_style_distribution.compute_means(),
+                        cognitive_style=state.recommended_resource_style or "textual",
                         difficulty=0.5,
                         priority=10,  # 低优先级
                         is_shadow=True,
@@ -576,10 +579,15 @@ class ContentMeshNode:
                     diagnostics["shadow_pregen_started"] = next_node
 
         # ---- Step 3: 为 active_path 中的节点创建生成任务 ----
-        recommended_style = state.static_profile.cognitive_style_distribution
-        style_means = recommended_style.compute_means()
-        # 选择主导风格
-        dominant_style = max(style_means, key=style_means.get)
+        recommended_style = state.recommended_resource_style
+        if recommended_style in ("visual", "textual", "practical"):
+            dominant_style = recommended_style
+        else:
+            style_means = state.static_profile.cognitive_style_distribution.compute_means()
+            dominant_style = max(
+                ("visual", "textual", "practical"),
+                key=lambda style: style_means.get(f"{style}_weight", 0.0),
+            )
 
         for node_id in active_path[:3]:  # 只调度前 3 个节点的资源
             mastery = state.dynamic_profile.knowledge_mastery.get(node_id, 0.5)
