@@ -17,6 +17,13 @@ from __future__ import annotations
 
 import sys
 import os
+import uvicorn
+from starlette.applications import Starlette
+from starlette.routing import Route, Mount
+from starlette.staticfiles import StaticFiles
+from starlette.responses import JSONResponse, Response
+from starlette.requests import Request
+from sse_starlette.sse import EventSourceResponse
 
 # ⚠️ 必须在导入 sentence-transformers 之前设置，否则模型下载会直连 HuggingFace 被墙
 # 加载 .env 文件
@@ -68,12 +75,6 @@ def _get_llm():
             print("[LLM] No API key found, using fallback mode")
     return _llm_client
 
-from starlette.applications import Starlette
-from starlette.routing import Route, Mount
-from starlette.staticfiles import StaticFiles
-from starlette.responses import JSONResponse, Response
-from starlette.requests import Request
-from sse_starlette.sse import EventSourceResponse
 
 # ─── 导入项目模块 ───────────────────────────────────────────
 from src.state.agent_state import (
@@ -1024,7 +1025,6 @@ app = Starlette(
 
 
 if __name__ == "__main__":
-    import uvicorn
     print("=" * 60)
     print("  EduAgent 前后端对接服务器")
     print("  访问: http://localhost:8800")
