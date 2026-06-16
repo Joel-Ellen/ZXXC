@@ -24,6 +24,7 @@ elasticsearch>=8.17.0,<9.0.0
 # --- Data Validation ---
 # Pydantic v2: 强类型校验与序列化
 pydantic>=2.5.0,<3.0.0
+numpy>=1.24.0,<2.0.0
 
 # --- Text Splitting ---
 # Used for MarkdownHeaderTextSplitter-based chunking.
@@ -47,6 +48,16 @@ sentence-transformers>=5.0.0,<6.0.0
 # SSE 流式输出支持
 sse-starlette>=1.8.0,<2.0.0
 starlette>=0.36.0,<1.0.0
+
+# --- Auth & Security ---
+# Argon2id password hashing + JWT token management
+argon2-cffi>=23.1.0
+PyJWT>=2.8.0
+# FastAPI (for auth middleware)
+fastapi>=0.104.0,<1.0.0
+
+# --- Backend Server ---
+uvicorn>=0.24.0,<1.0.0
 
 # --- Utilities ---
 python-dotenv>=1.0.0,<2.0.0

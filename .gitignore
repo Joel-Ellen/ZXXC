@@ -39,3 +39,4 @@ htmlcov/
 
 # Neo4j / Milvus data (local dev)
 data/
+src/auth/_users.json

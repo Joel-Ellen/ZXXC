@@ -76,7 +76,25 @@ def _get_llm():
     return _llm_client
 
 
-# ─── 导入项目模块 ───────────────────────────────────────────
+# --- 认证系统 (全局单例) ------------------------------------------
+_auth_store = None
+_auth_captcha = None
+
+def _get_auth():
+    global _auth_store, _auth_captcha
+    if _auth_store is None:
+        from src.auth.models import UserStore, PresetAccounts
+        from src.auth.captcha import CaptchaGenerator
+        _auth_store = UserStore()
+        created = PresetAccounts.ensure_presets(_auth_store)
+        print(f"[Auth] {len(created)} preset accounts ready")
+        for u in created:
+            print(f"  - {u.user_id} ({u.role}): {u.email}")
+        _auth_captcha = CaptchaGenerator()
+    return _auth_store, _auth_captcha
+
+
+# --- 导入项目模块 -------------------------------------------------
 from src.state.agent_state import (
     AgentState, StaticProfile, DynamicProfile,
     CognitiveStyleDistribution, ErrorTypeDistribution,
@@ -1007,6 +1025,180 @@ async def api_stream_pipeline(request: Request) -> EventSourceResponse:
 
 static_dir = Path(__file__).resolve().parent
 
+# --- Auth API Handlers ------------------------------------------------
+
+async def api_auth_captcha(request: Request) -> Response:
+    """GET /api/auth/captcha — 获取 SVG 数学验证码。"""
+    store, captcha = _get_auth()
+    svg, token = captcha.generate()
+    html = (
+        '<html><head><meta charset="utf-8"></head>'
+        '<body style="display:flex;flex-direction:column;align-items:center;'
+        'justify-content:center;min-height:100vh;font-family:Arial,sans-serif;'
+        'background:#f0f2f5">'
+        f'<div style="background:#fff;padding:30px 40px;border-radius:12px;'
+        f'box-shadow:0 2px 12px rgba(0,0,0,0.08);text-align:center">'
+        f'<h3 style="color:#333;margin-bottom:16px">EduAgent 验证码</h3>'
+        f'<div style="border:1px solid #e0e0e0;border-radius:6px;padding:8px;'
+        f'background:#fafafa">{svg}</div>'
+        f'<p style="margin-top:12px;color:#666;font-size:13px">'
+        f'请输入上方数学表达式的计算结果</p>'
+        f'<p style="color:#999;font-size:11px;word-break:break-all">'
+        f'Captcha Token: <code style="background:#f5f5f5;padding:2px 6px;'
+        f'border-radius:3px">{token}</code></p>'
+        f'</div></body></html>'
+    )
+    return Response(html, media_type="text/html; charset=utf-8")
+
+
+async def api_auth_captcha_json(request: Request) -> JSONResponse:
+    """GET /api/auth/captcha-json — 获取验证码 (JSON 响应，供前端调用)。"""
+    store, captcha = _get_auth()
+    svg, token = captcha.generate()
+    return JSONResponse({"svg": svg, "captcha_token": token})
+
+
+async def api_auth_register(request: Request) -> JSONResponse:
+    """POST /api/auth/register — 用户注册。"""
+    store, captcha = _get_auth()
+    from src.auth.security import SecurityManager
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"detail": "请求体格式错误"}, status_code=400)
+
+    user_id = body.get("user_id", "").strip()
+    email = body.get("email", "").strip()
+    password = body.get("password", "")
+    captcha_token = body.get("captcha_token", "")
+    captcha_answer = body.get("captcha_answer", "")
+
+    # 校验验证码
+    if not captcha.verify(captcha_token, captcha_answer):
+        return JSONResponse({"detail": "验证码错误或已过期"}, status_code=400)
+
+    # 基本校验
+    if len(user_id) < 3 or not user_id.replace("_", "").isalnum():
+        return JSONResponse(
+            {"detail": "用户名需 3-32 字符，仅允许字母/数字/下划线"},
+            status_code=400,
+        )
+    if "@" not in email:
+        return JSONResponse({"detail": "邮箱格式无效"}, status_code=400)
+    if len(password) < 8:
+        return JSONResponse({"detail": "密码至少 8 个字符"}, status_code=400)
+
+    try:
+        user = store.create_user(user_id, email, password)
+    except ValueError as e:
+        return JSONResponse({"detail": str(e)}, status_code=409)
+
+    token_pair = SecurityManager.create_token_pair(user.user_id, user.role)
+    return JSONResponse({
+        "access_token": token_pair["access_token"],
+        "refresh_token": token_pair["refresh_token"],
+        "token_type": "bearer",
+        "user": user.to_safe_dict(),
+    })
+
+
+async def api_auth_login(request: Request) -> JSONResponse:
+    """POST /api/auth/login — 用户登录。"""
+    store, captcha = _get_auth()
+    from src.auth.security import SecurityManager
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"detail": "请求体格式错误"}, status_code=400)
+
+    user_id = body.get("user_id", "").strip()
+    password = body.get("password", "")
+    captcha_token = body.get("captcha_token", "")
+    captcha_answer = body.get("captcha_answer", "")
+
+    if not captcha.verify(captcha_token, captcha_answer):
+        return JSONResponse({"detail": "验证码错误或已过期"}, status_code=400)
+
+    if not user_id or not password:
+        return JSONResponse({"detail": "用户名和密码不能为空"}, status_code=400)
+
+    user = store.verify_login(user_id, password)
+    if user is None:
+        return JSONResponse(
+            {"detail": "用户名或密码错误"},
+            status_code=401,
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    token_pair = SecurityManager.create_token_pair(user.user_id, user.role)
+    return JSONResponse({
+        "access_token": token_pair["access_token"],
+        "refresh_token": token_pair["refresh_token"],
+        "token_type": "bearer",
+        "user": user.to_safe_dict(),
+    })
+
+
+async def api_auth_refresh(request: Request) -> JSONResponse:
+    """POST /api/auth/refresh — 令牌刷新轮转。"""
+    from src.auth.security import SecurityManager
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"detail": "请求体格式错误"}, status_code=400)
+
+    refresh_token = body.get("refresh_token", "")
+    if not refresh_token:
+        return JSONResponse({"detail": "refresh_token 不能为空"}, status_code=400)
+
+    try:
+        payload = SecurityManager.decode_token(refresh_token)
+    except ValueError as e:
+        return JSONResponse({"detail": str(e)}, status_code=401)
+
+    if payload.get("type") != "refresh":
+        return JSONResponse({"detail": "INVALID_TOKEN_TYPE"}, status_code=401)
+
+    user_id = payload.get("sub", "")
+    store, _ = _get_auth()
+    user = store.get_by_id(user_id)
+    role = user.role if user else "STUDENT"
+
+    token_pair = SecurityManager.create_token_pair(user_id, role)
+    user_info = user.to_safe_dict() if user else {}
+    return JSONResponse({
+        "access_token": token_pair["access_token"],
+        "refresh_token": token_pair["refresh_token"],
+        "token_type": "bearer",
+        "user": user_info,
+    })
+
+
+async def api_auth_me(request: Request) -> JSONResponse:
+    """GET /api/auth/me — 获取当前用户信息 (需 Bearer Token)。"""
+    from src.auth.security import SecurityManager
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return JSONResponse({"detail": "缺少认证令牌"}, status_code=401)
+
+    token = auth_header[7:]
+    try:
+        payload = SecurityManager.decode_token(token)
+    except ValueError as e:
+        return JSONResponse({"detail": str(e)}, status_code=401)
+
+    if payload.get("type") != "access":
+        return JSONResponse({"detail": "INVALID_TOKEN_TYPE"}, status_code=401)
+
+    user_id = payload.get("sub", "")
+    store, _ = _get_auth()
+    user = store.get_by_id(user_id)
+    if user is None:
+        return JSONResponse({"detail": "用户不存在"}, status_code=404)
+
+    return JSONResponse(user.to_safe_dict())
+
+
 app = Starlette(
     debug=True,
     routes=[
@@ -1019,6 +1211,13 @@ app = Starlette(
         Route("/api/pipeline/stream", api_stream_pipeline, methods=["GET"]),
         Route("/api/tutor/ask", api_ask_tutor, methods=["POST"]),
         Route("/api/knowledge-graph", api_knowledge_graph, methods=["GET"]),
+        # ── 认证 API ──
+        Route("/api/auth/captcha", api_auth_captcha, methods=["GET"]),
+        Route("/api/auth/captcha-json", api_auth_captcha_json, methods=["GET"]),
+        Route("/api/auth/register", api_auth_register, methods=["POST"]),
+        Route("/api/auth/login", api_auth_login, methods=["POST"]),
+        Route("/api/auth/refresh", api_auth_refresh, methods=["POST"]),
+        Route("/api/auth/me", api_auth_me, methods=["GET"]),
         Mount("/", app=StaticFiles(directory=str(static_dir), html=True)),
     ],
 )
