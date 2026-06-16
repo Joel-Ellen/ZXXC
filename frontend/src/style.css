@@ -2,183 +2,34 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --base-font-size: 16px;
-  color-scheme: dark;
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #app {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: #030712;
+  color: #e5e7eb;
+  -webkit-font-smoothing: antialiased;
 }
 
-* {
-  box-sizing: border-box;
-}
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #4b5563; }
 
-html {
-  font-size: var(--base-font-size);
-}
-
-body {
-  margin: 0;
-  min-height: 100vh;
-  font-family: Inter, "PingFang SC", "HarmonyOS Sans SC", sans-serif;
-  background: #07080b;
-  color: #f0f0f5;
-  overflow: hidden;
-}
-
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  background:
-    radial-gradient(circle at 18% 18%, rgba(0, 242, 254, 0.07), transparent 28%),
-    radial-gradient(circle at 78% 20%, rgba(127, 0, 255, 0.11), transparent 32%),
-    radial-gradient(circle at 52% 88%, rgba(18, 22, 40, 0.45), transparent 24%);
-  pointer-events: none;
-}
-
-body.reduce-motion *,
-body.reduce-motion *::before,
-body.reduce-motion *::after {
-  animation-duration: 1ms !important;
-  animation-iteration-count: 1 !important;
-  transition-duration: 1ms !important;
-  scroll-behavior: auto !important;
-}
-
-body.high-contrast {
-  background: #05060c;
-}
-
-body.high-contrast::before {
-  background:
-    radial-gradient(circle at 18% 18%, rgba(0, 229, 255, 0.1), transparent 28%),
-    radial-gradient(circle at 78% 20%, rgba(157, 78, 221, 0.13), transparent 32%),
-    radial-gradient(circle at 52% 88%, rgba(18, 22, 40, 0.45), transparent 24%);
-}
-
-#app {
-  min-height: 100vh;
-}
-
-.glass-panel {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.012));
-  border: 1px solid rgba(255, 255, 255, 0.04);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.025),
-    0 18px 40px rgba(0, 0, 0, 0.32);
-  backdrop-filter: blur(14px);
-}
-
-.aurora-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(74, 79, 104, 0.7) transparent;
-}
-
-.aurora-scroll::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
-.aurora-scroll::-webkit-scrollbar-thumb {
-  background: rgba(74, 79, 104, 0.42);
-  border-radius: 999px;
-}
-
-.aurora-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.focus-ring {
-  outline: 2px solid transparent;
-  outline-offset: 2px;
-}
-
-.focus-ring:focus-visible {
-  outline-color: rgba(0, 242, 254, 0.7);
-}
-
-.markdown-body {
-  max-width: 80ch;
-}
-
-.markdown-body h1,
-.markdown-body h2,
-.markdown-body h3 {
-  margin: 1rem 0 0.55rem;
-  line-height: 1.15;
-  font-weight: 900;
-  letter-spacing: -0.04em;
-  color: #eef1f9;
-}
-
-.markdown-body p,
-.markdown-body li,
-.markdown-body blockquote {
-  color: #c9cfde;
-  line-height: 1.85;
-  font-weight: 300;
-}
-
-.markdown-body ul,
-.markdown-body ol {
-  padding-left: 1.2rem;
-}
-
-.markdown-body pre {
-  overflow-x: auto;
-  border-radius: 1rem;
-  border: 1px solid rgba(255, 255, 255, 0.04);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(0, 0, 0, 0.18));
-  padding: 1rem 1.1rem;
-  box-shadow: inset 0 1px 8px rgba(0, 0, 0, 0.35);
-}
-
-.markdown-body code {
-  font-family: "JetBrains Mono", Menlo, monospace;
-}
-
-.markdown-body :not(pre) > code {
-  border-radius: 0.4rem;
-  background: rgba(255, 255, 255, 0.05);
-  padding: 0.12rem 0.34rem;
-}
-
-.markdown-body hr {
-  border: 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
-  margin: 1rem 0;
-}
-
-.status-pill-enter-active,
-.status-pill-leave-active,
-.drawer-enter-active,
-.drawer-leave-active,
-.floating-enter-active,
-.floating-leave-active {
-  transition: all 300ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.status-pill-enter-from,
-.status-pill-leave-to,
-.drawer-enter-from,
-.drawer-leave-to,
-.floating-enter-from,
-.floating-leave-to {
-  opacity: 0;
-  transform: translateY(10px);
-}
-
-@media (max-width: 1023px) {
-  body {
-    overflow: auto;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  body:not(.allow-motion) *,
-  body:not(.allow-motion) *::before,
-  body:not(.allow-motion) *::after {
-    animation-duration: 1ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 1ms !important;
-  }
-}
+.markdown-body h1 { font-size: 1.5rem; font-weight: 700; margin: 1rem 0 0.5rem; color: #f3f4f6; }
+.markdown-body h2 { font-size: 1.25rem; font-weight: 600; margin: 0.875rem 0 0.5rem; color: #e5e7eb; }
+.markdown-body h3 { font-size: 1.1rem; font-weight: 600; margin: 0.75rem 0 0.375rem; color: #d1d5db; }
+.markdown-body p { margin: 0.5rem 0; line-height: 1.625; }
+.markdown-body code { background: #1f2937; padding: 0.125rem 0.375rem; border-radius: 0.25rem; font-size: 0.85em; color: #fbbf24; }
+.markdown-body pre { background: #111827; border: 1px solid #374151; border-radius: 0.5rem; padding: 1rem; overflow-x: auto; margin: 0.75rem 0; }
+.markdown-body pre code { background: transparent; padding: 0; color: #e5e7eb; }
+.markdown-body ul, .markdown-body ol { padding-left: 1.5rem; margin: 0.5rem 0; }
+.markdown-body li { line-height: 1.625; }
+.markdown-body blockquote { border-left: 3px solid #6366f1; padding-left: 1rem; margin: 0.75rem 0; color: #9ca3af; }
+.markdown-body table { border-collapse: collapse; width: 100%; margin: 0.75rem 0; }
+.markdown-body th, .markdown-body td { border: 1px solid #374151; padding: 0.5rem 0.75rem; text-align: left; font-size: 0.875rem; }
+.markdown-body th { background: #1f2937; font-weight: 600; }
+.markdown-body a { color: #818cf8; text-decoration: underline; }
+.markdown-body strong { color: #f3f4f6; font-weight: 600; }
+.markdown-body img { max-width: 100%; border-radius: 0.5rem; }

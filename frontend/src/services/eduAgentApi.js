@@ -1,5 +1,37 @@
-import apiClient from "./apiClient";
+import apiClient, { tokenStore } from "./apiClient";
 
+// ── 认证 ──
+export async function getCaptcha() {
+  const { data } = await apiClient.get("/auth/captcha-json");
+  return data;
+}
+
+export async function register(payload) {
+  const { data } = await apiClient.post("/auth/register", payload);
+  if (data.access_token) tokenStore.setTokens({ accessToken: data.access_token, refreshToken: data.refresh_token });
+  return data;
+}
+
+export async function login(payload) {
+  const { data } = await apiClient.post("/auth/login", payload);
+  if (data.access_token) tokenStore.setTokens({ accessToken: data.access_token, refreshToken: data.refresh_token });
+  return data;
+}
+
+export async function refreshToken() {
+  const rt = tokenStore.getRefreshToken();
+  if (!rt) return null;
+  const { data } = await apiClient.post("/auth/refresh", { refresh_token: rt });
+  if (data.access_token) tokenStore.setTokens({ accessToken: data.access_token, refreshToken: data.refresh_token });
+  return data;
+}
+
+export async function fetchMyProfile() {
+  const { data } = await apiClient.get("/auth/me");
+  return data;
+}
+
+// ── 学习流水线 ──
 export async function resetSession(userId) {
   const { data } = await apiClient.post("/reset", { user_id: userId });
   return data;
@@ -16,10 +48,7 @@ export async function fetchProbe(userId) {
 }
 
 export async function submitProbeAnswer(userId, answer) {
-  const { data } = await apiClient.post("/cold-start/answer", {
-    user_id: userId,
-    answer,
-  });
+  const { data } = await apiClient.post("/cold-start/answer", { user_id: userId, answer });
   return data;
 }
 
