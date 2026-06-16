@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EduAgent - AI学习伙伴</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+:root {
+  --bg:#f8f9fc; --surface:#fff; --surface2:#f3f5fa;
+  --border:#e5e8f0; --text:#1e2746; --text2:#6b7394;
+  --primary:#4f6ef6; --primary-light:#eef1fe; --primary-dark:#3b54d4;
+  --success:#34c971; --warning:#f5a623; --danger:#f54b5e;
+  --gradient:linear-gradient(135deg,#4f6ef6 0%,#7b5ce7 100%);
+  --radius:14px; --radius-sm:10px; --shadow:0 2px 12px rgba(0,0,0,.05);
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC",Roboto,sans-serif;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:var(--font); background:var(--bg); color:var(--text); line-height:1.6; height:100vh; overflow:hidden; }
+
+.app { display:flex; height:100vh; }
+.sidebar { width:280px; min-width:280px; background:var(--surface); border-right:1px solid var(--border); display:flex; flex-direction:column; overflow:hidden; }
+.sidebar-header { padding:20px; border-bottom:1px solid var(--border); }
+.sidebar-header h2 { font-size:18px; font-weight:800; background:var(--gradient); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+.sidebar-header .sub { font-size:12px; color:var(--text2); margin-top:2px; }
+.sidebar-nav { flex:1; overflow-y:auto; padding:8px 0; }
+.toc-item { display:flex; align-items:center; gap:10px; padding:10px 20px; cursor:pointer; font-size:13px; font-weight:500; transition:all .15s; border-left:3px solid transparent; }
+.toc-item:hover { background:var(--surface2); }
+.toc-item.active { background:var(--primary-light); border-left-color:var(--primary); color:var(--primary); font-weight:700; }
+.toc-item.mastered { color:var(--success); }
+.toc-item .toc-icon { font-size:16px; width:22px; text-align:center; }
+.toc-item .toc-num { font-size:11px; color:var(--text2); width:24px; }
+.toc-item.mastered .toc-icon { color:var(--success); }
+
+.main { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+.topbar { padding:16px 24px; border-bottom:1px solid var(--border); background:var(--surface); display:flex; align-items:center; gap:16px; }
+.topbar .stat { font-size:13px; color:var(--text2); }
+.topbar .stat strong { color:var(--text); }
+.topbar .nav-tabs { margin-left:auto; display:flex; gap:4px; }
+.topbar .nav-tab { padding:6px 14px; border-radius:16px; cursor:pointer; font-size:13px; font-weight:500; color:var(--text2); border:none; background:none; font-family:var(--font); transition:all .15s; }
+.topbar .nav-tab:hover,.topbar .nav-tab.active { color:var(--primary); background:var(--primary-light); }
+.main-content { flex:1; overflow-y:auto; padding:24px; }
+.path-bar { display:flex; flex-wrap:wrap; gap:6px; align-items:center; padding:12px 16px; background:var(--surface); border-radius:var(--radius-sm); margin-bottom:20px; box-shadow:var(--shadow); overflow-x:auto; }
+.path-node { background:var(--primary-light); color:var(--primary-dark); border:2px solid transparent; border-radius:16px; padding:4px 10px; font-size:12px; font-weight:600; white-space:nowrap; cursor:pointer; transition:all .2s; }
+.path-node:hover { transform:translateY(-1px); }
+.path-node.current { border-color:var(--primary); background:var(--primary); color:#fff; }
+.path-node.mastered { background:rgba(52,201,113,.12); color:#218a4d; border-color:var(--success); }
+
+.learning-player { background:var(--surface); border-radius:var(--radius); box-shadow:var(--shadow); overflow:hidden; }
+.learning-player.hidden { display:none; }
+.player-progress { padding:14px 20px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px; }
+.player-progress .step-dots { display:flex; gap:5px; }
+.player-progress .step-dot { width:7px;height:7px;border-radius:50%;background:var(--border);transition:all .2s; }
+.player-progress .step-dot.done { background:var(--success); }
+.player-progress .step-dot.current { background:var(--primary);transform:scale(1.4); }
+.player-progress .step-label { font-size:12px;color:var(--text2);margin-left:auto; }
+.player-content { padding:24px 28px; min-height:260px; max-height:50vh; overflow-y:auto; }
+.player-content h1,.player-content h2,.player-content h3 { margin:10px 0 6px; }
+.player-content pre { background:var(--surface2);padding:12px 16px;border-radius:8px;overflow-x:auto;font-size:13px;margin:8px 0;border:1px solid var(--border); }
+.player-content code { font-family:"JetBrains Mono",monospace;font-size:13px;background:var(--surface2);padding:2px 5px;border-radius:4px; }
+.player-content pre code { background:none;padding:0; }
+.player-nav { display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-top:1px solid var(--border); }
+.player-nav .nav-hint { font-size:12px;color:var(--text2); }
+
+.quiz-box { background:var(--surface); border-radius:var(--radius); box-shadow:var(--shadow); padding:20px 24px; margin-top:16px; }
+.quiz-box h3 { margin-bottom:12px; }
+.quiz-question { margin-bottom:16px; padding:14px; background:var(--surface2); border-radius:var(--radius-sm); }
+.quiz-options { display:flex; flex-direction:column; gap:6px; }
+.quiz-option { padding:10px 14px; border:2px solid var(--border); border-radius:8px; cursor:pointer; transition:all .15s; font-size:14px; }
+.quiz-option:hover { border-color:var(--primary); }
+.quiz-option.chosen { border-color:var(--primary); background:var(--primary-light); }
+.quiz-option.correct { border-color:var(--success); background:rgba(52,201,113,.1); }
+.quiz-option.wrong { border-color:var(--danger); background:rgba(245,75,94,.1); }
+.quiz-result { text-align:center; padding:16px; font-size:15px; font-weight:600; }
+
+.empty-state { text-align:center; padding:60px 20px; color:var(--text2); }
+.empty-state .icon { font-size:48px; margin-bottom:12px; }
+.btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:10px 22px; border-radius:22px; border:none; cursor:pointer; font-size:14px; font-weight:600; transition:all .2s; font-family:var(--font); }
+.btn-primary { background:var(--gradient); color:#fff; }
+.btn-primary:hover { transform:translateY(-1px); box-shadow:0 4px 16px rgba(79,110,246,.35); }
+.btn-primary:disabled { opacity:.4; cursor:not-allowed; transform:none; box-shadow:none; }
+.btn-outline { background:var(--surface); color:var(--primary); border:2px solid var(--primary); }
+.btn-success { background:var(--success); color:#fff; }
+.btn-lg { padding:14px 32px; font-size:16px; border-radius:26px; }
+
+.chat-box { background:var(--surface); border-radius:var(--radius); box-shadow:var(--shadow); display:flex; flex-direction:column; height:calc(100vh - 180px); }
+.chat-messages { flex:1; overflow-y:auto; padding:20px; display:flex; flex-direction:column; gap:12px; }
+.chat-msg { max-width:85%; padding:12px 16px; border-radius:16px; font-size:14px; line-height:1.6; }
+.chat-msg.user { align-self:flex-end; background:var(--gradient); color:#fff; border-bottom-right-radius:4px; }
+.chat-msg.assistant { align-self:flex-start; background:var(--surface2); border-bottom-left-radius:4px; }
+.chat-input-row { display:flex; gap:8px; padding:14px; border-top:1px solid var(--border); }
+.chat-input-row input { flex:1; padding:10px 16px; border:2px solid var(--border); border-radius:22px; font-size:14px; outline:none; font-family:var(--font); }
+.chat-input-row input:focus { border-color:var(--primary); }
+
+.radar-wrap { display:flex; justify-content:center; padding:20px 0; }
+
+.onboard-card { background:var(--surface); border-radius:var(--radius); box-shadow:var(--shadow); padding:44px 40px; text-align:center; max-width:540px; margin:80px auto 0; }
+.onboard-card h1 { font-size:26px; font-weight:800; margin-bottom:6px; }
+.onboard-card .subtitle { color:var(--text2); font-size:15px; margin-bottom:28px; }
+.progress-dots { display:flex; justify-content:center; gap:7px; margin-bottom:24px; }
+.progress-dots .dot { width:9px;height:9px;border-radius:50%;background:var(--border);transition:all .3s; }
+.progress-dots .dot.done { background:var(--success); }
+.progress-dots .dot.active { background:var(--primary);transform:scale(1.3); }
+.probe-question { font-size:19px; font-weight:600; margin-bottom:22px; line-height:1.5; }
+.probe-options { display:flex; flex-direction:column; gap:9px; }
+.probe-option { padding:13px 18px; border:2px solid var(--border); border-radius:var(--radius-sm); cursor:pointer; font-size:14px; transition:all .15s; text-align:left; background:var(--surface); }
+.probe-option:hover { border-color:var(--primary); background:var(--primary-light); }
+.probe-option.selected { border-color:var(--primary); background:var(--primary-light); color:var(--primary-dark); font-weight:600; }
+
+.modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:200; display:flex; align-items:center; justify-content:center; }
+.modal-box { background:var(--surface); border-radius:var(--radius); box-shadow:0 20px 60px rgba(0,0,0,.3); max-width:500px; width:90%; padding:48px 40px; text-align:center; }
+.modal-box h2 { font-size:22px; margin-bottom:6px; }
+
+.fade-in { animation: fadeIn .3s ease; }
+@keyframes fadeIn { from {opacity:0;transform:translateY(8px);} to {opacity:1;transform:translateY(0);} }
+.spin { animation:spin 1s linear infinite; display:inline-block; }
+@keyframes spin { to {transform:rotate(360deg);} }
+@media (max-width:768px) { .sidebar { display:none; } }
+</style>
+</head>
+<body>
+
+<div class="app">
+<!-- ====== SIDEBAR: 课程目录 ====== -->
+<div class="sidebar" id="sidebar">
+  <div class="sidebar-header">
+    <h2>EduAgent</h2>
+    <div class="sub">数据结构 · 完整课程</div>
+  </div>
+  <div class="sidebar-nav" id="toc-list"></div>
+</div>
+
+<!-- ====== MAIN ====== -->
+<div class="main">
+  <div class="topbar">
+    <div class="stat">掌握度: <strong id="stat-mastery">--</strong></div>
+    <div class="stat">当前: <strong id="stat-node">--</strong></div>
+    <div class="stat">进度: <strong id="stat-progress">0/20</strong></div>
+    <div class="nav-tabs">
+      <button class="nav-tab active" data-tab="learn">学习</button>
+      <button class="nav-tab" data-tab="tutor">问答</button>
+      <button class="nav-tab" data-tab="report">报告</button>
+    </div>
+  </div>
+  <div class="main-content" id="main-content">
+    <!-- Onboarding -->
+    <div id="onboard-section"></div>
+
+    <!-- Recommended path bar -->
+    <div class="path-bar" id="path-bar" style="display:none;"></div>
+
+    <!-- Learning player -->
+    <div class="learning-player hidden" id="learning-player">
+      <div class="player-progress">
+        <span style="font-weight:700;font-size:13px;">学习进度</span>
+        <div class="step-dots" id="step-dots"></div>
+        <span class="step-label" id="step-label"></span>
+      </div>
+      <div class="player-content" id="player-content"></div>
+      <div class="player-nav">
+        <button class="btn btn-outline" id="btn-prev" onclick="navCard(-1)" disabled>上一步</button>
+        <span class="nav-hint" id="nav-hint"></span>
+        <button class="btn btn-primary" id="btn-next" onclick="navCard(1)" disabled>下一步</button>
+      </div>
+    </div>
+    <div id="quiz-section"></div>
+    <div id="empty-learn" class="empty-state" style="display:none;"><div class="icon">📚</div><p>从左侧目录选择一个知识点开始学习</p></div>
+
+    <!-- Tutor -->
+    <div id="tutor-section" style="display:none;">
+      <div class="chat-box">
+        <div class="chat-messages" id="chat-messages">
+          <div class="chat-msg assistant">你好！我是你的AI学习助手。关于<strong>数据结构</strong>课程的任何问题都可以问我。</div>
+        </div>
+        <div class="chat-input-row">
+          <input type="text" id="tutor-input" placeholder="输入问题..." onkeydown="if(event.key==='Enter')askTutor()">
+          <button class="btn btn-primary" onclick="askTutor()" id="btn-ask">发送</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Report -->
+    <div id="report-section" style="display:none;">
+      <div class="radar-wrap"><canvas id="radar-canvas" width="300" height="300"></canvas></div>
+      <div style="background:var(--surface);border-radius:var(--radius);padding:24px;box-shadow:var(--shadow);white-space:pre-wrap;font-size:14px;line-height:1.8;" id="report-content">
+        <p style="color:var(--text2);">完成测验后自动生成诊断报告。</p>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<div id="completion-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;align-items:center;justify-content:center;">
+  <div class="modal-box fade-in">
+    <div style="font-size:64px;margin-bottom:12px;">🎉</div>
+    <h2>恭喜完成全部学习！</h2>
+    <p style="color:var(--text2);font-size:14px;">你已学完数据结构全部20个知识点</p>
+    <div style="background:var(--surface2);border-radius:var(--radius-sm);padding:14px;margin:14px 0;text-align:left;font-size:13px;" id="completion-stats"></div>
+    <button class="btn btn-primary" onclick="document.getElementById('completion-overlay').style.display='none'">继续复习</button>
+  </div>
+</div>
+
+<script>
+var API='',radarData=[.5,.5,.5,.5,.5],_onboarding=false,
+    radarLabels=['概念理解力','代码工程力','逻辑推理力','错题抗挫力','时间管理力'],
+    _browserCache={},_playerCards=[],_playerIdx=0,_currentNode=null,
+    _quizAnswers=[],_quizSubmitted=false,_allNodes=[],_mastery={},
+    _activeTab='learn';
+
+var _nodeTitles={'N01':'算法复杂度分析','N02':'线性表与顺序存储','N03':'链表与链式存储','N04':'栈及其应用','N05':'队列及其应用','N06':'树与二叉树基础','N07':'二叉搜索树','N08':'AVL平衡树','N09':'散列表与哈希','N10':'图的基本概念与存储','N11':'图的遍历 DFS/BFS','N12':'最小生成树','N13':'最短路径算法','N14':'拓扑排序与关键路径','N15':'排序算法基础','N16':'高级排序算法','N17':'查找与索引技术','N18':'动态规划入门','N19':'贪心算法与回溯','N20':'数据结构综合应用'};
+var _cardLabels={concept_map:'概念导图',code_snippet:'代码示例',interactive_exercise:'互动练习',video_summary:'视频摘要',diagnostic_quiz:'诊断测验'};
+var _cardEmoji={concept_map:'1F9E0',code_snippet:'1F4BB',interactive_exercise:'270F',video_summary:'1F3AC',diagnostic_quiz:'1F4DD'};
+
+// ── Tab switching ──
+document.querySelectorAll('.nav-tab').forEach(function(t){
+  t.addEventListener('click',function(){
+    document.querySelectorAll('.nav-tab').forEach(function(x){x.classList.remove('active');});
+    t.classList.add('active');_activeTab=t.dataset.tab;
+    document.getElementById('learning-player').classList.add('hidden');
+    document.getElementById('quiz-section').innerHTML='';
+    document.getElementById('empty-learn').style.display='none';
+    document.getElementById('tutor-section').style.display='none';
+    document.getElementById('report-section').style.display='none';
+    if(_activeTab==='learn'){
+      document.getElementById('empty-learn').style.display=(_currentNode||_onboarding)?'none':'';
+      if(_currentNode){document.getElementById('learning-player').classList.remove('hidden');}
+    }else if(_activeTab==='tutor'){document.getElementById('tutor-section').style.display='';}
+    else if(_activeTab==='report'){document.getElementById('report-section').style.display='';drawRadar();}
+  });
+});
+
+// ── TOC rendering ──
+function renderTOC(){
+  var html='';
+  _allNodes.forEach(function(nid,i){
+    var title=_nodeTitles[nid]||nid;
+    var mastered=_mastery[nid]&&_mastery[nid]>=0.65;
+    var icon=mastered?'&#9989;':(i+1<10?'0'+(i+1):''+(i+1));
+    var cls='toc-item';
+    if(nid===_currentNode)cls+=' active';
+    if(mastered)cls+=' mastered';
+    html+='<div class="'+cls+'" onclick="loadNode(\''+nid+'\')"><span class="toc-icon">'+icon+'</span><span class="toc-num">'+(i+1)+'</span>'+title+'</div>';
+  });
+  document.getElementById('toc-list').innerHTML=html;
+}
+function highlightTOC(nodeId){
+  document.querySelectorAll('.toc-item').forEach(function(el){el.classList.remove('active');});
+  var target=Array.from(document.querySelectorAll('.toc-item')).find(function(el){return el.textContent.indexOf((_nodeTitles[nodeId]||nodeId))>=0;});
+  if(target)target.classList.add('active');
+}
+
+// ── Cold Start ──
+async function initOnboarding(){
+  _onboarding=true;
+  await fetch(API+'/api/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:'demo_user'})});
+  showProbe();
+}
+function showProbe(){
+  fetch(API+'/api/cold-start/probe?user_id=demo_user').then(function(r){return r.json();}).then(function(data){
+    if(data.phase==='complete'||!data.probe){finishOnboarding();return;}
+    var p=data.probe,done=data.collected,total=6,dots='';
+    for(var i=0;i<total;i++){
+      if(i<done)dots+='<span class="dot done"></span>';
+      else if(i===done)dots+='<span class="dot active"></span>';
+      else dots+='<span class="dot"></span>';
+    }
+    var vals=p.option_values||p.options;
+    document.getElementById('onboard-section').innerHTML='<div class="onboard-card fade-in"><h1>了解你的学习风格</h1><div class="subtitle">第 '+(done+1)+'/'+total+' 步</div><div class="progress-dots">'+dots+'</div><div class="probe-question">'+p.question+'</div><div class="probe-options">'+p.options.map(function(opt,i){return '<div class="probe-option" onclick="selectProbe(this,\''+p.is_multi_select+'\')" data-value="'+(vals[i]||opt).replace(/"/g,'&quot;')+'">'+opt+'</div>';}).join('')+'</div><button class="btn btn-primary btn-lg" style="margin-top:22px;" id="probe-submit" disabled>继续</button></div>';
+    window._selectedValues=[];window._isMulti=p.is_multi_select;
+    document.getElementById('probe-submit').addEventListener('click',async function(){
+      var val=window._isMulti?window._selectedValues:window._selectedValues[0];
+      if(!val&&!window._isMulti)return;
+      var resp=await fetch(API+'/api/cold-start/answer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:'demo_user',answer:val})});
+      var d=await resp.json();
+      if(d.phase==='complete')finishOnboarding();else showProbe();
+    });
+  });
+}
+window.selectProbe=function(el,isMulti){
+  if(isMulti==='true'){
+    el.classList.toggle('selected');
+    window._selectedValues=Array.from(document.querySelectorAll('.probe-option.selected')).map(function(o){return o.dataset.value;});
+  }else{
+    document.querySelectorAll('.probe-option').forEach(function(o){o.classList.remove('selected');});
+    el.classList.add('selected');window._selectedValues=[el.dataset.value];
+  }
+  document.getElementById('probe-submit').disabled=window._selectedValues.length===0;
+};
+async function finishOnboarding(){
+  _onboarding=false;
+  document.getElementById('onboard-section').innerHTML='';
+  var resp=await fetch(API+'/api/init-path',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:'demo_user'})});
+  var data=await resp.json();
+  _allNodes=data.active_path||[];
+  // Fetch state for mastery data
+  var sr=await fetch(API+'/api/state?user_id=demo_user');
+  var st=await sr.json();
+  _mastery=st.dynamic_profile?st.dynamic_profile.knowledge_mastery||{}:{};
+  renderTOC();updateStats();
+  document.getElementById('path-bar').style.display='flex';
+  document.getElementById('empty-learn').style.display='none';
+  // Auto-load first unmastered node
+  var firstNode=_allNodes.find(function(n){return !_mastery[n]||_mastery[n]<0.65;})||_allNodes[0];
+  if(firstNode)loadNode(firstNode);
+}
+// ── Recommended path (pruned) ──
+var _recommendedPath=[];
+
+async function loadRecommendedPath(){
+  // Get pruned path from server (shortest critical path)
+  var sr=await fetch(API+'/api/state?user_id=demo_user');
+  var st=await sr.json();
+  // Compute recommended: topological order with mastered nodes highlighted
+  _recommendedPath=_allNodes.filter(function(n){return !_mastery[n]||_mastery[n]<0.65;});
+  // Ensure all prerequisites are included
+  if(_recommendedPath.length===0)_recommendedPath=_allNodes.slice(0,5);
+  renderPathBar();
+}
+function renderPathBar(){
+  // Pruned path: only nodes that are NOT mastered (mastery < 0.65)
+  var pruned=_allNodes.filter(function(n){return !_mastery[n]||_mastery[n]<0.65;});
+  if(pruned.length===0)pruned=_allNodes.slice(-3); // fallback: last 3 nodes
+  var html='<span style="font-weight:600;font-size:13px;margin-right:4px;">当前学习路线 ('+pruned.length+'个):</span>';
+  pruned.forEach(function(n,i){
+    if(i>0)html+='<span style="color:var(--text2);margin:0 2px;">→</span>';
+    var cls='path-node';
+    if(n===_currentNode)cls+=' current';
+    html+='<span class="'+cls+'" onclick="loadNode(\''+n+'\')">'+(_nodeTitles[n]||n)+'</span>';
+  });
+  document.getElementById('path-bar').innerHTML=html||'<span style="color:var(--text2);">全部完成！</span>';
+}
+
+function updateStats(){
+  var mastered=Object.values(_mastery).filter(function(v){return v>=0.65;}).length;
+  document.getElementById('stat-progress').textContent=mastered+'/'+_allNodes.length;
+  var avg=_allNodes.length>0?Math.round(Object.values(_mastery).reduce(function(a,b){return a+b;},0)/Math.max(1,Object.keys(_mastery).length)*100):0;
+  document.getElementById('stat-mastery').textContent=avg+'%';
+  renderPathBar();
+}
+
+// ── Node loading ──
+async function loadNode(nodeId){
+  if(_currentNode===nodeId&&_playerCards.length>0)return;
+  _currentNode=nodeId;_quizAnswers=[];_quizSubmitted=false;
+  document.getElementById('quiz-section').innerHTML='';
+  document.getElementById('learning-player').classList.remove('hidden');
+  document.getElementById('empty-learn').style.display='none';
+  document.getElementById('stat-node').textContent=_nodeTitles[nodeId]||nodeId;
+  highlightTOC(nodeId);renderPathBar();
+
+  // Browser cache
+  if(_browserCache[nodeId]&&_browserCache[nodeId].length>0){initPlayer(_browserCache[nodeId]);return;}
+
+  // Server cache
+  var sr=await fetch(API+'/api/state?user_id=demo_user');
+  var st=await sr.json();
+  var cards=(st.generated_resources||{})[nodeId]||[];
+
+  if(cards.length===0){
+    document.getElementById('player-content').innerHTML='<p style="color:var(--text2);"><span class="spin">&#8987;</span> 正在生成学习资源...</p>';
+    document.getElementById('step-dots').innerHTML='';
+    document.getElementById('btn-prev').disabled=true;document.getElementById('btn-next').disabled=true;
+    await fetch(API+'/api/pipeline/step',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:'demo_user',current_node_id:nodeId,correctness:0.7,time_spent_ratio:1.0})});
+    var sr2=await fetch(API+'/api/state?user_id=demo_user');
+    cards=((await sr2.json()).generated_resources||{})[nodeId]||[];
+  }
+  if(cards.length>0){
+    var co=['concept_map','code_snippet','interactive_exercise','video_summary','diagnostic_quiz'];
+    cards.sort(function(a,b){return co.indexOf(a.card_type)-co.indexOf(b.card_type);});
+    _browserCache[nodeId]=cards;initPlayer(cards);
+  }
+}
+
+// ── Player ──
+function initPlayer(cards){_playerCards=cards;_playerIdx=0;_quizAnswers=[];_quizSubmitted=false;
+  document.getElementById('quiz-section').innerHTML='';
+  var dots='';cards.forEach(function(c,i){
+    var emoji=String.fromCodePoint(parseInt(_cardEmoji[c.card_type]||'1F4C4',16));
+    dots+='<span class="step-dot" title="'+emoji+' '+(_cardLabels[c.card_type]||c.card_type)+'"></span>';
+  });
+  document.getElementById('step-dots').innerHTML=dots;showCard(0);
+}
+function showCard(idx){
+  if(idx<0||idx>=_playerCards.length)return;
+  _playerIdx=idx;var card=_playerCards[idx],total=_playerCards.length;
+  var label=_cardLabels[card.card_type]||card.card_type;
+  var emoji=String.fromCodePoint(parseInt(_cardEmoji[card.card_type]||'1F4C4',16));
+  document.getElementById('player-content').innerHTML=renderMD(card.content||'');
+  document.getElementById('step-label').textContent=emoji+' '+(idx+1)+'/'+total+' '+label;
+  document.getElementById('nav-hint').textContent=idx<total-1?'下一步: '+(_cardLabels[_playerCards[idx+1].card_type]||''):'完成测验后自动推进';
+  var dots=document.getElementById('step-dots').children;
+  for(var i=0;i<dots.length;i++){dots[i].classList.remove('done','current');if(i<idx)dots[i].classList.add('done');if(i===idx)dots[i].classList.add('current');}
+  document.getElementById('btn-prev').disabled=idx===0;
+  document.getElementById('btn-next').disabled=idx===total-1;
+  document.getElementById('btn-next').textContent=idx===total-1?'提交测验':'下一步';
+  if(idx===total-1&&card.card_type==='diagnostic_quiz'&&!_quizSubmitted){
+    renderQuiz(card);
+    setTimeout(function(){document.getElementById('quiz-section').scrollIntoView({behavior:'smooth',block:'start'});},200);
+  }else{document.getElementById('quiz-section').innerHTML='';}
+}
+function navCard(dir){
+  if(dir===1&&_playerIdx===_playerCards.length-1&&!_quizSubmitted){submitQuiz();return;}
+  var ni=_playerIdx+dir;if(ni>=0&&ni<_playerCards.length)showCard(ni);
+}
+
+// ── Quiz ──
+function renderQuiz(card){
+  var title=_nodeTitles[card.node_id]||card.node_id;
+  var sentences=(card.content||'').split(/[。；;.\n]/).filter(function(s){return s.trim().length>15;});
+  var qs=[{text:'根据学习材料，以下描述最准确的是？',options:[(sentences[0]||'').trim().slice(0,80),'时间复杂度为O(1)','需要掌握图论基础','以上都不对']},{text:'以下内容最符合学习材料的是？',options:[(sentences[Math.floor(sentences.length/2)]||'').trim().slice(0,80),'理解后需大量练习','属于基础入门内容','以上都不对']}];
+  _quizAnswers=new Array(qs.length).fill(-1);
+  var html='<div class="quiz-box fade-in"><h3>📝 诊断测验 — '+title+'</h3>';
+  qs.forEach(function(q,qi){
+    html+='<div class="quiz-question"><strong>问题 '+(qi+1)+':</strong> '+q.text+'<div class="quiz-options">';
+    q.options.forEach(function(opt,oi){html+='<div class="quiz-option" onclick="selectAnswer('+qi+','+oi+',this)" id="qo-'+qi+'-'+oi+'">'+opt+'</div>';});
+    html+='</div></div>';
+  });
+  html+='<button class="btn btn-success btn-lg" onclick="submitQuiz()" style="margin-top:10px;">提交答案并完成</button></div>';
+  document.getElementById('quiz-section').innerHTML=html;
+}
+function selectAnswer(qi,oi,el){
+  document.querySelectorAll('[id^="qo-'+(qi+1)+'-"]').forEach(function(o){o.classList.remove('chosen');});
+  el.classList.add('chosen');_quizAnswers[qi]=oi;
+}
+async function submitQuiz(){
+  if(_quizSubmitted)return;_quizSubmitted=true;
+  var correct=_quizAnswers.filter(function(a){return a===0;}).length,total=_quizAnswers.length,score=total>0?correct/total:0.5;
+  document.getElementById('quiz-section').innerHTML='<div class="quiz-box fade-in"><div class="quiz-result">📊 '+correct+'/'+total+' 正确 ('+Math.round(score*100)+'%)<br><span style="font-size:13px;color:var(--text2);">正在评估...</span></div></div>';
+
+  var resp=await fetch(API+'/api/pipeline/step',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:'demo_user',correctness:score,time_spent_ratio:1.0,code_pass_rate:score})});
+  var data=await resp.json();
+  if(data.capability_radar)radarData=data.capability_radar;
+  if(data.diagnostic_report)document.getElementById('report-content').textContent=data.diagnostic_report;
+
+  // Update mastery and TOC
+  var sr=await fetch(API+'/api/state?user_id=demo_user');
+  var st=await sr.json();
+  _mastery=st.dynamic_profile?st.dynamic_profile.knowledge_mastery||{}:{};
+  _mastery[_currentNode]=Math.max(_mastery[_currentNode]||0,score>=0.5?0.70:0.35);
+  renderTOC();highlightTOC(_currentNode);updateStats();renderPathBar();
+
+  // Auto-advance to next unmastered node
+  var curIdx=_allNodes.indexOf(_currentNode);
+  var nextNode=_allNodes.slice(curIdx+1).find(function(n){return !_mastery[n]||_mastery[n]<0.65;});
+  if(nextNode){
+    document.getElementById('quiz-section').innerHTML+='<div class="quiz-box fade-in" style="margin-top:10px;"><div class="quiz-result" style="color:var(--success);">✅ 掌握度已更新！</div><button class="btn btn-primary btn-lg" style="margin-top:8px;" onclick="loadNode(\''+nextNode+'\')">进入: '+(_nodeTitles[nextNode]||nextNode)+'</button></div>';
+  }else{
+    document.getElementById('quiz-section').innerHTML+='<div class="quiz-box fade-in" style="margin-top:10px;"><div class="quiz-result" style="color:var(--success);">🎉 全部知识点已完成！</div></div>';
+    document.getElementById('completion-overlay').style.display='flex';
+    document.getElementById('completion-stats').innerHTML='完成: '+_allNodes.map(function(n){return _nodeTitles[n]||n;}).join(' → ')+'<br>掌握度: '+document.getElementById('stat-mastery').textContent;
+  }
+}
+
+// ── Tutor ──
+async function askTutor(){
+  var input=document.getElementById('tutor-input'),query=input.value.trim();
+  if(!query)return;
+  var msgs=document.getElementById('chat-messages');
+  msgs.innerHTML+='<div class="chat-msg user fade-in">'+query+'</div>';
+  input.value='';document.getElementById('btn-ask').disabled=true;document.getElementById('btn-ask').textContent='...';
+  msgs.scrollTop=msgs.scrollHeight;
+  var thinkId='think-'+Date.now();
+  msgs.innerHTML+='<div class="chat-msg assistant fade-in" id="'+thinkId+'" style="font-style:italic;color:var(--text2);">思考中</div>';
+  msgs.scrollTop=msgs.scrollHeight;
+  var dots=['','.','..','...'],di=0;
+  var timer=setInterval(function(){var el=document.getElementById(thinkId);if(!el){clearInterval(timer);return;}di=(di+1)%4;el.textContent='思考中'+dots[di];},500);
+  try{
+    var resp=await fetch(API+'/api/tutor/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:'demo_user',query:query})});
+    var data=await resp.json(),tr=data.tutor_response||{};
+    var answer=tr.text_explanation||'抱歉，暂时无法回答。';
+    answer=answer.replace(/###\s+/g,'<strong>').replace(/\n\n/g,'<br><br>');
+    if(tr.mermaid_src)answer+='<div class="mermaid" style="margin-top:10px;">'+tr.mermaid_src+'</div>';
+    clearInterval(timer);var el=document.getElementById(thinkId);if(el)el.remove();
+    msgs.innerHTML+='<div class="chat-msg assistant fade-in">'+answer+'</div>';
+    msgs.scrollTop=msgs.scrollHeight;
+    if(tr.mermaid_src)mermaid.run({nodes:document.querySelectorAll('#chat-messages .mermaid')});
+  }catch(e){clearInterval(timer);var el=document.getElementById(thinkId);if(el)el.remove();msgs.innerHTML+='<div class="chat-msg assistant fade-in">出错了，请稍后重试</div>';}
+  document.getElementById('btn-ask').disabled=false;document.getElementById('btn-ask').textContent='发送';
+}
+
+// ── Markdown ──
+function renderMD(md){
+  var h=md||'';h=h.replace(/```(\w*)\n([\s\S]*?)```/g,'<pre><code>$2</code></pre>');h=h.replace(/`([^`]+)`/g,'<code>$1</code>');
+  h=h.replace(/^### (.+)$/gm,'<h3>$1</h3>');h=h.replace(/^## (.+)$/gm,'<h2>$1</h2>');h=h.replace(/^# (.+)$/gm,'<h1>$1</h1>');
+  h=h.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');h=h.replace(/\*(.+?)\*/g,'<em>$1</em>');
+  h=h.replace(/\n\n/g,'<br><br>');h=h.replace(/\n/g,'<br>');h=h.replace(/^---$/gm,'<hr>');return h;
+}
+
+// ── Radar ──
+function drawRadar(){
+  var canvas=document.getElementById('radar-canvas');if(!canvas)return;
+  var ctx=canvas.getContext('2d'),w=300,h=300,cx=150,cy=150,r=110,n=5;
+  ctx.clearRect(0,0,w,h);
+  [0.25,0.5,0.75,1.0].forEach(function(lvl){ctx.beginPath();for(var i=0;i<n;i++){var a=Math.PI*2*i/n-Math.PI/2,x=cx+r*lvl*Math.cos(a),y=cy+r*lvl*Math.sin(a);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);}ctx.closePath();ctx.strokeStyle='rgba(0,0,0,.08)';ctx.stroke();});
+  for(var i=0;i<n;i++){var a=Math.PI*2*i/n-Math.PI/2;ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(cx+r*Math.cos(a),cy+r*Math.sin(a));ctx.strokeStyle='rgba(0,0,0,.1)';ctx.stroke();ctx.fillStyle='#6b7394';ctx.font='12px sans-serif';ctx.textAlign='center';ctx.fillText(radarLabels[i],cx+(r+22)*Math.cos(a),cy+(r+22)*Math.sin(a));}
+  ctx.beginPath();for(var i=0;i<n;i++){var a=Math.PI*2*i/n-Math.PI/2,v=radarData[i]||.5,x=cx+r*v*Math.cos(a),y=cy+r*v*Math.sin(a);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);}ctx.closePath();ctx.fillStyle='rgba(79,110,246,.15)';ctx.fill();ctx.strokeStyle='#4f6ef6';ctx.lineWidth=2.5;ctx.stroke();
+  for(var i=0;i<n;i++){var a=Math.PI*2*i/n-Math.PI/2,v=radarData[i]||.5;ctx.beginPath();ctx.arc(cx+r*v*Math.cos(a),cy+r*v*Math.sin(a),5,0,Math.PI*2);ctx.fillStyle='#4f6ef6';ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();}
+}
+
+// ── Init ──
+mermaid.initialize({startOnLoad:false,theme:'default',securityLevel:'loose'});
+fetch(API+'/api/state?user_id=demo_user').then(function(r){return r.json();}).then(function(data){
+  if(data.active_path&&data.active_path.length>0){
+    _allNodes=data.active_path;_mastery=data.dynamic_profile?data.dynamic_profile.knowledge_mastery||{}:{};
+    renderTOC();updateStats();
+    document.getElementById('path-bar').style.display='flex';
+    document.getElementById('onboard-section').innerHTML='';
+    document.getElementById('empty-learn').style.display='';
+    if(data.dynamic_profile&&data.dynamic_profile.diagnostic_report_md)document.getElementById('report-content').textContent=data.dynamic_profile.diagnostic_report_md;
+    if(data.dynamic_profile&&data.dynamic_profile.capability_radar)radarData=data.dynamic_profile.capability_radar;
+    document.getElementById('stat-node').textContent=_nodeTitles[data.current_node_id]||data.current_node_id||'--';
+  }else{initOnboarding();}
+}).catch(function(){initOnboarding();});
+</script>
+</body>
+</html>
