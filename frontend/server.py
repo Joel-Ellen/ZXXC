@@ -125,97 +125,21 @@ from src.infrastructure.cold_start import (
     SituationProbe, ProbeFactory,
 )
 from src.infrastructure.path_planner import (
-    PathPlanner, KnowledgeNode, KnowledgeEdge, PathPlanStrategy, PlanContext,
+    PathPlanner, PathPlanStrategy, PlanContext,
 )
+from src.graph import get_kg_manager
 from src.infrastructure.pid_controller import PIDController, PIDConfig
 
 # ─── 模拟知识图谱 ───────────────────────────────────────────
-MOCK_KNOWLEDGE_NODES = [
-    KnowledgeNode(node_id="N01", title="算法复杂度分析", difficulty=0.25, estimated_hours=2.0, category="concept"),
-    KnowledgeNode(node_id="N02", title="线性表与顺序存储", difficulty=0.30, estimated_hours=2.5, category="concept"),
-    KnowledgeNode(node_id="N03", title="链表与链式存储", difficulty=0.30, estimated_hours=2.5, category="concept"),
-    KnowledgeNode(node_id="N04", title="栈及其应用", difficulty=0.35, estimated_hours=2.0, category="concept"),
-    KnowledgeNode(node_id="N05", title="队列及其应用", difficulty=0.35, estimated_hours=2.0, category="concept"),
-    KnowledgeNode(node_id="N06", title="树与二叉树基础", difficulty=0.45, estimated_hours=3.0, category="concept"),
-    KnowledgeNode(node_id="N07", title="二叉搜索树", difficulty=0.50, estimated_hours=3.0, category="concept"),
-    KnowledgeNode(node_id="N08", title="AVL 平衡树", difficulty=0.60, estimated_hours=3.5, category="concept"),
-    KnowledgeNode(node_id="N09", title="散列表与哈希", difficulty=0.55, estimated_hours=3.0, category="concept"),
-    KnowledgeNode(node_id="N10", title="图的基本概念与存储", difficulty=0.50, estimated_hours=2.5, category="concept"),
-    KnowledgeNode(node_id="N11", title="图的遍历 DFS/BFS", difficulty=0.55, estimated_hours=3.0, category="skill"),
-    KnowledgeNode(node_id="N12", title="最小生成树", difficulty=0.65, estimated_hours=3.5, category="skill"),
-    KnowledgeNode(node_id="N13", title="最短路径算法", difficulty=0.70, estimated_hours=4.0, category="skill"),
-    KnowledgeNode(node_id="N14", title="拓扑排序与关键路径", difficulty=0.70, estimated_hours=3.5, category="skill"),
-    KnowledgeNode(node_id="N15", title="排序算法基础", difficulty=0.55, estimated_hours=3.0, category="concept"),
-    KnowledgeNode(node_id="N16", title="高级排序算法", difficulty=0.65, estimated_hours=4.0, category="skill"),
-    KnowledgeNode(node_id="N17", title="查找与索引技术", difficulty=0.60, estimated_hours=3.0, category="concept"),
-    KnowledgeNode(node_id="N18", title="动态规划入门", difficulty=0.75, estimated_hours=5.0, category="skill"),
-    KnowledgeNode(node_id="N19", title="贪心算法与回溯", difficulty=0.70, estimated_hours=4.5, category="skill"),
-    KnowledgeNode(node_id="N20", title="数据结构综合应用", difficulty=0.80, estimated_hours=6.0, category="project"),
-]
 
-MOCK_KNOWLEDGE_EDGES = [
-    # 算法基础 → 各种数据结构
-    KnowledgeEdge(source_id="N01", target_id="N02", dependency_type="strict", weight=1.0),
-    KnowledgeEdge(source_id="N01", target_id="N03", dependency_type="strict", weight=1.0),
-    KnowledgeEdge(source_id="N01", target_id="N06", dependency_type="strict", weight=1.0),
-    KnowledgeEdge(source_id="N01", target_id="N15", dependency_type="strict", weight=1.0),
-    # 线性表 → 栈/队列
-    KnowledgeEdge(source_id="N02", target_id="N04", dependency_type="strict", weight=1.0),
-    KnowledgeEdge(source_id="N02", target_id="N05", dependency_type="strict", weight=1.0),
-    KnowledgeEdge(source_id="N03", target_id="N04", dependency_type="recommended", weight=0.5),
-    KnowledgeEdge(source_id="N03", target_id="N05", dependency_type="recommended", weight=0.5),
-    # 树进阶
-    KnowledgeEdge(source_id="N06", target_id="N07", dependency_type="strict", weight=1.0),
-    KnowledgeEdge(source_id="N07", target_id="N08", dependency_type="strict", weight=1.2),
-    # 散列表
-    KnowledgeEdge(source_id="N03", target_id="N09", dependency_type="recommended", weight=0.7),
-    KnowledgeEdge(source_id="N06", target_id="N09", dependency_type="recommended", weight=0.5),
-    # 图论链
-    KnowledgeEdge(source_id="N06", target_id="N10", dependency_type="strict", weight=1.0),
-    KnowledgeEdge(source_id="N10", target_id="N11", dependency_type="strict", weight=1.0),
-    KnowledgeEdge(source_id="N11", target_id="N12", dependency_type="strict", weight=1.2),
-    KnowledgeEdge(source_id="N11", target_id="N13", dependency_type="strict", weight=1.2),
-    KnowledgeEdge(source_id="N13", target_id="N14", dependency_type="strict", weight=1.0),
-    # 排序链
-    KnowledgeEdge(source_id="N15", target_id="N16", dependency_type="strict", weight=1.2),
-    KnowledgeEdge(source_id="N16", target_id="N17", dependency_type="recommended", weight=0.8),
-    # 高级算法
-    KnowledgeEdge(source_id="N13", target_id="N18", dependency_type="strict", weight=1.5),
-    KnowledgeEdge(source_id="N14", target_id="N18", dependency_type="recommended", weight=1.0),
-    KnowledgeEdge(source_id="N16", target_id="N19", dependency_type="recommended", weight=1.0),
-    KnowledgeEdge(source_id="N18", target_id="N19", dependency_type="recommended", weight=1.0),
-    # 综合
-    KnowledgeEdge(source_id="N08", target_id="N20", dependency_type="recommended", weight=1.0),
-    KnowledgeEdge(source_id="N09", target_id="N20", dependency_type="recommended", weight=1.0),
-    KnowledgeEdge(source_id="N12", target_id="N20", dependency_type="recommended", weight=1.0),
-    KnowledgeEdge(source_id="N19", target_id="N20", dependency_type="strict", weight=1.5),
-]
 
 # ─── 知识基础 → 节点掌握度映射 ─────────────────────────
-_KNOWLEDGE_TO_NODES = {
-    "python_basics": {"N02": 0.75, "N03": 0.70, "N04": 0.65, "N05": 0.65},
-    "data_structures": {"N01": 0.70, "N02": 0.80, "N03": 0.75, "N06": 0.60},
-    "linear_algebra": {"N18": 0.50},
-    "ml_basics": {"N18": 0.45},
-    "deep_learning": {"N18": 0.40, "N19": 0.35},
-    "databases": {"N09": 0.55, "N17": 0.50},
-    "dev_tools": {},
-    "none": {},
-}
 
 # ─── 节点标题映射（用于 ES 知识库检索）─────────────────────
-_NODE_TITLE_MAP = {
-    "N01": "算法复杂度分析", "N02": "线性表与顺序存储", "N03": "链表与链式存储",
-    "N04": "栈及其应用", "N05": "队列及其应用", "N06": "树与二叉树基础",
-    "N07": "二叉搜索树", "N08": "AVL平衡树", "N09": "散列表与哈希",
-    "N10": "图的基本概念与存储", "N11": "图的遍历DFS BFS", "N12": "最小生成树",
-    "N13": "最短路径算法", "N14": "拓扑排序与关键路径", "N15": "排序算法基础",
-    "N16": "高级排序算法", "N17": "查找与索引技术", "N18": "动态规划入门",
-    "N19": "贪心算法与回溯", "N20": "数据结构综合应用",
-}
+# removed
 
 def _apply_kb_premastery(kb_item: str, agent_state: AgentState) -> None:
-    node_map = _KNOWLEDGE_TO_NODES.get(kb_item, {})
+    node_map = _kg.get_knowledge_mastery_map([kb_item])
     for nid, mastery in node_map.items():
         if nid not in agent_state.dynamic_profile.knowledge_mastery:
             agent_state.dynamic_profile.knowledge_mastery[nid] = mastery
@@ -317,7 +241,7 @@ def get_or_create_session(user_id: str) -> Dict[str, Any]:
                     except Exception:
                         pass
                 # ES 知识库回退（同节点只搜一次）
-                title = _NODE_TITLE_MAP.get(node_id, node_id)
+                title = _get_node_title(node_id, node_id)
                 cache_key = node_id
                 if cache_key not in _es_cache:
                     chunks = _search_knowledge_base(title, top_k=2)
@@ -337,14 +261,14 @@ def get_or_create_session(user_id: str) -> Dict[str, Any]:
             def _kb_generate(node_id: str, card_type: str, difficulty: float) -> str:
                 chunks = _search_knowledge_base(node_id, top_k=2)
                 if not chunks:
-                    chunks = _search_knowledge_base(_NODE_TITLE_MAP.get(node_id, node_id), top_k=2)
+                    chunks = _search_knowledge_base(_get_node_title(node_id, node_id), top_k=2)
                 context = "\n\n".join(chunks) if chunks else f"知识点 {node_id} 的相关内容正在准备中。"
                 templates = {
-                    "concept_map": f"## {_NODE_TITLE_MAP.get(node_id, node_id)}\n\n### 概念解析\n\n{context}\n\n---\n*难度: {difficulty:.0%}*",
-                    "code_snippet": f"## {_NODE_TITLE_MAP.get(node_id, node_id)} · 代码示例\n\n```python\n# 相关实现\n{context[:800]}\n```\n\n---\n*难度: {difficulty:.0%}*",
-                    "interactive_exercise": f"## 互动练习 · {_NODE_TITLE_MAP.get(node_id, node_id)}\n\n阅读以下内容并回答问题：\n\n{context[:600]}\n\n---\n*难度: {difficulty:.0%}*",
-                    "video_summary": f"## 视频摘要 · {_NODE_TITLE_MAP.get(node_id, node_id)}\n\n{context[:500]}\n\n---\n*难度: {difficulty:.0%}*",
-                    "diagnostic_quiz": f"## 诊断测验 · {_NODE_TITLE_MAP.get(node_id, node_id)}\n\n根据以下知识点完成自测：\n\n{context[:600]}\n\n---\n*难度: {difficulty:.0%}*",
+                    "concept_map": f"## {_get_node_title(node_id, node_id)}\n\n### 概念解析\n\n{context}\n\n---\n*难度: {difficulty:.0%}*",
+                    "code_snippet": f"## {_get_node_title(node_id, node_id)} · 代码示例\n\n```python\n# 相关实现\n{context[:800]}\n```\n\n---\n*难度: {difficulty:.0%}*",
+                    "interactive_exercise": f"## 互动练习 · {_get_node_title(node_id, node_id)}\n\n阅读以下内容并回答问题：\n\n{context[:600]}\n\n---\n*难度: {difficulty:.0%}*",
+                    "video_summary": f"## 视频摘要 · {_get_node_title(node_id, node_id)}\n\n{context[:500]}\n\n---\n*难度: {difficulty:.0%}*",
+                    "diagnostic_quiz": f"## 诊断测验 · {_get_node_title(node_id, node_id)}\n\n根据以下知识点完成自测：\n\n{context[:600]}\n\n---\n*难度: {difficulty:.0%}*",
                 }
                 return templates.get(card_type, context)
             mesh = ContentMeshNode(generate_fn=_kb_generate)
@@ -354,7 +278,7 @@ def get_or_create_session(user_id: str) -> Dict[str, Any]:
         cold_state = cold_engine.initialize(user_id)
 
         # 初始化路径规划器（使用模拟知识图谱）
-        path_planner = PathPlanner(MOCK_KNOWLEDGE_NODES, MOCK_KNOWLEDGE_EDGES)
+        path_planner = _kg.create_path_planner()
 
         sessions[user_id] = {
             "agent_state": agent_state,
@@ -703,7 +627,7 @@ async def api_run_pipeline_step(request: Request) -> JSONResponse:
                 content = mesh._default_generate(nid, missing_type, difficulty)
                 # Try getting real content from ES
                 try:
-                    title = _NODE_TITLE_MAP.get(nid, nid)
+                    title = _get_node_title(nid, nid)
                     chunks = _search_knowledge_base(title, top_k=1)
                     if not chunks:
                         chunks = _search_knowledge_base(nid, top_k=1)
@@ -850,7 +774,7 @@ async def api_knowledge_graph(request: Request) -> JSONResponse:
                 "estimated_hours": n.estimated_hours,
                 "category": n.category,
             }
-            for n in MOCK_KNOWLEDGE_NODES
+            for n in _kg.get_all_nodes()
         ],
         "edges": [
             {
@@ -859,7 +783,7 @@ async def api_knowledge_graph(request: Request) -> JSONResponse:
                 "dependency_type": e.dependency_type,
                 "weight": e.weight,
             }
-            for e in MOCK_KNOWLEDGE_EDGES
+            for e in _kg.get_all_edges()
         ],
     })
 
@@ -1024,6 +948,228 @@ async def api_stream_pipeline(request: Request) -> EventSourceResponse:
 # ─── 应用 ────────────────────────────────────────────────────
 
 static_dir = Path(__file__).resolve().parent
+
+# --- Auth API Handlers ------------------------------------------------
+
+async def api_auth_captcha(request: Request) -> Response:
+    """GET /api/auth/captcha — 获取 SVG 数学验证码。"""
+    store, captcha = _get_auth()
+    svg, token = captcha.generate()
+    html = (
+        '<html><head><meta charset="utf-8"></head>'
+        '<body style="display:flex;flex-direction:column;align-items:center;'
+        'justify-content:center;min-height:100vh;font-family:Arial,sans-serif;'
+        'background:#f0f2f5">'
+        f'<div style="background:#fff;padding:30px 40px;border-radius:12px;'
+        f'box-shadow:0 2px 12px rgba(0,0,0,0.08);text-align:center">'
+        f'<h3 style="color:#333;margin-bottom:16px">EduAgent 验证码</h3>'
+        f'<div style="border:1px solid #e0e0e0;border-radius:6px;padding:8px;'
+        f'background:#fafafa">{svg}</div>'
+        f'<p style="margin-top:12px;color:#666;font-size:13px">'
+        f'请输入上方数学表达式的计算结果</p>'
+        f'<p style="color:#999;font-size:11px;word-break:break-all">'
+        f'Captcha Token: <code style="background:#f5f5f5;padding:2px 6px;'
+        f'border-radius:3px">{token}</code></p>'
+        f'</div></body></html>'
+    )
+    return Response(html, media_type="text/html; charset=utf-8")
+
+
+async def api_auth_captcha_json(request: Request) -> JSONResponse:
+    """GET /api/auth/captcha-json — 获取验证码 (JSON 响应，供前端调用)。"""
+    store, captcha = _get_auth()
+    svg, token = captcha.generate()
+    return JSONResponse({"svg": svg, "captcha_token": token})
+
+
+async def api_auth_register(request: Request) -> JSONResponse:
+    """POST /api/auth/register — 用户注册。"""
+    store, captcha = _get_auth()
+    from src.auth.security import SecurityManager
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"detail": "请求体格式错误"}, status_code=400)
+
+    user_id = body.get("user_id", "").strip()
+    email = body.get("email", "").strip()
+    password = body.get("password", "")
+    captcha_token = body.get("captcha_token", "")
+    captcha_answer = body.get("captcha_answer", "")
+
+    # 校验验证码
+    if not captcha.verify(captcha_token, captcha_answer):
+        return JSONResponse({"detail": "验证码错误或已过期"}, status_code=400)
+
+    # 基本校验
+    if len(user_id) < 3 or not user_id.replace("_", "").isalnum():
+        return JSONResponse(
+            {"detail": "用户名需 3-32 字符，仅允许字母/数字/下划线"},
+            status_code=400,
+        )
+    if "@" not in email:
+        return JSONResponse({"detail": "邮箱格式无效"}, status_code=400)
+    if len(password) < 8:
+        return JSONResponse({"detail": "密码至少 8 个字符"}, status_code=400)
+
+    try:
+        user = store.create_user(user_id, email, password)
+    except ValueError as e:
+        return JSONResponse({"detail": str(e)}, status_code=409)
+
+    token_pair = SecurityManager.create_token_pair(user.user_id, user.role)
+    return JSONResponse({
+        "access_token": token_pair["access_token"],
+        "refresh_token": token_pair["refresh_token"],
+        "token_type": "bearer",
+        "user": user.to_safe_dict(),
+    })
+
+
+async def api_auth_login(request: Request) -> JSONResponse:
+    """POST /api/auth/login — 用户登录。"""
+    store, captcha = _get_auth()
+    from src.auth.security import SecurityManager
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"detail": "请求体格式错误"}, status_code=400)
+
+    user_id = body.get("user_id", "").strip()
+    password = body.get("password", "")
+    captcha_token = body.get("captcha_token", "")
+    captcha_answer = body.get("captcha_answer", "")
+
+    if not captcha.verify(captcha_token, captcha_answer):
+        return JSONResponse({"detail": "验证码错误或已过期"}, status_code=400)
+
+    if not user_id or not password:
+        return JSONResponse({"detail": "用户名和密码不能为空"}, status_code=400)
+
+    user = store.verify_login(user_id, password)
+    if user is None:
+        return JSONResponse(
+            {"detail": "用户名或密码错误"},
+            status_code=401,
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    token_pair = SecurityManager.create_token_pair(user.user_id, user.role)
+    return JSONResponse({
+        "access_token": token_pair["access_token"],
+        "refresh_token": token_pair["refresh_token"],
+        "token_type": "bearer",
+        "user": user.to_safe_dict(),
+    })
+
+
+async def api_auth_refresh(request: Request) -> JSONResponse:
+    """POST /api/auth/refresh — 令牌刷新轮转。"""
+    from src.auth.security import SecurityManager
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"detail": "请求体格式错误"}, status_code=400)
+
+    refresh_token = body.get("refresh_token", "")
+    if not refresh_token:
+        return JSONResponse({"detail": "refresh_token 不能为空"}, status_code=400)
+
+    try:
+        payload = SecurityManager.decode_token(refresh_token)
+    except ValueError as e:
+        return JSONResponse({"detail": str(e)}, status_code=401)
+
+    if payload.get("type") != "refresh":
+        return JSONResponse({"detail": "INVALID_TOKEN_TYPE"}, status_code=401)
+
+    user_id = payload.get("sub", "")
+    store, _ = _get_auth()
+    user = store.get_by_id(user_id)
+    role = user.role if user else "STUDENT"
+
+    token_pair = SecurityManager.create_token_pair(user_id, role)
+    user_info = user.to_safe_dict() if user else {}
+    return JSONResponse({
+        "access_token": token_pair["access_token"],
+        "refresh_token": token_pair["refresh_token"],
+        "token_type": "bearer",
+        "user": user_info,
+    })
+
+
+async def api_auth_me(request: Request) -> JSONResponse:
+    """GET /api/auth/me — 获取当前用户信息 (需 Bearer Token)。"""
+    from src.auth.security import SecurityManager
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return JSONResponse({"detail": "缺少认证令牌"}, status_code=401)
+
+    token = auth_header[7:]
+    try:
+        payload = SecurityManager.decode_token(token)
+    except ValueError as e:
+        return JSONResponse({"detail": str(e)}, status_code=401)
+
+    if payload.get("type") != "access":
+        return JSONResponse({"detail": "INVALID_TOKEN_TYPE"}, status_code=401)
+
+    user_id = payload.get("sub", "")
+    store, _ = _get_auth()
+    user = store.get_by_id(user_id)
+    if user is None:
+        return JSONResponse({"detail": "用户不存在"}, status_code=404)
+
+    return JSONResponse(user.to_safe_dict())
+
+
+app = Starlette(
+    debug=True,
+    routes=[
+        Route("/api/reset", api_reset, methods=["POST"]),
+        Route("/api/state", api_get_state, methods=["GET"]),
+        Route("/api/cold-start/probe", api_cold_start_probe, methods=["GET"]),
+        Route("/api/cold-start/answer", api_cold_start_answer, methods=["POST"]),
+        Route("/api/init-path", api_init_path, methods=["POST"]),
+        Route("/api/pipeline/step", api_run_pipeline_step, methods=["POST"]),
+        Route("/api/pipeline/stream", api_stream_pipeline, methods=["GET"]),
+        Route("/api/tutor/ask", api_ask_tutor, methods=["POST"]),
+        Route("/api/knowledge-graph", api_knowledge_graph, methods=["GET"]),
+        # ── 认证 API ──
+        Route("/api/auth/captcha", api_auth_captcha, methods=["GET"]),
+        Route("/api/auth/captcha-json", api_auth_captcha_json, methods=["GET"]),
+        Route("/api/auth/register", api_auth_register, methods=["POST"]),
+        Route("/api/auth/login", api_auth_login, methods=["POST"]),
+        Route("/api/auth/refresh", api_auth_refresh, methods=["POST"]),
+        Route("/api/auth/me", api_auth_me, methods=["GET"]),
+        Mount("/", app=StaticFiles(directory=str(static_dir), html=True)),
+    ],
+)
+
+
+if __name__ == "__main__":
+    print("=" * 60)
+    print("  EduAgent 前后端对接服务器")
+    print("  访问: http://localhost:8800")
+    print("=" * 60)
+    # 启动时预加载 ES 知识库（模型加载 + 连接）
+    print("[Init] Loading knowledge base...")
+    _get_es_kb()
+    print("[Init] Ready.")
+    uvicorn.run(app, host="0.0.0.0", port=8800, log_level="info")# --- 知识图谱 (Neo4j / 内存回退) -------------------------------
+
+_kg = get_kg_manager()
+
+def _get_node_title(node_id: str) -> str:
+    """获取节点标题。"""
+    return _kg.get_node_title(node_id)
+
+def _apply_kb_premastery(kb_item: str, agent_state: AgentState) -> None:
+    node_map = _kg.get_knowledge_mastery_map([kb_item])
+    for nid, mastery in node_map.items():
+        if nid not in agent_state.dynamic_profile.knowledge_mastery:
+            agent_state.dynamic_profile.knowledge_mastery[nid] = mastery
+
 
 # --- Auth API Handlers ------------------------------------------------
 
