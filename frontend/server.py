@@ -130,13 +130,13 @@ from src.infrastructure.path_planner import (
 from src.graph import get_kg_manager
 from src.infrastructure.pid_controller import PIDController, PIDConfig
 
-# ─── 模拟知识图谱 ───────────────────────────────────────────
+_kg = get_kg_manager()
 
 
-# ─── 知识基础 → 节点掌握度映射 ─────────────────────────
+def _get_node_title(node_id: str) -> str:
+    """鑾峰彇鑺傜偣鏍囬銆?"""
+    return _kg.get_node_title(node_id)
 
-# ─── 节点标题映射（用于 ES 知识库检索）─────────────────────
-# removed
 
 def _apply_kb_premastery(kb_item: str, agent_state: AgentState) -> None:
     node_map = _kg.get_knowledge_mastery_map([kb_item])
@@ -179,9 +179,38 @@ def _get_es_kb():
     return _es_kb_client
 
 
+_es_kb_init_attempted = False
+_es_kb_init_error: Optional[str] = None
+
+
+def _safe_get_es_kb():
+    """Initialize the knowledge base once and gracefully degrade on failure."""
+    global _es_kb_client, _es_embedder, _es_kb_init_attempted, _es_kb_init_error
+    if _es_kb_client is not None:
+        return _es_kb_client
+    if _es_kb_init_attempted:
+        return None
+
+    _es_kb_init_attempted = True
+    try:
+        client = _get_es_kb()
+        _es_kb_init_error = None
+        return client
+    except Exception as exc:
+        _es_kb_client = None
+        _es_embedder = None
+        _es_kb_init_error = f"{type(exc).__name__}: {exc}"
+        print(
+            "[ES] Knowledge base unavailable, fallback mode enabled: "
+            f"{_es_kb_init_error}"
+        )
+        print(traceback.format_exc(limit=3).rstrip())
+        return None
+
+
 def _search_knowledge_base(query: str, top_k: int = 5) -> List[str]:
     """从 ES 知识库检索相关内容"""
-    client = _get_es_kb()
+    client = _safe_get_es_kb()
     if client is None:
         return []
     try:
@@ -947,7 +976,9 @@ async def api_stream_pipeline(request: Request) -> EventSourceResponse:
 
 # ─── 应用 ────────────────────────────────────────────────────
 
-static_dir = Path(__file__).resolve().parent
+_frontend_root = Path(__file__).resolve().parent
+_frontend_dist = _frontend_root / "dist"
+static_dir = _frontend_dist if _frontend_dist.is_dir() else _frontend_root
 
 # --- Auth API Handlers ------------------------------------------------
 
@@ -1154,7 +1185,7 @@ if __name__ == "__main__":
     print("=" * 60)
     # 启动时预加载 ES 知识库（模型加载 + 连接）
     print("[Init] Loading knowledge base...")
-    _get_es_kb()
+    _safe_get_es_kb()
     print("[Init] Ready.")
     uvicorn.run(app, host="0.0.0.0", port=8800, log_level="info")# --- 知识图谱 (Neo4j / 内存回退) -------------------------------
 
