@@ -1,43 +1,43 @@
 <template>
-  <div class="space-y-2.5">
+  <div class="space-y-3">
     <button
       v-for="node in nodes"
       :key="node.id"
       type="button"
-      class="focus-ring group relative flex w-full items-start gap-3 overflow-hidden rounded-[18px] px-4 py-3 text-left transition duration-300 hover:translate-x-[2px]"
+      class="focus-ring group relative flex w-full items-start gap-4 overflow-hidden rounded-[18px] px-4 py-4 text-left transition-all duration-300 hover:translate-x-[2px] active:scale-[0.99]"
       :class="buttonClass(node)"
       @click="$emit('select', node.id)"
     >
-      <div class="absolute inset-y-3 left-0 w-px bg-gradient-to-b from-transparent via-white/[0.06] to-transparent" />
+      <div class="absolute inset-y-4 left-0 w-px bg-gradient-to-b from-transparent via-[var(--border-strong)] to-transparent" />
 
-      <span class="mt-0.5 w-7 text-[11px] font-mono uppercase tracking-[0.18em] text-[#5E647B]">
+      <span class="mt-0.5 w-8 text-[13px] font-mono uppercase tracking-[0.14em] text-text-muted">
         {{ String(node.order).padStart(2, "0") }}
       </span>
 
       <span
-        class="relative mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-white/[0.06] bg-white/[0.02]"
+        class="relative mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-subtle bg-card"
       >
         <IconCheck
           v-if="node.mastery >= 0.65"
-          class="text-aurora-mint"
-          :size="14"
+          class="text-success"
+          :size="16"
         />
         <IconLock
           v-else-if="isLocked(node)"
-          class="text-[#5E647B]"
-          :size="14"
+          class="text-text-muted"
+          :size="16"
         />
         <span
           v-else
-          class="h-1.5 w-1.5 rounded-full shadow-[0_0_10px_rgba(0,242,254,0.6)]"
-          :class="node.id === currentNode ? 'bg-aurora-purple shadow-[0_0_10px_rgba(127,0,255,0.65)]' : 'bg-aurora-mint'"
+          class="h-2 w-2 rounded-full"
+          :class="node.id === currentNode ? 'bg-secondary shadow-[0_0_10px_var(--color-secondary)]' : 'bg-primary shadow-[0_0_10px_var(--color-primary)]'"
         />
       </span>
 
       <span class="min-w-0 flex-1">
-        <span class="block truncate text-sm font-medium text-[#EEF2FB]">{{ node.title }}</span>
-        <span class="mt-1 block text-[11px] font-light uppercase tracking-[0.12em] text-[#5E647B]">
-          {{ node.mastery >= 0.65 ? "Mastered" : `Mastery ${Math.round(node.mastery * 100)}%` }}
+        <span class="block truncate text-[15px] font-medium leading-6 text-text-primary">{{ node.title }}</span>
+        <span class="mt-1 block text-[12px] font-light tracking-[0.08em] text-text-muted">
+          {{ node.mastery >= 0.65 ? "已掌握" : `掌握度 ${Math.round(node.mastery * 100)}%` }}
         </span>
       </span>
     </button>
@@ -61,14 +61,14 @@ function isLocked(node) {
 
 function buttonClass(node) {
   if (node.id === props.currentNode) {
-    return "border border-aurora-purple/18 bg-[linear-gradient(135deg,rgba(127,0,255,0.12),rgba(255,255,255,0.02))] shadow-[0_10px_24px_rgba(0,0,0,0.24),inset_0_1px_0_rgba(255,255,255,0.02)]";
+    return "border border-secondary/25 bg-gradient-to-br from-secondary-soft to-transparent shadow-card";
   }
   if (node.mastery >= 0.65) {
-    return "border border-aurora-mint/14 bg-[linear-gradient(180deg,rgba(0,242,254,0.06),rgba(255,255,255,0.01))]";
+    return "border border-success/20 bg-gradient-to-b from-success-soft to-transparent";
   }
   if (isLocked(node)) {
-    return "border border-white/[0.03] bg-white/[0.015] opacity-80";
+    return "border border-subtle bg-card opacity-70";
   }
-  return "border border-white/[0.03] bg-white/[0.015] hover:border-white/[0.05]";
+  return "border border-subtle bg-card hover:border-hover hover:bg-card-hover";
 }
 </script>

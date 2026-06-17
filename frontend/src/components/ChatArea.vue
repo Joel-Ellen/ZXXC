@@ -1,10 +1,10 @@
 <template>
-  <section class="flex h-full min-h-0 flex-col bg-[#0C0D13] px-6 pb-6 pt-6 shadow-[inset_0_2px_12px_rgba(0,0,0,0.8)]">
+  <section class="flex h-full min-h-0 flex-col px-6 pb-6 pt-6">
     <header class="pb-5">
-      <p class="text-[10px] font-black uppercase tracking-[-0.05em] text-[#4A4F68]">TUTOR CHANNEL</p>
-      <h2 class="mt-2 text-[24px] font-black uppercase tracking-[-0.05em] text-[#F0F3FB]">Tray Interface</h2>
-      <p class="mt-2 max-w-[28ch] text-xs font-light leading-6 text-[#4A4F68]">
-        Probe prompts, tutoring dialogue, and agent feedback are embedded directly into the tray.
+      <p class="text-[11px] font-black uppercase tracking-[0.12em] text-text-muted">辅导通道</p>
+      <h2 class="mt-2 text-[24px] font-black tracking-tight text-text-primary">学习托盘</h2>
+      <p class="mt-2 max-w-[32ch] text-xs font-light leading-6 text-text-muted">
+        冷启动测评、辅导对话与智能体反馈都会直接嵌入此托盘。
       </p>
     </header>
 
@@ -20,23 +20,25 @@
 
       <div class="space-y-6">
         <article
-          v-for="message in messages"
+          v-for="(message, index) in messages"
           :key="message.id"
-          class="flex"
+          class="flex animate-slideUp"
+          :style="{ animationDelay: `${index * 40}ms` }"
           :class="message.role === 'user' ? 'justify-end' : 'justify-start'"
         >
           <div
             class="max-w-[92%]"
-            :class="message.role === 'user'
-              ? 'rounded-[18px] border border-white/[0.04] bg-[linear-gradient(135deg,rgba(12,55,69,0.92),rgba(22,20,44,0.92))] px-4 py-3 shadow-[0_10px_28px_rgba(0,0,0,0.28)]'
-              : 'pl-0'"
+            :class="message.role === 'user' ? 'pr-0' : 'pl-0'"
           >
             <div
               v-if="message.role === 'assistant'"
-              class="border-l-[1.5px] border-aurora-mint/55 py-1 pl-4 shadow-[inset_1.5px_0_10px_rgba(0,242,254,0.05)]"
+              class="rounded-r-2xl rounded-bl-2xl rounded-tl-md border-l-[3px] border-primary bg-card py-3 px-4 shadow-card"
             >
-              <div class="mb-2 text-[10px] font-mono uppercase tracking-[0.2em] text-aurora-mint/75">
-                Tutor Agent
+              <div class="mb-2 flex items-center gap-2">
+                <span class="h-1.5 w-1.5 rounded-full bg-primary shadow-[0_0_10px_var(--color-primary)] animate-breathe" />
+                <span class="text-[10px] font-mono uppercase tracking-[0.2em] text-primary/90">
+                  辅导智能体
+                </span>
               </div>
               <StreamText
                 v-if="message.isStreaming && message.tokenStream"
@@ -49,36 +51,42 @@
               />
             </div>
 
-            <p
+            <div
               v-else
-              class="whitespace-pre-wrap text-sm font-light leading-7 text-[#F0F3FB]"
+              class="rounded-l-2xl rounded-br-2xl rounded-tr-md border-r-[3px] border-secondary bg-gradient-to-br from-secondary-soft to-card py-3 px-4 text-right shadow-card"
             >
-              {{ message.content }}
-            </p>
+              <div class="mb-2 flex items-center justify-end gap-2">
+                <span class="text-[10px] font-mono uppercase tracking-[0.2em] text-secondary/90">我</span>
+                <span class="h-1.5 w-1.5 rounded-full bg-secondary shadow-[0_0_10px_var(--color-secondary)]" />
+              </div>
+              <p class="whitespace-pre-wrap text-sm font-light leading-7 text-text-primary">
+                {{ message.content }}
+              </p>
+            </div>
           </div>
         </article>
       </div>
     </div>
 
     <footer class="pt-5">
-      <div class="rounded-[22px] border border-white/[0.03] bg-white/[0.015] p-3 shadow-[inset_0_1px_10px_rgba(0,0,0,0.6)]">
+      <div class="rounded-[24px] border border-subtle bg-card p-3 shadow-card">
         <div class="flex items-end gap-3">
-          <label class="sr-only" for="chat-input">Tutor input</label>
+          <label class="sr-only" for="chat-input">辅导输入框</label>
           <textarea
             id="chat-input"
             v-model="draft"
-            class="focus-ring min-h-[108px] flex-1 resize-none border-0 bg-transparent px-2 py-2 text-sm font-light leading-7 text-[#E2E6F3] placeholder:text-[#4A4F68]"
+            class="focus-ring min-h-[108px] flex-1 resize-none border-0 bg-transparent px-2 py-2 text-sm font-light leading-7 text-text-primary placeholder:text-text-muted"
             :disabled="bootMode === 'probe' || busy"
-            placeholder="Ask about a node, a code path, or why a concept behaves the way it does."
+            placeholder="询问某个知识点、代码路径，或某个概念为何如此工作。"
             @keydown.enter.exact.prevent="submit"
           />
           <button
             type="button"
-            class="focus-ring rounded-full border border-white/[0.05] bg-[linear-gradient(135deg,rgba(0,242,254,0.28),rgba(127,0,255,0.42))] px-5 py-3 text-[11px] font-black uppercase tracking-[0.14em] text-white transition active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40"
+            class="focus-ring btn-capsule"
             :disabled="bootMode === 'probe' || busy || !draft.trim()"
             @click="submit"
           >
-            {{ busy ? "Routing" : "Dispatch" }}
+            {{ busy ? "调度中" : "发送" }}
           </button>
         </div>
       </div>

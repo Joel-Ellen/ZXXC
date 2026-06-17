@@ -1,28 +1,28 @@
 <template>
-  <section class="mb-6 rounded-[22px] border border-white/[0.04] bg-[linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.012))] p-5 shadow-[inset_0_1px_10px_rgba(0,0,0,0.38),0_18px_38px_rgba(0,0,0,0.18)]">
+  <section class="mb-6 rounded-[22px] border border-subtle bg-card p-5 shadow-card">
     <div class="mb-5 flex items-start justify-between gap-3">
       <div>
-        <p class="text-[10px] font-black uppercase tracking-[0.16em] text-[#4A4F68]">Cold Start Probe</p>
-        <h2 class="mt-2 text-xl font-black uppercase tracking-[-0.05em] text-[#F0F3FB]">
-          Learning Signal Intake
+        <p class="text-[11px] font-black uppercase tracking-[0.12em] text-text-muted">冷启动测评</p>
+        <h2 class="mt-2 text-xl font-black tracking-tight text-text-primary">
+          学习画像采集
         </h2>
       </div>
-      <div class="text-right text-[11px] font-light text-[#4A4F68]">
-        <div>Round {{ collected + 1 }}</div>
+      <div class="text-right text-[11px] font-light text-text-muted">
+        <div>第 {{ collected + 1 }} 轮</div>
         <div>{{ Math.min(collected, total) }}/{{ total }}</div>
       </div>
     </div>
 
-    <div class="mb-5 flex gap-2">
+    <div class="mb-5 flex gap-1.5">
       <span
         v-for="index in total"
         :key="index"
-        class="h-px flex-1"
-        :class="index <= collected ? 'bg-aurora-mint' : index === collected + 1 ? 'bg-aurora-purple' : 'bg-white/[0.08]'"
+        class="h-1 flex-1 rounded-full transition-all duration-300"
+        :class="index <= collected ? 'bg-success shadow-[0_0_8px_var(--color-success)]' : index === collected + 1 ? 'bg-secondary' : 'bg-[var(--border-strong)]'"
       />
     </div>
 
-    <p class="max-w-[42ch] text-base font-light leading-8 text-[#DCE1EE]">
+    <p class="max-w-[42ch] text-base font-light leading-8 text-text-secondary">
       {{ probe?.question }}
     </p>
 
@@ -31,25 +31,25 @@
         v-for="(option, index) in probe?.options ?? []"
         :key="`${option}-${index}`"
         type="button"
-        class="focus-ring w-full rounded-[18px] border px-4 py-3 text-left transition"
+        class="focus-ring w-full rounded-[16px] border px-4 py-3 text-left transition-all duration-200 active:scale-[0.99]"
         :class="selectedClass(option)"
         @click="toggleOption(option, probe?.option_values?.[index] ?? option)"
       >
-        <span class="text-sm font-light text-[#E8ECF6]">{{ option }}</span>
+        <span class="text-sm font-light text-text-primary">{{ option }}</span>
       </button>
     </div>
 
     <div class="mt-6 flex items-center justify-between gap-4">
-      <p class="text-[11px] font-light text-[#4A4F68]">
-        {{ probe?.is_multi_select ? "Multi-select is enabled for this intake." : "Single-select response expected." }}
+      <p class="text-[11px] font-light text-text-muted">
+        {{ probe?.is_multi_select ? "本题支持多选。" : "本题仅支持单选。" }}
       </p>
       <button
         type="button"
-        class="focus-ring rounded-full border border-white/[0.05] bg-[linear-gradient(135deg,rgba(0,242,254,0.26),rgba(127,0,255,0.4))] px-5 py-2 text-[11px] font-black uppercase tracking-[0.14em] text-white transition active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40"
+        class="focus-ring btn-capsule"
         :disabled="isDisabled || submitting"
         @click="$emit('submit', selectedValues)"
       >
-        {{ submitting ? "Routing" : "Continue" }}
+        {{ submitting ? "提交中" : "继续" }}
       </button>
     </div>
   </section>
@@ -96,7 +96,7 @@ function selectedClass(optionLabel) {
   const index = props.probe?.options?.indexOf(optionLabel) ?? -1;
   const value = props.probe?.option_values?.[index] ?? optionLabel;
   return selectedValues.value.includes(value)
-    ? "border-aurora-mint/30 bg-aurora-mint/8 text-aurora-mint"
-    : "border-white/[0.04] bg-transparent hover:border-aurora-purple/25 hover:bg-aurora-purple/[0.04]";
+    ? "border-primary/30 bg-primary-soft text-primary"
+    : "border-subtle bg-transparent hover:border-secondary/25 hover:bg-card-hover";
 }
 </script>

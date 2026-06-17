@@ -1,82 +1,86 @@
 <template>
-  <div class="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 via-gray-950 to-indigo-950">
-    <div class="w-full max-w-md mx-4">
+  <div class="relative z-10 flex min-h-screen items-center justify-center px-4 py-12 animate-fadeIn">
+    <div class="w-full max-w-md">
       <!-- Logo -->
-      <div class="text-center mb-8">
-        <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white text-2xl font-black mb-3">EA</div>
-        <h1 class="text-2xl font-bold text-white">EduAgent</h1>
-        <p class="text-gray-400 text-sm mt-1">个性化多智能体学习系统</p>
+      <div class="text-center mb-10">
+        <div class="relative inline-flex items-center justify-center w-20 h-20 rounded-[22px] mb-5 overflow-hidden shadow-glow">
+          <div class="absolute inset-0 bg-gradient-to-br from-primary to-secondary opacity-90" />
+          <div class="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.25),transparent)]" />
+          <span class="relative text-white text-2xl font-black">EA</span>
+        </div>
+        <h1 class="text-3xl font-black tracking-tight text-text-primary mb-2">EduAgent</h1>
+        <p class="text-sm text-text-secondary">个性化多智能体学习系统</p>
       </div>
 
       <!-- 卡片 -->
-      <div class="bg-gray-900/80 backdrop-blur border border-gray-800 rounded-2xl p-6 shadow-2xl">
+      <div class="glass-card rounded-[28px] p-7">
         <!-- 标签切换 -->
-        <div class="flex mb-6 bg-gray-800/50 rounded-lg p-1">
+        <div class="flex mb-7 p-1 rounded-xl bg-card border border-subtle">
           <button
-            :class="mode === 'login' ? 'bg-gray-700 text-white shadow' : 'text-gray-400 hover:text-gray-200'"
-            class="flex-1 py-2 text-sm font-medium rounded-md transition"
+            :class="mode === 'login' ? 'bg-card-hover text-text-primary shadow-lg shadow-black/20' : 'text-text-muted hover:text-text-secondary'"
+            class="flex-1 py-2.5 text-sm font-medium rounded-lg transition-all duration-200"
             @click="mode = 'login'"
           >登录</button>
           <button
-            :class="mode === 'register' ? 'bg-gray-700 text-white shadow' : 'text-gray-400 hover:text-gray-200'"
-            class="flex-1 py-2 text-sm font-medium rounded-md transition"
+            :class="mode === 'register' ? 'bg-card-hover text-text-primary shadow-lg shadow-black/20' : 'text-text-muted hover:text-text-secondary'"
+            class="flex-1 py-2.5 text-sm font-medium rounded-lg transition-all duration-200"
             @click="mode = 'register'"
           >注册</button>
         </div>
 
         <!-- 表单 -->
-        <form @submit.prevent="onSubmit" class="space-y-4">
+        <form @submit.prevent="onSubmit" class="space-y-5">
           <!-- 用户名 -->
           <div>
-            <label class="block text-xs font-medium text-gray-400 mb-1">用户名</label>
+            <label class="block text-xs font-semibold text-text-secondary mb-1.5">用户名</label>
             <input
               v-model="form.userId"
               type="text"
               required
               minlength="3"
               placeholder="请输入用户名"
-              class="w-full px-3 py-2.5 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
+              class="w-full px-4 py-3 bg-input border border-subtle rounded-xl text-text-primary text-sm placeholder:text-text-muted focus:outline-none focus:border-primary/40 focus:ring-1 focus:ring-primary/20 transition"
             />
           </div>
 
           <!-- 邮箱 (仅注册) -->
           <div v-if="mode === 'register'">
-            <label class="block text-xs font-medium text-gray-400 mb-1">邮箱</label>
+            <label class="block text-xs font-semibold text-text-secondary mb-1.5">邮箱</label>
             <input
               v-model="form.email"
               type="email"
               required
               placeholder="请输入邮箱"
-              class="w-full px-3 py-2.5 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
+              class="w-full px-4 py-3 bg-input border border-subtle rounded-xl text-text-primary text-sm placeholder:text-text-muted focus:outline-none focus:border-primary/40 focus:ring-1 focus:ring-primary/20 transition"
             />
           </div>
 
           <!-- 密码 -->
           <div>
-            <label class="block text-xs font-medium text-gray-400 mb-1">密码</label>
+            <label class="block text-xs font-semibold text-text-secondary mb-1.5">密码</label>
             <input
               v-model="form.password"
               type="password"
               required
               minlength="8"
               placeholder="至少 8 个字符"
-              class="w-full px-3 py-2.5 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
+              class="w-full px-4 py-3 bg-input border border-subtle rounded-xl text-text-primary text-sm placeholder:text-text-muted focus:outline-none focus:border-primary/40 focus:ring-1 focus:ring-primary/20 transition"
             />
           </div>
 
           <!-- 验证码 -->
           <div>
-            <label class="block text-xs font-medium text-gray-400 mb-1">验证码</label>
-            <div class="flex gap-2">
+            <label class="block text-xs font-semibold text-text-secondary mb-1.5">验证码</label>
+            <div class="flex gap-3">
               <input
                 v-model="form.captchaAnswer"
                 type="text"
                 required
                 placeholder="计算结果"
-                class="flex-1 px-3 py-2.5 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:border-indigo-500 transition"
+                class="flex-1 px-4 py-3 bg-input border border-subtle rounded-xl text-text-primary text-sm placeholder:text-text-muted focus:outline-none focus:border-primary/40 focus:ring-1 focus:ring-primary/20 transition"
               />
               <div
-                class="h-[42px] w-[140px] bg-gray-100 rounded-lg cursor-pointer overflow-hidden flex-shrink-0 border border-gray-700 hover:border-indigo-500 transition"
+                class="h-[46px] w-[140px] bg-space-surface rounded-xl cursor-pointer overflow-hidden flex-shrink-0 border border-subtle hover:border-primary/40 transition"
                 v-html="captchaSvg"
                 @click="fetchCaptcha"
                 title="点击刷新验证码"
@@ -85,13 +89,13 @@
           </div>
 
           <!-- 错误提示 -->
-          <div v-if="errorMsg" class="text-red-400 text-xs bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">{{ errorMsg }}</div>
+          <div v-if="errorMsg" class="rounded-xl border border-error/20 bg-error-soft px-3 py-2.5 text-xs text-error">{{ errorMsg }}</div>
 
           <!-- 提交按钮 -->
           <button
             type="submit"
             :disabled="loading"
-            class="w-full py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white text-sm font-medium rounded-lg hover:from-indigo-500 hover:to-purple-500 disabled:opacity-50 disabled:cursor-not-allowed transition shadow-lg"
+            class="focus-ring w-full py-3 bg-gradient-to-r from-primary to-secondary text-primary-text text-sm font-bold rounded-full hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg shadow-primary/20 active:scale-[0.98]"
           >
             <span v-if="loading" class="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2 align-middle"></span>
             {{ mode === 'login' ? '登录' : '注册' }}
@@ -99,14 +103,30 @@
         </form>
 
         <!-- 预设账号提示 -->
-        <div class="mt-6 p-3 bg-gray-800/40 rounded-lg border border-gray-800">
-          <p class="text-xs text-gray-500 mb-2">预设测试账号</p>
-          <div class="text-xs text-gray-400 space-y-1">
-            <p>管理员：<code class="text-indigo-300 bg-gray-800 px-1 rounded">admin</code> / <code class="text-indigo-300 bg-gray-800 px-1 rounded">Admin@2026!</code></p>
-            <p>学生：<code class="text-green-300 bg-gray-800 px-1 rounded">student</code> / <code class="text-green-300 bg-gray-800 px-1 rounded">Learn@2026</code></p>
+        <div class="mt-6 p-4 rounded-xl bg-card border border-subtle">
+          <p class="text-xs text-text-muted mb-2">预设测试账号</p>
+          <div class="text-xs text-text-secondary space-y-1.5">
+            <p>管理员：<code class="text-primary bg-card px-1.5 py-0.5 rounded">admin</code> / <code class="text-primary bg-card px-1.5 py-0.5 rounded">Admin@2026!</code></p>
+            <p>学生：<code class="text-secondary bg-card px-1.5 py-0.5 rounded">student</code> / <code class="text-secondary bg-card px-1.5 py-0.5 rounded">Learn@2026</code></p>
           </div>
         </div>
       </div>
+
+      <!-- 返回首页 -->
+      <div class="mt-8 text-center">
+        <button
+          type="button"
+          class="text-xs text-text-muted hover:text-primary transition-colors duration-200 underline underline-offset-4"
+          @click="$emit('go-home')"
+        >
+          返回首页
+        </button>
+      </div>
+
+      <!-- Footer -->
+      <p class="mt-4 text-center text-[11px] text-text-muted">
+        EduAgent · 数据结构与算法智能学习工作台
+      </p>
     </div>
   </div>
 </template>
@@ -115,7 +135,7 @@
 import { ref, reactive, onMounted } from "vue";
 import { getCaptcha } from "../services/eduAgentApi";
 
-const emit = defineEmits(["login", "register"]);
+const emit = defineEmits(["login", "register", "go-home"]);
 
 const mode = ref("login");
 const loading = ref(false);

@@ -77,8 +77,8 @@ onUnmounted(() => {
   height: 0.95rem;
   margin-left: 0.18rem;
   vertical-align: middle;
-  background: #00f2fe;
-  box-shadow: 0 0 10px rgba(0, 242, 254, 0.7);
+  background: var(--color-primary);
+  box-shadow: 0 0 10px var(--color-primary-soft);
   animation: pulseCaret 1s ease-in-out infinite;
 }
 

@@ -12,12 +12,14 @@
 <script setup>
 import { computed, nextTick, ref, watch } from "vue";
 import { renderMarkdown } from "../utils/markdown";
+import { useTheme } from "../composables/useTheme.js";
 
 const props = defineProps({
   content: { type: String, default: "" },
   mermaidSource: { type: String, default: "" },
 });
 
+const { theme } = useTheme();
 const mermaidRoot = ref(null);
 const html = computed(() => renderMarkdown(props.content));
 
@@ -28,14 +30,17 @@ async function renderMermaid() {
     return;
   }
 
+  const isLight = theme.value === "light";
+
   if (!mermaidModule) {
     mermaidModule = await import("mermaid");
-    mermaidModule.default.initialize({
-      startOnLoad: false,
-      theme: "dark",
-      securityLevel: "strict",
-    });
   }
+
+  mermaidModule.default.initialize({
+    startOnLoad: false,
+    theme: isLight ? "default" : "dark",
+    securityLevel: "strict",
+  });
 
   await nextTick();
   mermaidRoot.value.innerHTML = props.mermaidSource;
@@ -51,4 +56,8 @@ watch(
   },
   { immediate: true },
 );
+
+watch(theme, () => {
+  renderMermaid();
+});
 </script>

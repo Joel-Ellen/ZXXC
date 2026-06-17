@@ -1,25 +1,25 @@
 <template>
-  <section class="relative flex h-full min-h-0 flex-col px-8 pb-8">
+  <section class="dot-grid relative flex h-full min-h-0 flex-col px-8 pb-8">
     <header class="pb-6">
       <div class="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p class="text-[10px] font-black uppercase tracking-[-0.05em] text-[#4A4F68]">MULTIMODAL CANVAS</p>
-          <h2 class="mt-2 text-[28px] font-black uppercase tracking-[-0.05em] text-[#F1F4FC]">{{ nodeTitle || "Awaiting Assembly" }}</h2>
+          <p class="text-[11px] font-black uppercase tracking-[0.12em] text-text-muted">多模态画布</p>
+          <h2 class="gradient-text mt-2 text-[28px] font-black tracking-tight">{{ nodeTitle || "等待装配" }}</h2>
         </div>
         <div class="flex items-center gap-2">
           <button
             type="button"
-            class="focus-ring rounded-full border border-white/[0.04] px-3 py-2 text-[11px] font-black uppercase tracking-[0.14em] text-[#7A8096] transition hover:border-aurora-mint/25 hover:text-[#E9EDF8]"
+            class="focus-ring rounded-full border border-subtle bg-card px-3.5 py-2 text-[11px] font-semibold uppercase tracking-[0.10em] text-text-muted transition-all duration-200 hover:border-primary/30 hover:text-primary hover:bg-card-hover active:scale-95"
             @click="isExpanded = !isExpanded"
           >
-            {{ isExpanded ? "Compact View" : "Expand Matrix" }}
+            {{ isExpanded ? "紧凑视图" : "展开矩阵" }}
           </button>
           <button
             type="button"
-            class="focus-ring rounded-full border border-white/[0.04] px-3 py-2 text-[11px] font-black uppercase tracking-[0.14em] text-[#7A8096] transition hover:border-aurora-mint/25 hover:text-[#E9EDF8]"
+            class="focus-ring rounded-full border border-subtle bg-card px-3.5 py-2 text-[11px] font-semibold uppercase tracking-[0.10em] text-text-muted transition-all duration-200 hover:border-secondary/30 hover:text-secondary hover:bg-card-hover active:scale-95"
             @click="focusMode = !focusMode"
           >
-            {{ focusMode ? "Exit Focus" : "Focus Mode" }}
+            {{ focusMode ? "退出聚焦" : "聚焦模式" }}
           </button>
         </div>
       </div>
@@ -29,12 +29,12 @@
           v-for="node in pathNodes"
           :key="node.id"
           type="button"
-          class="focus-ring rounded-full border px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.14em] transition"
+          class="focus-ring rounded-full border px-3.5 py-1.5 text-[11px] font-medium uppercase tracking-[0.10em] transition-all duration-200 active:scale-95"
           :class="node.id === currentNode
-            ? 'border-aurora-purple/35 text-[#ECEFFC]'
+            ? 'border-secondary/40 bg-secondary-soft text-secondary shadow-[0_0_12px_var(--color-secondary-soft)]'
             : node.mastery >= 0.65
-              ? 'border-aurora-mint/28 text-aurora-mint'
-              : 'border-white/[0.04] text-[#69708A]'"
+              ? 'border-success/25 text-success hover:border-success/40 hover:bg-success-soft'
+              : 'border-subtle text-text-muted hover:border-hover hover:text-text-secondary hover:bg-card-hover'"
           @click="$emit('select-node', node.id)"
         >
           {{ node.title }}
@@ -44,15 +44,16 @@
 
     <div class="aurora-scroll relative flex-1 overflow-y-auto">
       <div v-if="!cards.length && !loading" class="flex h-full min-h-[420px] items-center justify-center">
-        <div class="flex flex-col items-center text-center">
-          <div class="relative mb-5 flex h-20 w-20 items-center justify-center rounded-full">
-            <div class="absolute inset-0 rounded-full bg-aurora-purple/10 blur-xl animate-halo" />
+        <div class="flex flex-col items-center text-center animate-fadeIn">
+          <div class="relative mb-6 flex h-24 w-24 items-center justify-center rounded-full">
+            <div class="absolute inset-0 rounded-full bg-secondary/15 blur-2xl animate-halo" />
+            <div class="absolute inset-0 rounded-full border border-secondary/20 animate-spin-slow" />
             <svg
-              width="48"
-              height="48"
+              width="52"
+              height="52"
               viewBox="0 0 48 48"
               fill="none"
-              class="relative text-aurora-purple"
+              class="relative text-secondary"
               aria-hidden="true"
             >
               <circle cx="24" cy="24" r="6" stroke="currentColor" stroke-width="1.5" />
@@ -64,24 +65,24 @@
               <path d="M19 27l-4 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
             </svg>
           </div>
-          <p class="font-mono text-[12px] uppercase tracking-[0.22em] text-[#4A4F68]">
-            Multi-agent topology core waiting for assembly.
+          <p class="font-mono text-[12px] uppercase tracking-[0.22em] text-text-muted">
+            多智能体拓扑核心等待装配。
           </p>
-          <p class="mt-2 max-w-[42ch] font-mono text-[12px] leading-6 text-[#4A4F68]">
-            Current node resources have not been materialized yet. Select a path node or wait for the orchestration pipeline.
+          <p class="mt-2 max-w-[46ch] font-mono text-[12px] leading-6 text-text-muted">
+            当前节点资源尚未生成。请选择左侧路径节点，或等待编排流水线完成。
           </p>
         </div>
       </div>
 
       <div
-        class="mx-auto grid max-w-6xl grid-cols-1 gap-6 transition-all duration-500 ease-in-out md:grid-cols-2 xl:grid-cols-3"
-        :class="isExpanded ? 'scale-100' : 'scale-[0.992]'"
-      >
+        class="mx-auto grid max-w-6xl grid-cols-1 gap-5 transition-all duration-500 ease-snap md:grid-cols-12"
+        :class="isExpanded ? 'scale-100' : 'scale-[0.992]'">
         <div
-          v-for="card in visibleCards"
+          v-for="(card, index) in visibleCards"
           :key="card.resource_id"
           draggable="true"
-          class="transition-all duration-500"
+          class="animate-cardIn transition-all duration-500"
+          :style="{ animationDelay: `${index * 60}ms` }"
           :class="getGridSpanClass(card.card_type)"
           @dragstart="onDragStart(card.resource_id)"
           @dragover.prevent
@@ -90,11 +91,11 @@
           <ResourceCard
             :agent-name="agentLabel(card.card_type)"
             :title="cardLabel(card.card_type)"
-            :progress-text="loading ? 'Mesh Sync' : 'Resource Ready'"
+            :progress-text="loading ? '网格同步' : '资源就绪'"
             :progress="loading ? progressHint(card.card_type) : 100"
             :is-ready="!loading"
             :is-active="card.resource_id === activeCardId"
-            :ready-class="card.card_type === 'diagnostic_quiz' ? 'bg-aurora-purple' : 'bg-aurora-mint'"
+            :color="cardColor(card.card_type)"
             @pin="pinCard(card.resource_id)"
             @minimize="minimizeCard(card.resource_id)"
           >
@@ -110,15 +111,15 @@
                   <div
                     v-for="question in quizQuestions"
                     :key="question.id"
-                    class="rounded-[18px] border border-white/[0.04] bg-white/[0.015] p-4 shadow-[inset_0_1px_8px_rgba(0,0,0,0.35)]"
+                    class="rounded-[18px] border border-subtle bg-card p-4 shadow-card"
                   >
-                    <p class="text-sm font-medium text-[#F0F3FB]">{{ question.prompt }}</p>
+                    <p class="text-sm font-medium text-text-primary">{{ question.prompt }}</p>
                     <div class="mt-3 space-y-2">
                       <button
                         v-for="(option, optionIndex) in question.options"
                         :key="`${question.id}-${optionIndex}`"
                         type="button"
-                        class="focus-ring w-full rounded-[16px] border px-3 py-2 text-left text-sm font-light transition"
+                        class="focus-ring w-full rounded-[14px] border px-3 py-2.5 text-left text-sm font-light transition-all duration-200 active:scale-[0.99]"
                         :class="answerClass(question.id, optionIndex)"
                         @click="setAnswer(question.id, optionIndex)"
                       >
@@ -127,17 +128,17 @@
                     </div>
                   </div>
 
-                  <div class="flex flex-wrap items-center justify-between gap-3 rounded-[18px] border border-white/[0.04] bg-white/[0.015] p-4 shadow-[inset_0_1px_8px_rgba(0,0,0,0.35)]">
-                    <div class="text-sm font-light text-[#7A8096]">
-                      {{ submittedScore === null ? "Answer all prompts before dispatching the diagnostic score." : `Last diagnostic score ${Math.round(submittedScore * 100)}%` }}
+                  <div class="flex flex-wrap items-center justify-between gap-3 rounded-[18px] border border-subtle bg-card p-4 shadow-card">
+                    <div class="text-sm font-light text-text-muted">
+                      {{ submittedScore === null ? "请先回答所有题目，再提交诊断得分。" : `上次诊断得分 ${Math.round(submittedScore * 100)}%` }}
                     </div>
                     <button
                       type="button"
-                      class="focus-ring rounded-full border border-aurora-purple/18 bg-[linear-gradient(135deg,rgba(0,242,254,0.22),rgba(127,0,255,0.32))] px-4 py-2 text-[11px] font-black uppercase tracking-[0.14em] text-white transition active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40"
+                      class="focus-ring btn-capsule"
                       :disabled="!allAnswered || loading"
                       @click="submitQuizScore"
                     >
-                      Submit Diagnostic
+                      提交诊断
                     </button>
                   </div>
                 </div>
@@ -150,12 +151,12 @@
 
     <footer v-if="minimizedCards.length" class="pt-5">
       <div class="flex flex-wrap items-center gap-2">
-        <span class="text-[10px] font-black uppercase tracking-[0.16em] text-[#4A4F68]">Minimized</span>
+        <span class="text-[11px] font-black uppercase tracking-[0.12em] text-text-muted">已最小化</span>
         <button
           v-for="card in minimizedCards"
           :key="card.resource_id"
           type="button"
-          class="focus-ring rounded-full border border-white/[0.04] px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.14em] text-[#7A8096] transition hover:border-aurora-mint/25 hover:text-[#E9EDF8]"
+          class="focus-ring rounded-full border border-subtle bg-card px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.10em] text-text-muted transition-all duration-200 hover:border-primary/30 hover:text-primary hover:bg-card-hover active:scale-95"
           @click="restoreCard(card.resource_id)"
         >
           {{ cardLabel(card.card_type) }}
@@ -244,6 +245,17 @@ function agentLabel(cardType) {
   return props.getAgentLabel(cardType);
 }
 
+function cardColor(cardType) {
+  switch (cardType) {
+    case "concept_map": return "primary";
+    case "code_snippet": return "info";
+    case "interactive_exercise": return "tertiary";
+    case "video_summary": return "secondary";
+    case "diagnostic_quiz": return "warning";
+    default: return "primary";
+  }
+}
+
 function progressHint(cardType) {
   if (cardType === "diagnostic_quiz") {
     return 72;
@@ -258,13 +270,13 @@ function getGridSpanClass(cardType) {
   switch (cardType) {
     case "concept_map":
     case "video_summary":
-      return "col-span-1 xl:col-span-2";
+      return "col-span-1 md:col-span-6 xl:col-span-6";
     case "code_snippet":
-      return "col-span-1 md:col-span-2 xl:col-span-3";
+      return "col-span-1 md:col-span-12 xl:col-span-12";
     case "interactive_exercise":
     case "diagnostic_quiz":
     default:
-      return "col-span-1";
+      return "col-span-1 md:col-span-6";
   }
 }
 
@@ -315,8 +327,8 @@ function setAnswer(questionId, optionIndex) {
 function answerClass(questionId, optionIndex) {
   const selected = answers.value[questionId] === optionIndex;
   return selected
-    ? "border-aurora-mint/30 bg-aurora-mint/8 text-[#F0F3FB]"
-    : "border-white/[0.04] bg-transparent text-[#8A90A8] hover:border-aurora-purple/25 hover:text-[#E9EDF8]";
+    ? "border-primary/30 bg-primary-soft text-primary"
+    : "border-subtle bg-transparent text-text-secondary hover:border-secondary/25 hover:text-text-primary hover:bg-card-hover";
 }
 
 function submitQuizScore() {
@@ -331,3 +343,10 @@ function submitQuizScore() {
   emit("submit-quiz", score);
 }
 </script>
+
+<style scoped>
+.dot-grid {
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--text-muted) 10%, transparent) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+</style>

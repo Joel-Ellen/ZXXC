@@ -1,79 +1,148 @@
 <template>
-  <transition name="drawer">
-    <aside
+  <transition name="drawer-backdrop">
+    <div
       v-if="open"
-      class="fixed bottom-4 left-4 right-4 top-24 z-30 flex overflow-hidden rounded-[30px] border border-white/[0.035] bg-[linear-gradient(180deg,rgba(13,14,21,0.94),rgba(10,11,18,0.92))] shadow-[0_28px_60px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(255,255,255,0.02),inset_0_-28px_42px_rgba(0,0,0,0.42)] backdrop-blur-[18px] lg:inset-y-4 lg:left-24 lg:right-auto lg:top-4 lg:w-[300px]"
+      class="fixed inset-0 z-40 lg:z-30"
+      aria-hidden="true"
+      @click.self="$emit('close')"
     >
-      <div class="flex w-full flex-col">
-        <div class="relative px-6 pb-5 pt-5">
-          <div class="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
-          <p class="text-[10px] font-black uppercase tracking-[0.16em] text-[#4A4F68]">Mesh Console</p>
-          <h2 class="mt-2 text-[28px] font-black uppercase tracking-[-0.05em] text-[#F0F3FB]">{{ panelTitle }}</h2>
-          <p class="mt-2 max-w-[22ch] text-xs font-light leading-6 text-[#4A4F68]">
-            {{ panelDescription }}
-          </p>
-        </div>
+      <!-- Backdrop overlay -->
+      <div
+        class="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity lg:bg-black/10 lg:backdrop-blur-none"
+      />
 
-        <div class="aurora-scroll flex-1 overflow-y-auto px-5 pb-5">
-          <KnowledgeTree
-            v-if="activePanel === 'tree'"
-            :nodes="nodes"
-            :current-node="currentNode"
-            @select="$emit('select-node', $event)"
-          />
-          <RadarCanvas
-            v-else-if="activePanel === 'radar'"
-            :values="radarValues"
-            :high-contrast="highContrast"
-          />
-          <div v-else class="space-y-4">
-            <section class="rounded-[20px] border border-white/[0.035] bg-white/[0.02] p-4 shadow-[inset_0_1px_8px_rgba(0,0,0,0.34)]">
-              <h3 class="text-[11px] font-black uppercase tracking-[0.14em] text-[#E9EDF8]">High Contrast</h3>
-              <p class="mt-2 text-xs font-light leading-6 text-[#4A4F68]">
-                Increase mint and iris contrast for long-form reading and denser node scanning.
-              </p>
-              <button
-                type="button"
-                class="focus-ring mt-4 rounded-full border border-white/[0.05] px-3 py-2 text-[11px] font-black uppercase tracking-[0.14em] text-[#8A90A8] transition hover:border-aurora-mint/25 hover:text-[#EEF2FB]"
-                @click="$emit('toggle-contrast')"
-              >
-                {{ highContrast ? "Enabled" : "Enable" }}
-              </button>
-            </section>
+      <!-- Drawer panel -->
+      <transition name="drawer-panel">
+        <aside
+          class="absolute bottom-4 left-4 right-4 top-24 z-10 flex overflow-hidden rounded-[28px] border border-subtle bg-space-panel shadow-2xl backdrop-blur-xl lg:inset-y-4 lg:left-[68px] lg:right-auto lg:top-4 lg:w-[380px] lg:rounded-l-none lg:border-l-0"
+        >
+          <div class="flex w-full flex-col">
+            <!-- Header -->
+            <div class="relative flex items-start gap-4 px-6 pb-5 pt-6">
+              <div class="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-[var(--border-strong)] to-transparent" />
 
-            <section class="rounded-[20px] border border-white/[0.035] bg-white/[0.02] p-4 shadow-[inset_0_1px_8px_rgba(0,0,0,0.34)]">
-              <h3 class="text-[11px] font-black uppercase tracking-[0.14em] text-[#E9EDF8]">Base Font Size</h3>
-              <p class="mt-2 text-xs font-light leading-6 text-[#4A4F68]">
-                Adjust the workbench typography between 14 and 20 pixels.
-              </p>
-              <input
-                class="mt-4 w-full accent-[#00F2FE]"
-                type="range"
-                min="14"
-                max="20"
-                :value="fontSize"
-                @input="$emit('set-font-size', Number($event.target.value))"
+              <!-- Panel icon -->
+              <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-[16px] bg-gradient-to-br from-primary-soft to-secondary-soft text-primary shadow-card">
+                <component :is="panelIcon" :size="22" />
+              </div>
+
+              <div class="min-w-0 flex-1">
+                <p class="text-[11px] font-black uppercase tracking-[0.14em] text-text-muted">网格控制台</p>
+                <h2 class="gradient-text mt-1.5 text-[28px] font-black tracking-tight">{{ panelTitle }}</h2>
+                <p class="mt-2 max-w-[32ch] text-sm font-light leading-7 text-text-muted">
+                  {{ panelDescription }}
+                </p>
+              </div>
+            </div>
+
+            <!-- Content -->
+            <div class="aurora-scroll flex-1 overflow-y-auto px-5 pb-6">
+              <KnowledgeTree
+                v-if="activePanel === 'tree'"
+                :nodes="nodes"
+                :current-node="currentNode"
+                @select="$emit('select-node', $event)"
               />
-              <p class="mt-2 text-[11px] font-mono uppercase tracking-[0.14em] text-[#6E748B]">{{ fontSize }}px</p>
-            </section>
+              <RadarCanvas
+                v-else-if="activePanel === 'radar'"
+                :values="radarValues"
+                :high-contrast="highContrast"
+              />
+              <div v-else class="space-y-5">
+                <!-- Theme selector -->
+                <section class="rounded-[22px] border border-subtle bg-card p-5 shadow-card">
+                  <h3 class="text-sm font-bold tracking-wide text-text-secondary">配色主题</h3>
+                  <p class="mt-2 text-sm font-light leading-7 text-text-muted">
+                    在深色与浅色主题之间切换，颜色范围已扩展并提升辨识度。
+                  </p>
+                  <div class="mt-5 flex gap-2 p-1 rounded-xl bg-card border border-subtle">
+                    <button
+                      type="button"
+                      class="focus-ring flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-xs font-semibold tracking-wide transition-all duration-200"
+                      :class="theme === 'dark'
+                        ? 'bg-card-hover text-text-primary shadow-lg shadow-black/20'
+                        : 'text-text-muted hover:text-text-secondary'"
+                      @click="setTheme('dark')"
+                    >
+                      <span class="h-3 w-3 rounded-full bg-[#05060A] border border-white/20" />
+                      深色
+                    </button>
+                    <button
+                      type="button"
+                      class="focus-ring flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-xs font-semibold tracking-wide transition-all duration-200"
+                      :class="theme === 'light'
+                        ? 'bg-card-hover text-text-primary shadow-lg shadow-black/20'
+                        : 'text-text-muted hover:text-text-secondary'"
+                      @click="setTheme('light')"
+                    >
+                      <span class="h-3 w-3 rounded-full bg-[#FAFAF8] border border-black/10" />
+                      浅色
+                    </button>
+                  </div>
+                </section>
 
-            <section class="rounded-[20px] border border-white/[0.035] bg-white/[0.02] p-4 shadow-[inset_0_1px_8px_rgba(0,0,0,0.34)]">
-              <h3 class="text-[11px] font-black uppercase tracking-[0.14em] text-[#E9EDF8]">Reduced Motion</h3>
-              <p class="mt-2 text-xs font-light leading-6 text-[#4A4F68]">
-                Respect system preference and allow manual damping of motion across the interface.
-              </p>
-              <button
-                type="button"
-                class="focus-ring mt-4 rounded-full border border-white/[0.05] px-3 py-2 text-[11px] font-black uppercase tracking-[0.14em] text-[#8A90A8] transition hover:border-aurora-purple/25 hover:text-[#EEF2FB]"
-                @click="$emit('toggle-motion')"
-              >
-                {{ reduceMotion ? "Enabled" : "Enable" }}
-              </button>
-            </section>
+                <section class="rounded-[22px] border border-subtle bg-card p-5 shadow-card">
+                  <h3 class="text-sm font-bold tracking-wide text-text-secondary">高对比度</h3>
+                  <p class="mt-2 text-sm font-light leading-7 text-text-muted">
+                    提升主题色对比度，便于长时间阅读与密集节点扫描。
+                  </p>
+                  <button
+                    type="button"
+                    class="focus-ring mt-5 rounded-full border border-subtle bg-card px-4 py-2 text-xs font-semibold tracking-wide text-text-secondary transition-all duration-200 hover:border-primary/40 hover:text-primary hover:bg-card-hover"
+                    @click="$emit('toggle-contrast')"
+                  >
+                    {{ highContrast ? "已启用" : "启用" }}
+                  </button>
+                </section>
+
+                <section class="rounded-[22px] border border-subtle bg-card p-5 shadow-card">
+                  <h3 class="text-sm font-bold tracking-wide text-text-secondary">基础字号</h3>
+                  <p class="mt-2 text-sm font-light leading-7 text-text-muted">
+                    在工作台 14 至 20 像素之间调整字体大小。
+                  </p>
+                  <input
+                    class="mt-5 w-full accent-primary h-1.5 bg-[var(--border-strong)] rounded-lg appearance-none cursor-pointer"
+                    type="range"
+                    min="14"
+                    max="20"
+                    :value="fontSize"
+                    @input="$emit('set-font-size', Number($event.target.value))"
+                  />
+                  <p class="mt-2 text-xs font-mono uppercase tracking-[0.14em] text-text-muted">{{ fontSize }}px</p>
+                </section>
+
+                <section class="rounded-[22px] border border-subtle bg-card p-5 shadow-card">
+                  <h3 class="text-sm font-bold tracking-wide text-text-secondary">减少动效</h3>
+                  <p class="mt-2 text-sm font-light leading-7 text-text-muted">
+                    尊重系统偏好，并可手动减弱界面中的运动效果。
+                  </p>
+                  <button
+                    type="button"
+                    class="focus-ring mt-5 rounded-full border border-subtle bg-card px-4 py-2 text-xs font-semibold tracking-wide text-text-secondary transition-all duration-200 hover:border-secondary/40 hover:text-secondary hover:bg-card-hover"
+                    @click="$emit('toggle-motion')"
+                  >
+                    {{ reduceMotion ? "已启用" : "启用" }}
+                  </button>
+                </section>
+              </div>
+            </div>
+
+            <!-- Close handle (mobile) -->
+            <button
+              type="button"
+              class="focus-ring absolute right-4 top-4 rounded-full p-2 text-text-muted transition hover:bg-card-hover hover:text-text-primary lg:hidden"
+              aria-label="关闭侧边栏"
+              @click="$emit('close')"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 6 6 18" />
+                <path d="M6 6l12 12" />
+              </svg>
+            </button>
           </div>
-        </div>
-      </div>
-    </aside>
+        </aside>
+      </transition>
+    </div>
   </transition>
 </template>
 
@@ -81,6 +150,12 @@
 import { computed } from "vue";
 import KnowledgeTree from "./KnowledgeTree.vue";
 import RadarCanvas from "./RadarCanvas.vue";
+import IconRadar from "./icons/IconRadar.vue";
+import IconSettings from "./icons/IconSettings.vue";
+import IconTree from "./icons/IconTree.vue";
+import { useTheme } from "../composables/useTheme.js";
+
+const { theme, setTheme } = useTheme();
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -98,20 +173,72 @@ defineEmits([
   "toggle-contrast",
   "toggle-motion",
   "set-font-size",
+  "close",
 ]);
 
+const panelIcons = {
+  tree: IconTree,
+  radar: IconRadar,
+  settings: IconSettings,
+};
+
 const titles = {
-  tree: "Knowledge Tree",
-  radar: "Capability Radar",
-  settings: "Workbench Settings",
+  tree: "知识树",
+  radar: "能力雷达",
+  settings: "工作台设置",
 };
 
 const descriptions = {
-  tree: "Trace the learning topology, inspect mastery states, and jump directly into the next node.",
-  radar: "Review capability balance across concept comprehension, engineering, and timing discipline.",
-  settings: "Tune visual contrast, typography, and motion behavior for the current workbench session.",
+  tree: "追踪学习拓扑，查看掌握状态，并直接跳转到下一个节点。",
+  radar: "回顾概念理解、代码工程、逻辑推理等五项能力的平衡分布。",
+  settings: "为当前工作台会话调整主题、对比度、字体与动效。",
 };
 
-const panelTitle = computed(() => titles[props.activePanel] ?? "Workbench");
-const panelDescription = computed(() => descriptions[props.activePanel] ?? "Workbench controls.");
+const panelIcon = computed(() => panelIcons[props.activePanel] ?? IconSettings);
+const panelTitle = computed(() => titles[props.activePanel] ?? "工作台");
+const panelDescription = computed(() => descriptions[props.activePanel] ?? "工作台控制。");
 </script>
+
+<style scoped>
+.drawer-backdrop-enter-active,
+.drawer-backdrop-leave-active {
+  transition: opacity 280ms ease;
+}
+
+.drawer-backdrop-enter-from,
+.drawer-backdrop-leave-to {
+  opacity: 0;
+}
+
+.drawer-panel-enter-active,
+.drawer-panel-leave-active {
+  transition: transform 320ms cubic-bezier(0.16, 1, 0.3, 1), opacity 260ms ease;
+}
+
+.drawer-panel-enter-from,
+.drawer-panel-leave-to {
+  transform: translateX(-24px) scale(0.98);
+  opacity: 0;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  box-shadow: 0 0 12px var(--color-primary-soft);
+  cursor: pointer;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  box-shadow: 0 0 12px var(--color-primary-soft);
+  cursor: pointer;
+  border: none;
+}
+</style>

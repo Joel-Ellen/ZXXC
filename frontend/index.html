@@ -9,6 +9,18 @@
       content="EduAgent 多智能体学习工作台，提供冷启动测评、知识路径、对话辅导与资源画布。"
     />
     <link rel="icon" href="data:," />
+    <script>
+      (function () {
+        try {
+          var stored = window.localStorage.getItem("eduagent-theme");
+          var prefersLight = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches;
+          var theme = stored || (prefersLight ? "light" : "dark");
+          document.documentElement.setAttribute("data-theme", theme);
+        } catch (e) {
+          document.documentElement.setAttribute("data-theme", "dark");
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>

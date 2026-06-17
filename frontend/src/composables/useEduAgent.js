@@ -50,9 +50,9 @@ export function useEduAgent() {
   const messages = ref([]);
   const infoMessage = ref("");
   const agentStatuses = ref([
-    { key: "doc", label: "文档智能体", phase: "待命", progress: 0, active: false },
-    { key: "quiz", label: "评估智能体", phase: "等待中", progress: 0, active: false },
-    { key: "path", label: "路径规划", phase: "未启动", progress: 0, active: false },
+    { key: "doc", kind: "doc", label: "文档智能体", phase: "待命", progress: 0, active: false },
+    { key: "quiz", kind: "quiz", label: "评估智能体", phase: "等待中", progress: 0, active: false },
+    { key: "path", kind: "path", label: "路径规划", phase: "未启动", progress: 0, active: false },
   ]);
 
   // --- 计算属性 ---
@@ -90,9 +90,9 @@ export function useEduAgent() {
 
   function refreshStatuses() {
     agentStatuses.value = [
-      { key: "doc", label: "文档智能体", phase: currentCards.value.length ? "资源就绪" : "待命", progress: currentCards.value.length ? 100 : 0, active: true },
-      { key: "quiz", label: "评估智能体", phase: currentCards.value.some(c => c.card_type === "diagnostic_quiz") ? "测验可用" : "等待中", progress: 50, active: true },
-      { key: "path", label: "路径规划", phase: activePath.value.length ? `${activePath.value.length} 个节点` : "生成中", progress: activePath.value.length ? 100 : 10, active: true },
+      { key: "doc", kind: "doc", label: "文档智能体", phase: currentCards.value.length ? "资源就绪" : "待命", progress: currentCards.value.length ? 100 : 0, active: true },
+      { key: "quiz", kind: "quiz", label: "评估智能体", phase: currentCards.value.some(c => c.card_type === "diagnostic_quiz") ? "测验可用" : "等待中", progress: 50, active: true },
+      { key: "path", kind: "path", label: "路径规划", phase: activePath.value.length ? `${activePath.value.length} 个节点` : "生成中", progress: activePath.value.length ? 100 : 10, active: true },
     ];
   }
 
