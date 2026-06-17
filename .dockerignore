@@ -1,0 +1,62 @@
+# ============================================================================
+# Docker 构建忽略文件
+# ============================================================================
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+venv/
+.venv/
+*.egg
+
+# 前端
+frontend/node_modules/
+frontend/dist/          # 将在 Docker 内重新构建
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# 环境文件 (通过 docker-compose 传入)
+.env
+.env.local
+.env.*.local
+
+# 文档 & 素材 (太大，不需要打入镜像)
+DataStructures.md
+algorithm_design.html
+algorithm_design.md
+*.png
+*.jpg
+*.gif
+*.svg
+docs/
+
+# 日志
+logs/
+*.log
+
+# 测试 & 开发工具
+tests/
+frontend/public/
+node_modules/
+
+# Docker 相关
+Dockerfile*
+docker-compose*
+.dockerignore
+nginx/
+deploy.sh
+
+# macOS / Windows
+.DS_Store
+Thumbs.db
+desktop.ini
