@@ -102,14 +102,14 @@
         </div>
         <h1
           ref="heroHeadline"
-          class="reveal text-5xl font-black leading-[1.05] tracking-tight sm:text-6xl md:text-7xl lg:text-8xl"
+          class="reveal text-5xl font-black leading-[1.02] tracking-[-0.02em] sm:text-6xl md:text-7xl lg:text-[5.5rem]"
         >
-          <span class="block">让 AI</span>
-          <span class="gradient-text">成为你的私教。</span>
+          <span class="block text-text-primary">让 AI</span>
+          <span class="gradient-text block">成为你的私教。</span>
         </h1>
         <p
           ref="heroSubhead"
-          class="reveal mx-auto mt-6 max-w-2xl text-lg font-light leading-relaxed text-text-secondary sm:text-xl"
+          class="reveal mx-auto mt-8 max-w-[38rem] text-lg font-light leading-[1.75] text-text-secondary sm:text-xl"
         >
           EduAgent 将冷启动测评、知识路径、苏格拉底式对话辅导与五维能力雷达融为一体，为每一位学习者打造自适应的数据结构与算法学习体验。
         </p>
@@ -257,7 +257,10 @@
     <section id="curriculum" class="py-32 px-6">
       <div class="mx-auto max-w-6xl">
         <div class="mb-20 text-center">
-          <p class="reveal mb-4 text-xs font-bold uppercase tracking-[0.2em] text-primary">知识体系</p>
+          <div class="reveal mb-5 inline-flex flex-col items-center gap-4">
+            <span class="text-xs font-bold uppercase tracking-[0.2em] text-primary">知识体系</span>
+            <span class="block h-px w-8 bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
+          </div>
           <h2 class="reveal text-4xl font-black tracking-tight sm:text-5xl md:text-6xl">
             覆盖数据结构与算法<br class="hidden sm:block" />
             <span class="gradient-text">全体系核心模块。</span>
@@ -271,18 +274,18 @@
           <div
             v-for="(mod, idx) in curriculumModules"
             :key="mod.title"
-            class="reveal group relative overflow-hidden rounded-[28px] border border-subtle bg-card p-6 transition-all duration-500 hover:-translate-y-1 hover:shadow-card"
+            class="reveal group relative overflow-hidden rounded-[28px] border border-subtle bg-card p-7 transition-all duration-500 hover:-translate-y-1 hover:shadow-card"
             :style="{ transitionDelay: `${idx * 80}ms` }"
           >
-            <div class="mb-4 flex items-center justify-between">
-              <div class="flex h-11 w-11 items-center justify-center rounded-2xl bg-space-surface transition-colors duration-300 group-hover:bg-card-hover">
+            <div class="mb-5 flex items-center justify-between">
+              <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-space-surface transition-colors duration-300 group-hover:bg-card-hover">
                 <component :is="mod.icon" :size="22" :class="`text-${mod.accent}`" />
               </div>
               <span class="text-[11px] font-mono font-bold uppercase tracking-[0.12em] text-text-muted">{{ mod.count }} 节点</span>
             </div>
             <h3 class="text-lg font-bold tracking-tight">{{ mod.title }}</h3>
-            <p class="mt-2 text-sm font-light leading-relaxed text-text-secondary">{{ mod.desc }}</p>
-            <div class="mt-4 flex flex-wrap gap-1.5">
+            <p class="mt-2.5 text-sm font-light leading-[1.7] text-text-secondary">{{ mod.desc }}</p>
+            <div class="mt-5 flex flex-wrap gap-1.5">
               <span
                 v-for="tag in mod.tags"
                 :key="tag"
@@ -300,7 +303,10 @@
       <div class="mx-auto max-w-6xl">
         <div class="grid items-center gap-16 lg:grid-cols-2">
           <div class="reveal">
-            <p class="mb-4 text-xs font-bold uppercase tracking-[0.2em] text-primary">为何选择 EduAgent</p>
+            <div class="mb-6 inline-flex flex-col items-start gap-3">
+              <span class="text-xs font-bold uppercase tracking-[0.2em] text-primary">为何选择 EduAgent</span>
+              <span class="block h-px w-8 bg-gradient-to-r from-primary/40 to-transparent" />
+            </div>
             <h2 class="text-4xl font-black tracking-tight sm:text-5xl">
               传统学习工具的<br />
               <span class="gradient-text">痛点，</span>
@@ -329,7 +335,10 @@
       </div>
       <div class="relative mx-auto max-w-6xl">
         <div class="mb-20 text-center">
-          <p class="reveal mb-4 text-xs font-bold uppercase tracking-[0.2em] text-primary">核心功能</p>
+            <div class="reveal mb-5 inline-flex flex-col items-center gap-4">
+              <span class="text-xs font-bold uppercase tracking-[0.2em] text-primary">核心功能</span>
+              <span class="block h-px w-8 bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
+            </div>
           <h2 ref="featureTitle" class="reveal text-4xl font-black tracking-tight sm:text-5xl md:text-6xl">
             一套完整的<br class="hidden sm:block" />
             <span class="gradient-text">学习闭环。</span>
@@ -343,7 +352,7 @@
               <IconQuiz :size="24" />
             </div>
             <h3 class="text-3xl font-bold tracking-tight sm:text-4xl">冷启动学习画像</h3>
-            <p class="mt-4 text-lg font-light leading-relaxed text-text-secondary">
+            <p class="mt-4 max-w-[36rem] text-lg font-light leading-[1.8] text-text-secondary">
               首次进入只需完成 5 分钟测评，系统即可识别你的知识盲区、学习习惯与目标水平，为后续路径推荐提供精准依据。
             </p>
             <ul class="mt-6 space-y-3 text-text-secondary">
@@ -401,7 +410,7 @@
               <IconTree :size="24" />
             </div>
             <h3 class="text-3xl font-bold tracking-tight sm:text-4xl">结构化知识路径</h3>
-            <p class="mt-4 text-lg font-light leading-relaxed text-text-secondary">
+            <p class="mt-4 max-w-[36rem] text-lg font-light leading-[1.8] text-text-secondary">
               将复杂的数据结构与算法课程拆解为递进式节点，每个节点对应明确的学习目标与掌握阈值，让学习路径像地图一样清晰可见。
             </p>
             <ul class="mt-6 space-y-3 text-text-secondary">
@@ -428,7 +437,7 @@
               <IconChat :size="24" />
             </div>
             <h3 class="text-3xl font-bold tracking-tight sm:text-4xl">苏格拉底式对话辅导</h3>
-            <p class="mt-4 text-lg font-light leading-relaxed text-text-secondary">
+            <p class="mt-4 max-w-[36rem] text-lg font-light leading-[1.8] text-text-secondary">
               不是直接给答案，而是通过连续追问引导你思考。辅导智能体能够理解你的困惑点，并用适合你当前水平的方式解释概念。
             </p>
           </div>
@@ -464,7 +473,7 @@
               <IconRadar :size="24" />
             </div>
             <h3 class="text-3xl font-bold tracking-tight sm:text-4xl">五维能力雷达</h3>
-            <p class="mt-4 text-lg font-light leading-relaxed text-text-secondary">
+            <p class="mt-4 max-w-[36rem] text-lg font-light leading-[1.8] text-text-secondary">
               从概念理解、代码工程、逻辑推理、错题恢复到时间管理，全方位量化你的学习状态，帮助你发现短板、精准提升。
             </p>
             <div class="mt-6 grid grid-cols-2 gap-3">
@@ -480,7 +489,10 @@
     <!-- Bento grid -->
     <section class="py-24 px-6">
       <div class="mx-auto max-w-6xl">
-        <p class="reveal mb-4 text-center text-xs font-bold uppercase tracking-[0.2em] text-primary">更多能力</p>
+          <div class="reveal mb-5 inline-flex flex-col items-center gap-4">
+            <span class="text-xs font-bold uppercase tracking-[0.2em] text-primary">更多能力</span>
+            <span class="block h-px w-8 bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
+          </div>
         <h2 ref="bentoTitle" class="reveal mb-16 text-center text-3xl font-black tracking-tight sm:text-4xl md:text-5xl">
           为学习体验<br class="hidden sm:block" />
           <span class="gradient-text">重新设计的每一个细节。</span>
@@ -512,7 +524,10 @@
       </div>
       <div class="relative mx-auto max-w-6xl">
         <div class="mb-16 text-center">
-          <p class="reveal mb-4 text-xs font-bold uppercase tracking-[0.2em] text-primary">为什么与众不同</p>
+            <div class="reveal mb-5 inline-flex flex-col items-center gap-4">
+              <span class="text-xs font-bold uppercase tracking-[0.2em] text-primary">为什么与众不同</span>
+              <span class="block h-px w-8 bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
+            </div>
           <h2 class="reveal text-4xl font-black tracking-tight sm:text-5xl md:text-6xl">
             不是又一个<br class="hidden sm:block" />
             <span class="gradient-text">刷题平台。</span>
@@ -554,39 +569,64 @@
       </div>
     </section>
 
-    <!-- Workflow section -->
+    <!-- Workflow section (horizontal axis) -->
     <section id="workflow" class="relative overflow-hidden py-32 px-6">
       <div class="pointer-events-none absolute inset-0">
         <div class="absolute top-1/2 left-1/2 h-[100vh] w-[100vh] -translate-x-1/2 -translate-y-1/2 rounded-full bg-gradient-to-br from-primary/5 via-secondary/5 to-transparent blur-[120px]" />
       </div>
       <div class="relative mx-auto max-w-6xl">
         <div class="mb-20 text-center">
-          <p class="reveal mb-4 text-xs font-bold uppercase tracking-[0.2em] text-primary">使用流程</p>
+            <div class="reveal mb-5 inline-flex flex-col items-center gap-4">
+              <span class="text-xs font-bold uppercase tracking-[0.2em] text-primary">使用流程</span>
+              <span class="block h-px w-8 bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
+            </div>
           <h2 class="reveal text-4xl font-black tracking-tight sm:text-5xl md:text-6xl">
             四步开启<br class="hidden sm:block" />
             <span class="gradient-text">智能学习。</span>
           </h2>
         </div>
 
+        <!-- Horizontal flow -->
         <div class="relative">
-          <!-- Timeline line -->
-          <div class="absolute left-8 top-0 bottom-0 w-px bg-gradient-to-b from-primary via-secondary to-tertiary md:left-1/2" />
+          <!-- Connecting track line -->
+          <div class="absolute left-[60px] right-[60px] top-[72px] hidden h-0.5 rounded-full bg-gradient-to-r from-primary via-secondary to-tertiary md:block" />
 
-          <div class="space-y-16">
-            <div v-for="(step, idx) in workflowSteps" :key="step.title" class="relative grid items-center gap-8 md:grid-cols-2" :class="idx % 2 === 1 ? 'md:text-right' : ''">
-              <div class="reveal" :class="idx % 2 === 1 ? 'md:order-2' : ''" :style="{ transitionDelay: `${idx * 100}ms` }">
-                <div class="flex aspect-[4/3] items-center justify-center rounded-[32px] border border-subtle bg-space-panel/50 p-8 shadow-glass backdrop-blur-xl">
-                  <component :is="step.icon" :size="64" :class="`text-${step.accent} opacity-80`" />
-                </div>
+          <div class="grid grid-cols-1 gap-6 md:grid-cols-4">
+            <div
+              v-for="(step, idx) in workflowSteps"
+              :key="step.title"
+              class="reveal group relative flex flex-col items-center text-center"
+              :style="{ transitionDelay: `${idx * 120}ms` }"
+            >
+              <!-- Step number node on track -->
+              <div class="relative z-10 mb-6 flex h-14 w-14 items-center justify-center rounded-full border-2 bg-card text-lg font-black transition-all duration-500 group-hover:scale-110" :class="`border-${step.accent} text-${step.accent} shadow-[0_0_24px_var(--color-${step.accent}-soft)]`">
+                <span>{{ idx + 1 }}</span>
+                <!-- Pulse ring -->
+                <div class="absolute inset-0 rounded-full border-2 opacity-0 transition-opacity duration-500 group-hover:opacity-100" :class="`border-${step.accent}`" :style="{ animation: 'ring-pulse 1.8s ease-out infinite' }" />
               </div>
-              <div class="reveal pl-20 md:pl-0" :class="idx % 2 === 1 ? 'md:order-1 md:pr-20' : 'md:pl-20'" :style="{ transitionDelay: `${idx * 100 + 100}ms` }">
-                <div class="absolute left-6 flex h-10 w-10 items-center justify-center rounded-full border-2 md:left-1/2 md:-translate-x-1/2 text-sm font-bold" :class="`border-${step.accent} bg-card text-${step.accent}`">
-                  {{ idx + 1 }}
+
+              <!-- Arrow connector (mobile: vertical, desktop: hidden in favor of track line) -->
+              <div v-if="idx < workflowSteps.length - 1" class="flex h-8 w-0.5 rounded-full bg-gradient-to-b md:hidden" :class="`from-${step.accent} to-${workflowSteps[idx + 1].accent}`" />
+
+              <!-- Card -->
+              <div class="w-full rounded-[28px] border border-subtle bg-space-panel/60 p-6 shadow-glass backdrop-blur-xl transition-all duration-500 group-hover:-translate-y-1 group-hover:border-primary/20 group-hover:shadow-card">
+                <div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl" :class="`bg-${step.accent}-soft text-${step.accent}`">
+                  <component :is="step.icon" :size="24" />
                 </div>
-                <h3 class="text-2xl font-bold tracking-tight">{{ step.title }}</h3>
-                <p class="mt-3 text-base font-light leading-relaxed text-text-secondary">{{ step.desc }}</p>
+                <h3 class="text-lg font-bold tracking-tight">{{ step.title }}</h3>
+                <p class="mt-3 text-sm font-light leading-relaxed text-text-secondary">{{ step.desc }}</p>
               </div>
             </div>
+          </div>
+
+          <!-- Progress flow indicator (mobile-friendly) -->
+          <div class="mt-10 flex items-center justify-center gap-2 md:hidden">
+            <span
+              v-for="(step, idx) in workflowSteps"
+              :key="'dot-' + step.title"
+              class="h-2 rounded-full transition-all duration-500"
+              :class="idx === 0 ? `w-6 bg-${step.accent}` : `w-2 bg-${step.accent}/30`"
+            />
           </div>
         </div>
       </div>
@@ -596,7 +636,10 @@
     <section id="demo" class="relative overflow-hidden py-32 px-6">
       <div class="relative mx-auto max-w-6xl">
         <div class="mb-16 text-center">
-          <p class="reveal mb-4 text-xs font-bold uppercase tracking-[0.2em] text-primary">实时演示</p>
+            <div class="reveal mb-5 inline-flex flex-col items-center gap-4">
+              <span class="text-xs font-bold uppercase tracking-[0.2em] text-primary">实时演示</span>
+              <span class="block h-px w-8 bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
+            </div>
           <h2 ref="demoTitle" class="reveal text-4xl font-black tracking-tight sm:text-5xl md:text-6xl">
             看 EduAgent<br class="hidden sm:block" />
             <span class="gradient-text">如何工作。</span>
@@ -767,7 +810,10 @@
     <section id="architecture" class="py-32 px-6">
       <div class="mx-auto max-w-6xl">
         <div class="mb-16 text-center">
-          <p class="reveal mb-4 text-xs font-bold uppercase tracking-[0.2em] text-primary">系统架构</p>
+            <div class="reveal mb-5 inline-flex flex-col items-center gap-4">
+              <span class="text-xs font-bold uppercase tracking-[0.2em] text-primary">系统架构</span>
+              <span class="block h-px w-8 bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
+            </div>
           <h2 class="reveal text-4xl font-black tracking-tight sm:text-5xl md:text-6xl">
             多智能体<br class="hidden sm:block" />
             <span class="gradient-text">协同编排。</span>
@@ -880,7 +926,10 @@
     <section id="faq" class="py-24 px-6">
       <div class="mx-auto max-w-3xl">
         <div class="mb-16 text-center">
-          <p class="reveal mb-4 text-xs font-bold uppercase tracking-[0.2em] text-primary">常见问题</p>
+            <div class="reveal mb-5 inline-flex flex-col items-center gap-4">
+              <span class="text-xs font-bold uppercase tracking-[0.2em] text-primary">常见问题</span>
+              <span class="block h-px w-8 bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
+            </div>
           <h2 class="reveal text-3xl font-black tracking-tight sm:text-4xl md:text-5xl">
             还有疑问？<br class="hidden sm:block" />
             <span class="gradient-text">我们来解答。</span>
@@ -891,7 +940,7 @@
           <div
             v-for="(faq, idx) in faqs"
             :key="idx"
-            class="reveal overflow-hidden rounded-2xl border border-subtle bg-card transition-all duration-300"
+            class="reveal rounded-2xl border border-subtle bg-card transition-all duration-300"
             :class="openFaq === idx ? 'border-primary/20' : 'hover:border-hover'"
             :style="{ transitionDelay: `${idx * 80}ms` }"
           >
@@ -914,10 +963,7 @@
                 <path d="M12 5v14M5 12h14" />
               </svg>
             </button>
-            <div
-              class="overflow-hidden transition-all duration-300"
-              :style="{ maxHeight: openFaq === idx ? '200px' : '0px', opacity: openFaq === idx ? 1 : 0 }"
-            >
+            <div class="faq-answer" :class="{ 'faq-answer--open': openFaq === idx }">
               <p class="px-6 pb-5 text-sm font-light leading-relaxed text-text-secondary">{{ faq.a }}</p>
             </div>
           </div>
@@ -926,33 +972,33 @@
     </section>
 
     <!-- CTA footer -->
-    <section class="relative py-32 px-6">
+    <section class="relative py-40 px-6">
       <div class="pointer-events-none absolute inset-0 overflow-hidden">
-        <div class="absolute bottom-0 left-1/2 h-[60vh] w-[80vh] -translate-x-1/2 rounded-full bg-primary/10 blur-[120px]" />
+        <div class="absolute top-1/2 left-1/2 h-[80vh] w-[80vh] -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary/12 blur-[140px]" />
+        <div class="absolute bottom-0 right-0 h-[40vh] w-[40vh] rounded-full bg-secondary/8 blur-[100px]" />
       </div>
       <div class="relative mx-auto max-w-4xl text-center">
-        <h2 ref="ctaTitle" class="reveal text-4xl font-black tracking-tight sm:text-5xl md:text-6xl">
+        <h2 ref="ctaTitle" class="reveal text-4xl font-black tracking-tight sm:text-5xl md:text-6xl lg:text-7xl">
           准备好开始你的<br class="hidden sm:block" />
           <span class="gradient-text">算法之旅了吗？</span>
         </h2>
-        <p ref="ctaSubtitle" class="reveal mx-auto mt-6 max-w-xl text-lg font-light text-text-secondary" style="transition-delay: 100ms;">
-          无需配置，一键进入多智能体学习工作台。
+        <p ref="ctaSubtitle" class="reveal mx-auto mt-6 max-w-[36rem] text-lg font-light leading-[1.8] text-text-secondary" style="transition-delay: 100ms;">
+          无需配置，一键进入多智能体学习工作台。AI 私教已就绪。
         </p>
-        <div ref="ctaButtons" class="reveal mt-10 flex flex-wrap items-center justify-center gap-4" style="transition-delay: 200ms;">
+        <div ref="ctaButtons" class="reveal mt-12 flex flex-wrap items-center justify-center gap-5" style="transition-delay: 200ms;">
           <button
             type="button"
-            class="focus-ring btn-capsule px-10 py-4 text-base"
+            class="focus-ring btn-capsule px-12 py-4 text-base shadow-glow"
             @click="enterApp"
           >
             立即体验
           </button>
-          <button
-            type="button"
-            class="focus-ring rounded-full border border-subtle bg-card px-8 py-4 text-base font-medium text-text-secondary transition-all duration-200 hover:border-primary/30 hover:text-primary hover:bg-card-hover"
-            @click="enterApp"
+          <a
+            href="#demo"
+            class="focus-ring rounded-full border border-subtle bg-card px-10 py-4 text-base font-medium text-text-secondary transition-all duration-200 hover:border-primary/30 hover:text-primary hover:bg-card-hover"
           >
-            登录账户
-          </button>
+            观看演示
+          </a>
         </div>
       </div>
     </section>
@@ -1279,6 +1325,11 @@ onBeforeUnmount(() => {
 
 .animate-marquee {
   animation: marquee 28s linear infinite;
+}
+
+@keyframes ring-pulse {
+  0% { transform: scale(1); opacity: 0.7; }
+  100% { transform: scale(1.8); opacity: 0; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════ */
@@ -1611,6 +1662,21 @@ onBeforeUnmount(() => {
   42%  { opacity: 0.5; left: 48%; top: 15%; }
   88%  { opacity: 0; left: 92%; top: 25%; }
   100% { opacity: 0; left: 92%; top: 25%; }
+}
+
+/* ── FAQ accordion answer ── */
+.faq-answer {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height 0.45s cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+              padding 0.35s ease;
+}
+
+.faq-answer--open {
+  max-height: 600px;
+  opacity: 1;
 }
 
 /* Fade transition for mobile menu */
