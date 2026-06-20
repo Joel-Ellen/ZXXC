@@ -11,6 +11,8 @@ EduAgent Auth Layer
   - CaptchaGenerator   : SVG 数学验证码生成
   - UserStore          : JSON 文件持久化用户存储
   - AuthRouter         : FastAPI 认证路由 (注册/登录/验证码/刷新)
+  - PromptDefense      : Prompt 注入攻击检测与清洗
+  - RateLimiter        : 内存滑动窗口限流器
 """
 
 from .security import SecurityManager, FAKE_HASH, JWT_SECRET_KEY, ALGORITHM
@@ -19,6 +21,8 @@ from .models import UserRecord, UserStore, PresetAccounts
 from .middleware import AsyncAuthGuard, oauth2_scheme
 from .graph_guard import LangGraphImmutableContextGuard
 from .routes import AuthRouter, create_auth_router
+from .prompt_defense import PromptDefense, get_prompt_defense
+from .rate_limiter import RateLimiter, get_rate_limiter
 
 __all__ = [
     "SecurityManager",
@@ -35,4 +39,8 @@ __all__ = [
     "LangGraphImmutableContextGuard",
     "AuthRouter",
     "create_auth_router",
+    "PromptDefense",
+    "get_prompt_defense",
+    "RateLimiter",
+    "get_rate_limiter",
 ]

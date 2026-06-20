@@ -43,3 +43,7 @@ node_modules/
 # Neo4j / Milvus data (local dev)
 data/
 src/auth/_users.json
+nul
+fix_pkg.tar.gz
+update_pkg.tar.gz
+update_pkg.tar.gz

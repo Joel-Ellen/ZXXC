@@ -28,6 +28,9 @@ from starlette.applications import Starlette
 from starlette.routing import Route, Mount
 from starlette.staticfiles import StaticFiles
 from starlette.responses import JSONResponse, Response
+
+# 新增 API 路由 (合并自 backend/)
+from src.routes.new_api_routes import new_routes
 from starlette.requests import Request
 
 # --- Course System ---
@@ -69,18 +72,9 @@ def _get_llm():
     if _llm_client is None:
         api_key = os.environ.get("DASHSCOPE_API_KEY", "")
         if api_key:
-            from src.llm.client import LLMClient, LLMConfig, Provider
-            config = LLMConfig(
-                provider=Provider.DASHSCOPE,
-                dashscope_api_key=api_key,
-                dashscope_model="qwen-plus",
-                max_tokens=512,
-                temperature=0.7,
-                timeout_seconds=15,
-                max_retries=0,
-            )
-            _llm_client = LLMClient(config)
-            print(f"[LLM] DashScope qwen-plus connected")
+            from src.llm import LLMClientV2
+            _llm_client = LLMClientV2(provider="dashscope")
+            print(f"[LLM] LLMClientV2 connected (provider={_llm_client.provider})")
         else:
             print("[LLM] No API key found, using fallback mode")
     return _llm_client
@@ -1483,6 +1477,8 @@ app = Starlette(
         Route("/api/auth/refresh", api_auth_refresh, methods=["POST"]),
         Route("/api/auth/logout", api_auth_logout, methods=["POST"]),
         Route("/api/auth/me", api_auth_me, methods=["GET"]),
+        # ── 新增 API (合并自 backend/) ──
+        *new_routes,
         Mount("/", app=StaticFiles(directory=str(static_dir), html=True)),
     ],
 )

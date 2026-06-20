@@ -1,118 +1,94 @@
 # -*- coding: utf-8 -*-
 """
-EduAgent Agent Layer
-====================
-LangGraph Agent Node 集合 — 多智能体协同网络中的各职能节点。
+EduAgent Agent Layer (合并版 — 17 agents)
+=========================================
+LangGraph Agent Node + Backend B 多智能体集合。
 
-本包包含：
-  - EvaluatorNode     : 行为清洗 + PID 平滑评估 + 重寻路闸门控制
-  - ProfilerNode      : MAB 汤普森采样 + 艾宾浩斯遗忘 + 硬切换干预
-  - PlannerNode       : Neo4j DAG-Dijkstra 最优路径规划
-  - TutorAgentNode    : 智能辅导答疑（三轨多模态） — 加分项
-  - ContentMeshNode   : WFQ 调度 + 马尔可夫影子预生成 + 资源卡片流式输出
-  - ValidatorNode     : 双极防幻觉校验 (符号硬核对 + NLI 蕴含度)
-  - AssessmentReporterNode : EMA 能力雷达 + 迟滞环策略自适应 — 加分项
+原有 7 个 LangGraph Node:
+  - EvaluatorNode, ProfilerNode, PlannerNode
+  - TutorAgentNode, ContentMeshNode, ValidatorNode
+  - AssessmentReporterNode
+
+新增 10 个 Agent（合并自 backend/agents/）:
+  - BaseAgent (基类), AgentMessage, BaseAgentState
+  - StudentProfilerAgent, KnowledgeAnalysisAgent, ResourcePlannerAgent
+  - PPTGeneratorAgent, QuestionGeneratorAgent, MindMapGeneratorAgent
+  - CodingPracticeAgent, VideoScriptAgent, LearningCoachAgent, EvaluationAgent
 """
 
+# ── 原有 7 个 LangGraph Node ──────────────────────────────────────────
 from .evaluator_node import (
-    EvaluatorNode,
-    EvaluatorInput,
-    EvaluatorOutput,
-    BehaviorVector,
-    CleanedBehavior,
-    PIDReplanGate,
-    BehaviorAnomaly,
-    GateConfig,
+    EvaluatorNode, EvaluatorInput, EvaluatorOutput,
+    BehaviorVector, CleanedBehavior, PIDReplanGate,
+    BehaviorAnomaly, GateConfig,
 )
 from .profiler_node import (
-    ProfilerNode,
-    ProfilerInput,
-    ProfilerOutput,
-    ThompsonSampler,
-    EbbinghausForgettingEngine,
-    StyleProfileResult,
-    ForgettingCurveResult,
-    create_profiler_node,
+    ProfilerNode, ProfilerInput, ProfilerOutput,
+    ThompsonSampler, EbbinghausForgettingEngine,
+    StyleProfileResult, ForgettingCurveResult, create_profiler_node,
 )
 from .planner_node import (
-    PlannerNode,
-    PlannerInput,
-    PlannerOutput,
-    DAGDijkstraSolver,
-    PathEdgeInfo,
-    create_planner_node,
+    PlannerNode, PlannerInput, PlannerOutput,
+    DAGDijkstraSolver, PathEdgeInfo, create_planner_node,
 )
 from .tutor_node import (
-    TutorAgentNode,
-    TutorInput,
-    TutorOutput,
-    TutorResponseCard,
-    VideoHydrationCard,
-    MermaidSyntaxGuard,
-    create_tutor_node,
+    TutorAgentNode, TutorInput, TutorOutput,
+    TutorResponseCard, VideoHydrationCard,
+    MermaidSyntaxGuard, create_tutor_node,
 )
 from .content_mesh_node import (
-    ContentMeshNode,
-    MeshInput,
-    MeshOutput,
-    WFQScheduler,
-    MarkovShadowPregen,
-    GenerationTask,
-    CardType,
-    QueueClass,
-    GenerationStatus,
-    create_content_mesh_node,
+    ContentMeshNode, MeshInput, MeshOutput,
+    WFQScheduler, MarkovShadowPregen, GenerationTask,
+    CardType, QueueClass, GenerationStatus, create_content_mesh_node,
 )
 from .validator_node import (
-    ValidatorNode,
-    ValidatorInput,
-    ValidatorOutput,
-    Pole1Gate,
-    Pole2Gate,
-    EntityExtractor,
-    SlidingWindowSplitter,
-    Pole1Result,
-    Pole2Result,
-    create_validator_node,
+    ValidatorNode, ValidatorInput, ValidatorOutput,
+    Pole1Gate, Pole2Gate, EntityExtractor,
+    SlidingWindowSplitter, Pole1Result, Pole2Result, create_validator_node,
 )
 from .assessment_node import (
-    AssessmentReporterNode,
-    AssessmentInput,
-    AssessmentOutput,
-    CapabilityRadar,
-    HysteresisStrategyController,
-    create_assessment_node,
+    AssessmentReporterNode, AssessmentInput, AssessmentOutput,
+    CapabilityRadar, HysteresisStrategyController, create_assessment_node,
 )
 
+# ── 新增 10 个 Agent（合并自 backend/）────────────────────────────────
+from .base_agent import BaseAgent, AgentMessage, BaseAgentState
+from .student_profiler_agent import StudentProfilerAgent
+from .knowledge_analysis_agent import KnowledgeAnalysisAgent
+from .resource_planner_agent import ResourcePlannerAgent
+from .ppt_generator_agent import PPTGeneratorAgent
+from .question_generator_agent import QuestionGeneratorAgent
+from .mindmap_generator_agent import MindMapGeneratorAgent
+from .coding_practice_agent import CodingPracticeAgent
+from .video_script_agent import VideoScriptAgent
+from .learning_coach_agent import LearningCoachAgent
+from .evaluation_agent import EvaluationAgent
+
 __all__ = [
-    # Evaluator
+    # Existing 7
     "EvaluatorNode", "EvaluatorInput", "EvaluatorOutput",
     "BehaviorVector", "CleanedBehavior", "PIDReplanGate",
     "BehaviorAnomaly", "GateConfig",
-    # Profiler
     "ProfilerNode", "ProfilerInput", "ProfilerOutput",
     "ThompsonSampler", "EbbinghausForgettingEngine",
-    "StyleProfileResult", "ForgettingCurveResult",
-    "create_profiler_node",
-    # Planner
+    "StyleProfileResult", "ForgettingCurveResult", "create_profiler_node",
     "PlannerNode", "PlannerInput", "PlannerOutput",
     "DAGDijkstraSolver", "PathEdgeInfo", "create_planner_node",
-    # Tutor (加分项)
     "TutorAgentNode", "TutorInput", "TutorOutput",
     "TutorResponseCard", "VideoHydrationCard",
     "MermaidSyntaxGuard", "create_tutor_node",
-    # Content Mesh
     "ContentMeshNode", "MeshInput", "MeshOutput",
     "WFQScheduler", "MarkovShadowPregen", "GenerationTask",
-    "CardType", "QueueClass", "GenerationStatus",
-    "create_content_mesh_node",
-    # Validator
+    "CardType", "QueueClass", "GenerationStatus", "create_content_mesh_node",
     "ValidatorNode", "ValidatorInput", "ValidatorOutput",
     "Pole1Gate", "Pole2Gate", "EntityExtractor",
-    "SlidingWindowSplitter", "Pole1Result", "Pole2Result",
-    "create_validator_node",
-    # Assessment (加分项)
+    "SlidingWindowSplitter", "Pole1Result", "Pole2Result", "create_validator_node",
     "AssessmentReporterNode", "AssessmentInput", "AssessmentOutput",
-    "CapabilityRadar", "HysteresisStrategyController",
-    "create_assessment_node",
+    "CapabilityRadar", "HysteresisStrategyController", "create_assessment_node",
+    # New 10 + base
+    "BaseAgent", "AgentMessage", "BaseAgentState",
+    "StudentProfilerAgent", "KnowledgeAnalysisAgent", "ResourcePlannerAgent",
+    "PPTGeneratorAgent", "QuestionGeneratorAgent", "MindMapGeneratorAgent",
+    "CodingPracticeAgent", "VideoScriptAgent", "LearningCoachAgent",
+    "EvaluationAgent",
 ]
