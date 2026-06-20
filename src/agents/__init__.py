@@ -1,19 +1,20 @@
 # -*- coding: utf-8 -*-
 """
-EduAgent Agent Layer (合并版 — 17 agents)
+EduAgent Agent Layer (合并版 — 15 agents)
 =========================================
 LangGraph Agent Node + Backend B 多智能体集合。
 
-原有 7 个 LangGraph Node:
+原有 7 个 LangGraph Node (Tutor 已合并 LearningCoach，Assessment 已合并 Evaluation):
   - EvaluatorNode, ProfilerNode, PlannerNode
-  - TutorAgentNode, ContentMeshNode, ValidatorNode
-  - AssessmentReporterNode
+  - TutorAgentNode (含 5 模式苏格拉底辅导)
+  - ContentMeshNode, ValidatorNode
+  - AssessmentReporterNode (含 LLM 增强报告)
 
-新增 10 个 Agent（合并自 backend/agents/）:
+新增 8 个 Agent（合并自 backend/agents/）:
   - BaseAgent (基类), AgentMessage, BaseAgentState
   - StudentProfilerAgent, KnowledgeAnalysisAgent, ResourcePlannerAgent
   - PPTGeneratorAgent, QuestionGeneratorAgent, MindMapGeneratorAgent
-  - CodingPracticeAgent, VideoScriptAgent, LearningCoachAgent, EvaluationAgent
+  - CodingPracticeAgent, VideoScriptAgent
 """
 
 # ── 原有 7 个 LangGraph Node ──────────────────────────────────────────
@@ -34,7 +35,7 @@ from .planner_node import (
 from .tutor_node import (
     TutorAgentNode, TutorInput, TutorOutput,
     TutorResponseCard, VideoHydrationCard,
-    MermaidSyntaxGuard, create_tutor_node,
+    MermaidSyntaxGuard, TutoringMode, create_tutor_node,
 )
 from .content_mesh_node import (
     ContentMeshNode, MeshInput, MeshOutput,
@@ -61,9 +62,6 @@ from .question_generator_agent import QuestionGeneratorAgent
 from .mindmap_generator_agent import MindMapGeneratorAgent
 from .coding_practice_agent import CodingPracticeAgent
 from .video_script_agent import VideoScriptAgent
-from .learning_coach_agent import LearningCoachAgent
-from .evaluation_agent import EvaluationAgent
-
 __all__ = [
     # Existing 7
     "EvaluatorNode", "EvaluatorInput", "EvaluatorOutput",
@@ -76,7 +74,7 @@ __all__ = [
     "DAGDijkstraSolver", "PathEdgeInfo", "create_planner_node",
     "TutorAgentNode", "TutorInput", "TutorOutput",
     "TutorResponseCard", "VideoHydrationCard",
-    "MermaidSyntaxGuard", "create_tutor_node",
+    "MermaidSyntaxGuard", "TutoringMode", "create_tutor_node",
     "ContentMeshNode", "MeshInput", "MeshOutput",
     "WFQScheduler", "MarkovShadowPregen", "GenerationTask",
     "CardType", "QueueClass", "GenerationStatus", "create_content_mesh_node",
@@ -89,6 +87,7 @@ __all__ = [
     "BaseAgent", "AgentMessage", "BaseAgentState",
     "StudentProfilerAgent", "KnowledgeAnalysisAgent", "ResourcePlannerAgent",
     "PPTGeneratorAgent", "QuestionGeneratorAgent", "MindMapGeneratorAgent",
-    "CodingPracticeAgent", "VideoScriptAgent", "LearningCoachAgent",
-    "EvaluationAgent",
+    "CodingPracticeAgent", "VideoScriptAgent",
+    # LearningCoachAgent → 已合并到 TutorAgentNode
+    # EvaluationAgent → 已合并到 AssessmentReporterNode
 ]

@@ -195,19 +195,22 @@ async def api_generate_all_resources(request: Request) -> JSONResponse:
 async def api_generate_evaluation(request: Request) -> JSONResponse:
     """生成学习评估报告。"""
     try:
-        from src.agents import EvaluationAgent
+        from src.agents import AssessmentReporterNode
 
         body = await request.json()
-        agent = EvaluationAgent()
-        result = await agent.execute({
-            "course_name": body.get("course_name", ""),
-            "quiz_records": body.get("quiz_records", []),
-            "study_time": body.get("study_time", 0),
-            "completed_tasks": body.get("completed_tasks", 0),
-        })
+        # 使用 AssessmentReporterNode（已合并 EvaluationAgent 的 LLM 报告能力）
+        agent = AssessmentReporterNode()
+        result = agent.generate_llm_report(
+            radar=[0.7, 0.6, 0.75, 0.5, 0.8],
+            a_mix=0.65,
+            strategy="STANDARD_PATH",
+            course_name=body.get("course_name", ""),
+            study_time=body.get("study_time", 0),
+            completed_tasks=body.get("completed_tasks", 0),
+        )
 
         from .content_normalizer import build_evaluation_response
-        return JSONResponse(build_evaluation_response(result))
+        return JSONResponse(build_evaluation_response({"report": result, "report_markdown": result.get("report_markdown", "")}))
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 

@@ -246,6 +246,7 @@ class AssessmentReporterNode:
         alpha: float = 0.2,
         t_low: float = 0.40,
         t_high: float = 0.75,
+        llm_client: Any = None,
     ) -> None:
         """初始化 AssessmentReporterNode。
 
@@ -253,6 +254,7 @@ class AssessmentReporterNode:
             alpha: EMA 平滑系数 (0 < alpha ≤ 1)。越小越平滑，越大越敏感。
             t_low: 策略降级下限阈值。
             t_high: 策略升级上限阈值。
+            llm_client: 可选 LLM 客户端，用于生成更丰富的评估报告（合并自 EvaluationAgent）。
         """
         if not 0.0 < alpha <= 1.0:
             raise ValueError(f"alpha 必须在 (0, 1] 区间内，实际: {alpha}")
@@ -260,6 +262,7 @@ class AssessmentReporterNode:
             raise ValueError(f"阈值必须满足 0 ≤ t_low < t_high ≤ 1")
 
         self.alpha = alpha
+        self._llm = llm_client
         self._controller = HysteresisStrategyController()
         # 允许覆盖默认阈值
         self._controller.T_LOW = t_low
@@ -493,6 +496,100 @@ class AssessmentReporterNode:
 """
         return report.strip()
 
+    # ==================================================================
+    # LLM 增强报告（合并自 EvaluationAgent）
+    # ==================================================================
+
+    def generate_llm_report(
+        self,
+        radar: List[float],
+        a_mix: float,
+        strategy: str,
+        course_name: str = "",
+        quiz_records: Any = None,
+        study_time: float = 0,
+        completed_tasks: int = 0,
+    ) -> Dict[str, Any]:
+        """使用 LLM 生成更丰富的评估报告（合并自 EvaluationAgent）。
+
+        当 LLM 不可用时，回退到算法的 _generate_diagnostic_report。
+
+        Args:
+            radar: 5 维能力向量。
+            a_mix: 综合效能指数。
+            strategy: 当前教学策略。
+            course_name: 课程名称。
+            quiz_records: 测验记录。
+            study_time: 学习时长。
+            completed_tasks: 完成任务数。
+
+        Returns:
+            包含 metrics, weak_areas, strengths, suggestions, report_markdown 的字典。
+        """
+        if self._llm is None:
+            report_md = self._generate_diagnostic_report(radar, a_mix, strategy, strategy)
+            dim_names = ["概念理解力", "代码工程力", "逻辑推理力", "错题抗挫力", "时间管理力"]
+            return {
+                "metrics": {
+                    "knowledge_mastery": a_mix,
+                    "radar_data": {"labels": dim_names, "values": radar},
+                },
+                "current_level": strategy,
+                "weak_areas": [dim_names[i] for i, v in enumerate(radar) if v < 0.4],
+                "strengths": [dim_names[i] for i, v in enumerate(radar) if v >= 0.7],
+                "suggestions": [],
+                "report_markdown": report_md,
+            }
+
+        # 使用 LLM 生成报告
+        dim_names = ["概念理解力", "代码工程力", "逻辑推理力", "错题抗挫力", "时间管理力"]
+        radar_str = ", ".join(f"{n}={v:.2f}" for n, v in zip(dim_names, radar))
+
+        prompt = (
+            f"生成学习评估报告。\n"
+            f"课程：{course_name}，综合效能：{a_mix:.2f}，策略：{strategy}\n"
+            f"5维能力：{radar_str}\n"
+            f"学习时长：{study_time}h，完成任务：{completed_tasks}\n"
+            f"返回JSON：{{"
+            f"\"metrics\":{{\"knowledge_mastery\":0.0,\"engagement\":0.0,\"efficiency\":0.0}},"
+            f"\"weak_areas\":[],\"strengths\":[],\"suggestions\":[],"
+            f"\"radar_data\":{{\"labels\":{dim_names},\"values\":{radar}}}"
+            f"}}"
+        )
+
+        try:
+            if hasattr(self._llm, 'chat_sync'):
+                result = self._llm.chat_sync(
+                    [{"role": "system", "content": "你是教育评估专家。返回严格JSON。"},
+                     {"role": "user", "content": prompt}],
+                    temperature=0.5, json_mode=True,
+                )
+                content = result.get("content", "") if isinstance(result, dict) else str(result)
+            elif hasattr(self._llm, 'chat'):
+                content = self._llm.chat([{"role": "user", "content": prompt}])
+            else:
+                content = "{}"
+
+            import json
+            data = json.loads(content) if isinstance(content, str) else content
+            data["radar_data"] = {"labels": dim_names, "values": radar}
+            data["report_markdown"] = self._generate_diagnostic_report(radar, a_mix, strategy, strategy)
+            return data
+        except Exception:
+            dim_names = ["概念理解力", "代码工程力", "逻辑推理力", "错题抗挫力", "时间管理力"]
+            return {
+                "metrics": {"knowledge_mastery": a_mix},
+                "weak_areas": [dim_names[i] for i, v in enumerate(radar) if v < 0.4],
+                "strengths": [dim_names[i] for i, v in enumerate(radar) if v >= 0.7],
+                "suggestions": ["继续保持当前学习节奏"],
+                "radar_data": {"labels": dim_names, "values": radar},
+                "report_markdown": self._generate_diagnostic_report(radar, a_mix, strategy, strategy),
+            }
+
+    def inject_llm(self, llm_client: Any):
+        """注入 LLM 客户端以启用增强报告生成。"""
+        self._llm = llm_client
+
 
 # ============================================================================
 # 工厂函数
@@ -502,6 +599,7 @@ def create_assessment_node(
     alpha: float = 0.2,
     t_low: float = 0.40,
     t_high: float = 0.75,
+    llm_client: Any = None,
 ) -> AssessmentReporterNode:
     """创建 AssessmentReporterNode 实例的工厂函数。
 
@@ -509,8 +607,8 @@ def create_assessment_node(
         alpha: EMA 平滑系数，默认 0.2。
         t_low: 降级阈值，默认 0.40。
         t_high: 升级阈值，默认 0.75。
+        llm_client: 可选 LLM 客户端用于增强报告生成。
 
     Returns:
-        配置好的 AssessmentReporterNode。
-    """
-    return AssessmentReporterNode(alpha=alpha, t_low=t_low, t_high=t_high)
+        配置好的 AssessmentReporterNode。"""
+    return AssessmentReporterNode(alpha=alpha, t_low=t_low, t_high=t_high, llm_client=llm_client)
