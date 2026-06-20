@@ -37,23 +37,23 @@ export async function resetSession(userId) {
   return data;
 }
 
-export async function fetchState(userId) {
-  const { data } = await apiClient.get("/state", { params: { user_id: userId } });
+export async function fetchState(userId, courseId = "data_structures") {
+  const { data } = await apiClient.get("/state", { params: { user_id: userId, course_id: courseId } });
   return data;
 }
 
-export async function fetchProbe(userId) {
-  const { data } = await apiClient.get("/cold-start/probe", { params: { user_id: userId } });
+export async function fetchProbe(userId, courseId = "data_structures") {
+  const { data } = await apiClient.get("/cold-start/probe", { params: { user_id: userId, course_id: courseId } });
   return data;
 }
 
-export async function submitProbeAnswer(userId, answer) {
-  const { data } = await apiClient.post("/cold-start/answer", { user_id: userId, answer });
+export async function submitProbeAnswer(userId, answer, courseId = "data_structures") {
+  const { data } = await apiClient.post("/cold-start/answer", { user_id: userId, answer, course_id: courseId });
   return data;
 }
 
-export async function initLearningPath(userId) {
-  const { data } = await apiClient.post("/init-path", { user_id: userId });
+export async function initLearningPath(userId, courseId = "data_structures") {
+  const { data } = await apiClient.post("/init-path", { user_id: userId, course_id: courseId });
   return data;
 }
 
@@ -67,7 +67,33 @@ export async function askTutor(payload) {
   return data;
 }
 
-export async function fetchKnowledgeGraph() {
-  const { data } = await apiClient.get("/knowledge-graph");
+export async function fetchKnowledgeGraph(courseId = "data_structures") {
+  const { data } = await apiClient.get("/knowledge-graph", { params: { course_id: courseId } });
+  return data;
+}
+
+// ── 课程 ──
+export async function fetchCourses(search) {
+  const { data } = await apiClient.get("/courses", { params: search ? { search } : {} });
+  return data;
+}
+
+export async function fetchCourseDetail(courseId) {
+  const { data } = await apiClient.get(`/courses/${courseId}`);
+  return data;
+}
+
+export async function fetchUserCourses(userId) {
+  const { data } = await apiClient.get("/user/courses", { params: { user_id: userId } });
+  return data;
+}
+
+export async function enrollCourse(userId, courseId) {
+  const { data } = await apiClient.post("/user/courses/enroll", { user_id: userId, course_id: courseId });
+  return data;
+}
+
+export async function switchCourse(userId, courseId) {
+  const { data } = await apiClient.post("/user/courses/switch", { user_id: userId, course_id: courseId });
   return data;
 }

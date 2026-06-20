@@ -41,8 +41,55 @@
           <TopStatusBar :statuses="statuses" />
         </div>
 
-        <!-- 用户信息 + 操作（右侧） -->
+        <!-- 课程切换 + 用户操作（右侧） -->
         <div class="flex flex-shrink-0 items-center gap-3">
+          <!-- 课程切换器 -->
+          <div class="relative" v-if="activeCourse || enrolledCourses.length">
+            <button
+              type="button"
+              class="focus-ring flex items-center gap-2 rounded-full border border-subtle bg-card px-3.5 py-1.5 text-[11px] font-semibold text-text-secondary transition-all duration-200 hover:border-primary/30 hover:text-primary hover:bg-card-hover"
+              @click="courseMenuOpen = !courseMenuOpen"
+            >
+              <span class="text-base leading-none">{{ activeCourse?.icon || '📚' }}</span>
+              <span class="max-w-[120px] truncate hidden sm:inline">{{ activeCourse?.title_cn || '课程' }}</span>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" class="transition-transform duration-200" :class="courseMenuOpen ? 'rotate-180' : ''">
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+            <!-- Dropdown -->
+            <transition name="fade">
+              <div v-if="courseMenuOpen" class="absolute right-0 top-full mt-2 z-50 w-60 rounded-2xl border border-subtle bg-space-panel p-2 shadow-2xl backdrop-blur-xl" @click.stop>
+                <p class="px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-text-muted">已选课程</p>
+                <button
+                  v-for="c in enrolledCourses"
+                  :key="c.course_id"
+                  type="button"
+                  class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors duration-150 hover:bg-card"
+                  :class="c.course_id === activeCourse?.course_id ? 'bg-primary-soft/20 text-primary' : 'text-text-secondary'"
+                  @click="onSwitchCourse(c.course_id)"
+                >
+                  <span class="text-lg">{{ c.icon || '📚' }}</span>
+                  <div class="flex-1 min-w-0">
+                    <span class="block truncate text-sm font-medium">{{ c.title_cn }}</span>
+                    <span class="block text-[10px] text-text-muted">{{ c.progress ? Math.round(c.progress * 100) : 0 }}%</span>
+                  </div>
+                  <IconCheck v-if="c.course_id === activeCourse?.course_id" :size="14" class="text-primary shrink-0" />
+                </button>
+                <div class="my-1 h-px bg-subtle" />
+                <button
+                  type="button"
+                  class="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm text-text-muted transition-colors hover:bg-card hover:text-primary"
+                  @click="$emit('go-home')"
+                >
+                  <span class="text-base">+</span>
+                  浏览更多课程
+                </button>
+              </div>
+            </transition>
+            <!-- Backdrop -->
+            <div v-if="courseMenuOpen" class="fixed inset-0 z-40" @click="courseMenuOpen = false" />
+          </div>
+
           <button
             type="button"
             class="focus-ring rounded-full border border-subtle bg-card px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-muted transition-all duration-200 hover:border-primary/30 hover:text-primary hover:bg-primary-soft"
@@ -125,6 +172,7 @@
 <script setup>
 import { ref } from "vue";
 import ChatArea from "./ChatArea.vue";
+import IconCheck from "./icons/IconCheck.vue";
 import ResourceCanvas from "./ResourceCanvas.vue";
 import SidebarDrawer from "./SidebarDrawer.vue";
 import SidebarRail from "./SidebarRail.vue";
@@ -150,6 +198,8 @@ defineProps({
   getCardLabel: { type: Function, required: true },
   getAgentLabel: { type: Function, required: true },
   parseQuiz: { type: Function, required: true },
+  activeCourse: { type: Object, default: null },
+  enrolledCourses: { type: Array, default: () => [] },
 });
 
 // ── Emits ──
@@ -160,11 +210,13 @@ const emit = defineEmits([
   "submit-probe",
   "logout",
   "go-home",
+  "switch-course",
 ]);
 
 // ── Sidebar 状态 ──
 const drawerOpen = ref(false);
 const sidebarPanel = ref("tree"); // "tree" | "radar" | "settings"
+const courseMenuOpen = ref(false);
 
 // ── 无障碍 / 视觉偏好 ──
 const highContrast = ref(false);
@@ -184,5 +236,10 @@ function onSidebarSelect(panelKey) {
 function onSelectNode(nodeId) {
   emit("select-node", nodeId);
   drawerOpen.value = false;
+}
+
+function onSwitchCourse(courseId) {
+  courseMenuOpen.value = false;
+  emit("switch-course", courseId);
 }
 </script>

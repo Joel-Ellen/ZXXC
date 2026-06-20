@@ -38,6 +38,16 @@
         @go-home="goHome"
       />
 
+      <!-- 课程选择 -->
+      <CourseSelectionView
+        v-else-if="bootMode === 'course_selection'"
+        :courses="availableCourses"
+        :enrolled="enrolledCourses"
+        :loading="isBusy"
+        @select="onCourseSelect"
+        @go-home="goHome"
+      />
+
       <!-- 主工作台 (探针 + 就绪) -->
       <PremiumWorkspace
         v-else-if="bootMode === 'probe' || bootMode === 'ready'"
@@ -59,12 +69,15 @@
         :get-card-label="getCardLabel"
         :get-agent-label="getAgentLabel"
         :parse-quiz="parseQuiz"
+        :active-course="activeCourse"
+        :enrolled-courses="enrolledCourses"
         @select-node="loadNode"
         @submit-quiz="submitQuiz"
         @send-tutor="sendTutorMessage"
         @submit-probe="submitProbe"
         @logout="handleLogout"
         @go-home="goHome"
+        @switch-course="onSwitchCourse"
       />
     </template>
   </div>
@@ -74,6 +87,7 @@
 import { onMounted, ref } from "vue";
 import AuroraBackground from "./components/AuroraBackground.vue";
 import AuthView from "./components/AuthView.vue";
+import CourseSelectionView from "./components/CourseSelectionView.vue";
 import LandingView from "./components/LandingView.vue";
 import PremiumWorkspace from "./components/PremiumWorkspace.vue";
 import { useEduAgent } from "./composables/useEduAgent";
@@ -90,9 +104,11 @@ const {
   currentCards, currentNodeTitle, currentPathNodes,
   messages, agentStatuses, probe, probeCollected, probeTotal,
   overallProgress, masteredCount,
+  activeCourse, availableCourses, enrolledCourses,
   handleLogin, handleRegister, handleLogout,
   bootstrap, submitProbe, loadNode, submitQuiz, sendTutorMessage,
   getCardLabel, getAgentLabel, parseQuiz,
+  handleEnrollCourse, handleSwitchCourse,
 } = useEduAgent();
 
 async function onLogin(userId, password, captchaToken, captchaAnswer) {
@@ -112,6 +128,14 @@ function onEnterApp() {
 
 function goHome() {
   showLanding.value = true;
+}
+
+function onCourseSelect(courseId) {
+  handleEnrollCourse(courseId);
+}
+
+function onSwitchCourse(courseId) {
+  handleSwitchCourse(courseId);
 }
 
 onMounted(() => {

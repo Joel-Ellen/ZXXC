@@ -34,7 +34,7 @@ from __future__ import annotations
 import ast as _ast
 import re
 import math
-from typing import Dict, List, Optional, Tuple, Any, Set
+from typing import Dict, List, Optional, Tuple, Any, Set, Callable
 from enum import Enum
 
 from pydantic import BaseModel, Field

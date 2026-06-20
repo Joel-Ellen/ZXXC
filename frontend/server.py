@@ -17,15 +17,24 @@ from __future__ import annotations
 
 import sys
 import os
+
+# 将项目根目录加入 sys.path，确保 src 包可被导入
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
 import uvicorn
 from starlette.applications import Starlette
 from starlette.routing import Route, Mount
 from starlette.staticfiles import StaticFiles
 from starlette.responses import JSONResponse, Response
 from starlette.requests import Request
+
+# --- Course System ---
+from src.courses import CourseStore
 from sse_starlette.sse import EventSourceResponse
 
-# ⚠️ 必须在导入 sentence-transformers 之前设置，否则模型下载会直连 HuggingFace 被墙
+
 # 加载 .env 文件
 _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 if os.path.isfile(_env_path):
@@ -40,6 +49,7 @@ if os.path.isfile(_env_path):
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
 import json
+import threading
 import time
 import uuid
 import asyncio
@@ -76,22 +86,70 @@ def _get_llm():
     return _llm_client
 
 
-# --- 认证系统 (全局单例) ------------------------------------------
-_auth_store = None
+# --- 数据库层 (全局单例) ------------------------------------------
+try:
+    from src.database import (
+        db as _db, UserRepo, EnrollmentRepo, StateRepo,
+        get_redis, blacklist_token, is_blacklisted, store_refresh_token,
+        mark_rotated, is_rotated, revoke_all_user_sessions,
+    )
+    _db_available = True
+    print("[DB] PostgreSQL backend loaded")
+except Exception as e:
+    print(f"[DB] PostgreSQL not available ({e}), using JSON fallback")
+    _db_available = False
+    _db = None
+    UserRepo = None
+    EnrollmentRepo = None
+    StateRepo = None
+    get_redis = lambda: None
+    blacklist_token = lambda *a, **kw: None
+    is_blacklisted = lambda *a, **kw: False
+    store_refresh_token = lambda *a, **kw: None
+    mark_rotated = lambda *a, **kw: None
+    is_rotated = lambda *a, **kw: False
+    revoke_all_user_sessions = lambda *a, **kw: None
+
+_user_repo = None
+_enrollment_repo = None
+_state_repo = None
 _auth_captcha = None
 
+def _get_user_repo():
+    global _user_repo
+    if _user_repo is None and _db_available:
+        _user_repo = UserRepo()
+    return _user_repo
+
+def _get_enrollment_repo():
+    global _enrollment_repo
+    if _enrollment_repo is None and _db_available:
+        _enrollment_repo = EnrollmentRepo()
+    return _enrollment_repo
+
+def _get_state_repo():
+    global _state_repo
+    if _state_repo is None and _db_available:
+        _state_repo = StateRepo()
+    return _state_repo
+
 def _get_auth():
-    global _auth_store, _auth_captcha
-    if _auth_store is None:
-        from src.auth.models import UserStore, PresetAccounts
+    global _auth_captcha, _user_repo
+    if _auth_captcha is None:
         from src.auth.captcha import CaptchaGenerator
-        _auth_store = UserStore()
-        created = PresetAccounts.ensure_presets(_auth_store)
+        from src.auth.models import PresetAccounts, UserStore
+
+        if _db_available:
+            _user_repo = _get_user_repo()
+            created = PresetAccounts.ensure_presets_db(_user_repo)
+        else:
+            _user_repo = UserStore()
+            created = PresetAccounts.ensure_presets(_user_repo)
         print(f"[Auth] {len(created)} preset accounts ready")
         for u in created:
-            print(f"  - {u.user_id} ({u.role}): {u.email}")
+            print(f"  - {u['user_id']} ({u['role']}): {u['email']}")
         _auth_captcha = CaptchaGenerator()
-    return _auth_store, _auth_captcha
+    return _user_repo, _auth_captcha
 
 
 # --- 导入项目模块 -------------------------------------------------
@@ -138,14 +196,31 @@ def _get_node_title(node_id: str) -> str:
     return _kg.get_node_title(node_id)
 
 
-def _apply_kb_premastery(kb_item: str, agent_state: AgentState) -> None:
-    node_map = _kg.get_knowledge_mastery_map([kb_item])
+def _apply_kb_premastery(kb_item: str, agent_state: AgentState, course_id: str = "data_structures") -> None:
+    node_map = _kg.get_knowledge_mastery_map([kb_item], course_id)
     for nid, mastery in node_map.items():
         if nid not in agent_state.dynamic_profile.knowledge_mastery:
             agent_state.dynamic_profile.knowledge_mastery[nid] = mastery
 
-# ─── 全局会话存储 ───────────────────────────────────────────
-sessions: Dict[str, Dict[str, Any]] = {}
+# ─── 全局会话存储 (user_id → course_id → session) ──────────
+sessions: Dict[str, Dict[str, Dict[str, Any]]] = {}
+
+# ─── 课程存储 (全局单例) ────────────────────────────────────
+_course_store = None
+
+def _get_course_store() -> CourseStore:
+    global _course_store
+    if _course_store is None:
+        _course_store = CourseStore()
+        print(f"[Courses] {_course_store.count()} courses loaded")
+    return _course_store
+
+# ─── 用户选课 (数据库持久化) ─────────────────────────────────
+def _get_user_enrollments(user_id: str) -> Dict[str, Any]:
+    repo = _get_enrollment_repo()
+    if repo is None:
+        return {}
+    return repo.get_user_enrollments(user_id)
 
 # ─── ES 知识库客户端（全局单例）─────────────────────────────
 _es_kb_client = None
@@ -161,12 +236,17 @@ def _get_es_kb():
             SentenceTransformerEmbedder,
         )
         _es_embedder = SentenceTransformerEmbedder(model_name="BAAI/bge-small-zh-v1.5")
+        es_hosts = os.getenv("ES_HOSTS", "http://127.0.0.1:9200")
+        es_user = os.getenv("ES_USER", "elastic")
+        es_password = os.getenv("ES_PASSWORD", "")
         config = ElasticsearchKnowledgeBaseConfig(
-            hosts=["http://127.0.0.1:9200"],
+            hosts=[es_hosts],
             index_name="eduagent_data_structure_kb",
             vector_dims=_es_embedder.dims,
             request_timeout=30,
             verify_certs=False,
+            basic_auth_user=es_user,
+            basic_auth_password=es_password,
         )
         _es_kb_client = ElasticsearchKnowledgeBaseClient(config)
         _es_kb_client.set_embedding_function(_es_embedder.embed, _es_embedder.embed_batch)
@@ -221,14 +301,65 @@ def _search_knowledge_base(query: str, top_k: int = 5) -> List[str]:
         return []
 
 
-def get_or_create_session(user_id: str) -> Dict[str, Any]:
+def _persist_state(user_id: str, course_id: str, agent_state, cold_state=None) -> None:
+    """持久化 AgentState 到 PostgreSQL + Neo4j（三层架构）。"""
+    # 1. PostgreSQL: 完整状态 JSON blob
+    try:
+        state_json = agent_state.model_dump_json()
+        cold_json = cold_state.model_dump_json() if cold_state else None
+        _get_state_repo().save_state(user_id, course_id, state_json, cold_json)
+    except Exception as e:
+        print(f"[DB] State save PG failed: {e}")
+
+    # 2. Neo4j: 知识点掌握度关系 (User)-[:MASTERED]->(KnowledgePoint)
+    _persist_mastery_to_neo4j(user_id, course_id, agent_state)
+
+
+def _persist_mastery_to_neo4j(user_id: str, course_id: str, agent_state) -> None:
+    """将掌握度数据写入 Neo4j 图数据库。
+
+    为每个已掌握的知识点创建或更新：
+        (:User {user_id}) - [:MASTERED {mastery, updated_at}] -> (:KnowledgePoint)
+    """
+    try:
+        mastery = agent_state.dynamic_profile.knowledge_mastery
+        if not mastery:
+            return
+        nc = _kg.get_neo4j_client()
+        if nc is None:
+            return  # Neo4j 不可用，静默跳过
+        for node_id, score in mastery.items():
+            nc.set_user_mastery(user_id, node_id, round(score, 4))
+    except Exception:
+        # Neo4j 写入失败不影响主流程（回退到内存+PostgreSQL）
+        pass
+
+
+def get_or_create_session(user_id: str, course_id: str = "data_structures") -> Dict[str, Any]:
+    """获取或创建用户在某课程下的会话。
+
+    Args:
+        user_id: 用户 ID。
+        course_id: 课程 ID（默认 data_structures）。
+
+    Returns:
+        包含 agent_state / evaluator / ... 的会话字典。
+    """
+    # 确保用户层和课程层存在
     if user_id not in sessions:
+        sessions[user_id] = {}
+    if course_id not in sessions[user_id]:
+        # 获取课程信息以设置 target_node
+        store = _get_course_store()
+        course = store.get_by_id(course_id)
+        target_node = "N20" if course_id == "data_structures" else "N01"
+
         # 初始化 AgentState
         agent_state = AgentState(
             user_id=user_id,
-            course_id="data_structures_101",
+            course_id=course_id,
             current_node_id=None,
-            target_node_id="N20",
+            target_node_id=target_node,
             static_profile=StaticProfile(
                 cognitive_style_distribution=CognitiveStyleDistribution(),
                 motivation="academic_exam",
@@ -254,13 +385,13 @@ def get_or_create_session(user_id: str) -> Dict[str, Any]:
         evaluator = EvaluatorNode()
         profiler = ProfilerNode(seed=42)
         planner = PlannerNode()
-        tutor = TutorAgentNode(llm_generator=llm)  # LLM 注入 → AI 讲解 + Mermaid 图解
+        tutor = TutorAgentNode(llm_generator=llm)
         validator = ValidatorNode(
-            nli_fn=llm.compute_nli_entailment if llm else None  # LLM 注入 → 真实 NLI 校验
+            nli_fn=llm.compute_nli_entailment if llm else None
         )
         assessment = AssessmentReporterNode(alpha=0.2)
 
-        # ContentMesh: LLM 生成核心卡片，其余用 ES 知识库（缓存查询结果）
+        # ContentMesh
         _es_cache: Dict[str, str] = {}
         mesh = None
         if llm:
@@ -270,15 +401,13 @@ def get_or_create_session(user_id: str) -> Dict[str, Any]:
                         return llm.generate_content(node_id, card_type, difficulty)
                     except Exception:
                         pass
-                # ES 知识库回退（同节点只搜一次）
                 title = _get_node_title(node_id, node_id)
-                cache_key = node_id
-                if cache_key not in _es_cache:
+                if node_id not in _es_cache:
                     chunks = _search_knowledge_base(title, top_k=2)
                     if not chunks:
                         chunks = _search_knowledge_base(node_id, top_k=2)
-                    _es_cache[cache_key] = "\n\n".join(chunks) if chunks else f"知识点 {title} 的相关内容正在准备中。"
-                context = _es_cache[cache_key]
+                    _es_cache[node_id] = "\n\n".join(chunks) if chunks else f"知识点 {title} 的相关内容正在准备中。"
+                context = _es_cache[node_id]
                 templates = {
                     "concept_map": f"## {title}\n\n### 概念解析\n\n{context}\n\n---\n*难度: {difficulty:.0%}*",
                     "code_snippet": f"## {title} · 代码示例\n\n```python\n# 相关实现代码\n{context[:800]}\n```\n\n---\n*难度: {difficulty:.0%}*",
@@ -288,6 +417,7 @@ def get_or_create_session(user_id: str) -> Dict[str, Any]:
                 }
                 return templates.get(card_type, context)
             mesh = ContentMeshNode(generate_fn=_hybrid_generate)
+        else:
             def _kb_generate(node_id: str, card_type: str, difficulty: float) -> str:
                 chunks = _search_knowledge_base(node_id, top_k=2)
                 if not chunks:
@@ -307,10 +437,12 @@ def get_or_create_session(user_id: str) -> Dict[str, Any]:
         cold_engine = ColdStartEngine()
         cold_state = cold_engine.initialize(user_id)
 
-        # 初始化路径规划器（使用模拟知识图谱）
-        path_planner = _kg.create_path_planner()
+        # 初始化路径规划器（按课程加载图谱数据）
+        path_planner = _kg.create_path_planner(course_id)
+        # 如果是非 DSA 课程且 Neo4j 中数据为空，先播种
+        _kg.seed_course(course_id)
 
-        sessions[user_id] = {
+        sessions[user_id][course_id] = {
             "agent_state": agent_state,
             "evaluator": evaluator,
             "profiler": profiler,
@@ -322,9 +454,24 @@ def get_or_create_session(user_id: str) -> Dict[str, Any]:
             "cold_engine": cold_engine,
             "cold_state": cold_state,
             "path_planner": path_planner,
-            "pipeline_log": [],  # 记录每一步的执行日志
+            "pipeline_log": [],
         }
-    return sessions[user_id]
+
+        # 持久化到 SQLite
+        _persist_state(user_id, course_id, agent_state, cold_state)
+
+    # 尝试从 DB 恢复（如果内存中没有 agent_state）
+    session = sessions[user_id][course_id]
+    if session["agent_state"] is None:
+        saved = _get_state_repo().load_state(user_id, course_id) if _get_state_repo() else None
+        if saved:
+            try:
+                session["agent_state"] = AgentState.model_validate_json(saved["state_json"])
+                if saved.get("cold_state_json"):
+                    session["cold_state"] = ColdStartState.model_validate_json(saved["cold_state_json"])
+            except Exception:
+                pass  # 反序列化失败则使用新创建的
+    return session
 
 
 # ─── API 端点 ────────────────────────────────────────────────
@@ -333,15 +480,18 @@ async def api_reset(request: Request) -> JSONResponse:
     """重置会话"""
     body = await request.json()
     user_id = body.get("user_id", "demo_user")
-    sessions.pop(user_id, None)
-    get_or_create_session(user_id)
-    return JSONResponse({"status": "ok", "user_id": user_id})
+    course_id = body.get("course_id", "data_structures")
+    if user_id in sessions:
+        sessions[user_id].pop(course_id, None)
+    get_or_create_session(user_id, course_id)
+    return JSONResponse({"status": "ok", "user_id": user_id, "course_id": course_id})
 
 
 async def api_get_state(request: Request) -> JSONResponse:
     """获取当前 AgentState"""
     user_id = request.query_params.get("user_id", "demo_user")
-    session = get_or_create_session(user_id)
+    course_id = request.query_params.get("course_id", "data_structures")
+    session = get_or_create_session(user_id, course_id)
     state: AgentState = session["agent_state"]
     return JSONResponse({
         "user_id": state.user_id,
@@ -384,7 +534,8 @@ async def api_get_state(request: Request) -> JSONResponse:
 async def api_cold_start_probe(request: Request) -> JSONResponse:
     """获取冷启动探针"""
     user_id = request.query_params.get("user_id", "demo_user")
-    session = get_or_create_session(user_id)
+    course_id = request.query_params.get("course_id", "data_structures")
+    session = get_or_create_session(user_id, course_id)
     cold_state: ColdStartState = session["cold_state"]
     engine: ColdStartEngine = session["cold_engine"]
 
@@ -413,8 +564,9 @@ async def api_cold_start_answer(request: Request) -> JSONResponse:
     """处理冷启动回答"""
     body = await request.json()
     user_id = body.get("user_id", "demo_user")
+    course_id = body.get("course_id", "data_structures")
     answer = body.get("answer")
-    session = get_or_create_session(user_id)
+    session = get_or_create_session(user_id, course_id)
 
     cold_state: ColdStartState = session["cold_state"]
     engine: ColdStartEngine = session["cold_engine"]
@@ -473,14 +625,16 @@ async def api_cold_start_answer(request: Request) -> JSONResponse:
     else:
         result["next_probe"] = None
 
+    # 持久化冷启动状态
+    _persist_state(user_id, course_id, agent_state, cold_state)
     return JSONResponse(result)
-
 
 async def api_init_path(request: Request) -> JSONResponse:
     """冷启动完成后，初始化学习路径"""
     body = await request.json()
     user_id = body.get("user_id", "demo_user")
-    session = get_or_create_session(user_id)
+    course_id = body.get("course_id", "data_structures")
+    session = get_or_create_session(user_id, course_id)
     agent_state: AgentState = session["agent_state"]
     path_planner: PathPlanner = session["path_planner"]
 
@@ -489,13 +643,13 @@ async def api_init_path(request: Request) -> JSONResponse:
     for answer in _cs_answers:
         if isinstance(answer, list):
             for item in answer:
-                _apply_kb_premastery(item, agent_state)
+                _apply_kb_premastery(item, agent_state, course_id)
         elif isinstance(answer, str):
-            _apply_kb_premastery(answer, agent_state)
+            _apply_kb_premastery(answer, agent_state, course_id)
     # 如果没有记录，回退到 knowledge_base
     if not agent_state.dynamic_profile.knowledge_mastery:
         for kb_item in agent_state.static_profile.knowledge_base:
-            _apply_kb_premastery(kb_item, agent_state)
+            _apply_kb_premastery(kb_item, agent_state, course_id)
 
     if not agent_state.active_path:
         # 完整课程路径 = 全部知识点按拓扑序排列
@@ -510,6 +664,7 @@ async def api_init_path(request: Request) -> JSONResponse:
             "path": agent_state.active_path,
         })
 
+    _persist_state(user_id, course_id, agent_state, session.get("cold_state"))
     return JSONResponse({
         "active_path": agent_state.active_path,
         "current_node_id": agent_state.current_node_id,
@@ -521,6 +676,7 @@ async def api_run_pipeline_step(request: Request) -> JSONResponse:
     """执行一轮完整的 Agent 管线（模拟一次学习交互）"""
     body = await request.json()
     user_id = body.get("user_id", "demo_user")
+    course_id = body.get("course_id", "data_structures")
     # 模拟的行为数据
     correctness = body.get("correctness", 0.75)
     time_spent_ratio = body.get("time_spent_ratio", 1.0)
@@ -530,7 +686,7 @@ async def api_run_pipeline_step(request: Request) -> JSONResponse:
     # 可选：指定要生成资源的知识点（用于点击路径节点跳转）
     target_node = body.get("current_node_id", None)
 
-    session = get_or_create_session(user_id)
+    session = get_or_create_session(user_id, course_id)
     agent_state: AgentState = session["agent_state"]
     if target_node:
         agent_state.current_node_id = target_node
@@ -729,6 +885,9 @@ async def api_run_pipeline_step(request: Request) -> JSONResponse:
     session["agent_state"] = agent_state
     session["pipeline_log"].extend(logs)
 
+    # 持久化学习状态到 SQLite
+    _persist_state(user_id, course_id, agent_state, session.get("cold_state"))
+
     return JSONResponse({
         "iteration": agent_state.iteration,
         "current_node_id": agent_state.current_node_id,
@@ -752,8 +911,9 @@ async def api_ask_tutor(request: Request) -> JSONResponse:
     """单独调用 Tutor Agent（LLM + ES 知识库）"""
     body = await request.json()
     user_id = body.get("user_id", "demo_user")
+    course_id = body.get("course_id", "data_structures")
     query = body.get("query", "")
-    session = get_or_create_session(user_id)
+    session = get_or_create_session(user_id, course_id)
     agent_state: AgentState = session["agent_state"]
     tutor: TutorAgentNode = session["tutor"]
 
@@ -794,7 +954,8 @@ async def api_ask_tutor(request: Request) -> JSONResponse:
 
 
 async def api_knowledge_graph(request: Request) -> JSONResponse:
-    """获取知识图谱数据（用于前端可视化）"""
+    """获取知识图谱数据（用于前端可视化，可按课程筛选）"""
+    course_id = request.query_params.get("course_id", "data_structures")
     return JSONResponse({
         "nodes": [
             {
@@ -804,7 +965,7 @@ async def api_knowledge_graph(request: Request) -> JSONResponse:
                 "estimated_hours": n.estimated_hours,
                 "category": n.category,
             }
-            for n in _kg.get_all_nodes()
+            for n in _kg.get_all_nodes(course_id)
         ],
         "edges": [
             {
@@ -813,7 +974,7 @@ async def api_knowledge_graph(request: Request) -> JSONResponse:
                 "dependency_type": e.dependency_type,
                 "weight": e.weight,
             }
-            for e in _kg.get_all_edges()
+            for e in _kg.get_all_edges(course_id)
         ],
     })
 
@@ -821,6 +982,7 @@ async def api_knowledge_graph(request: Request) -> JSONResponse:
 async def api_stream_pipeline(request: Request) -> EventSourceResponse:
     """SSE 流式执行完整管线"""
     user_id = request.query_params.get("user_id", "demo_user")
+    course_id = request.query_params.get("course_id", "data_structures")
     correctness = float(request.query_params.get("correctness", "0.75"))
     time_spent_ratio = float(request.query_params.get("time_spent_ratio", "1.0"))
     code_pass_rate = float(request.query_params.get("code_pass_rate", "0.70"))
@@ -981,6 +1143,96 @@ _frontend_root = Path(__file__).resolve().parent
 _frontend_dist = _frontend_root / "dist"
 static_dir = _frontend_dist if _frontend_dist.is_dir() else _frontend_root
 
+# --- Course API Handlers -----------------------------------------------
+
+async def api_list_courses(request: Request) -> JSONResponse:
+    """GET /api/courses — 列出所有课程（支持 ?search= 搜索）。"""
+    search = request.query_params.get("search", "").strip() or None
+    store = _get_course_store()
+    courses = store.list_courses(search=search)
+    return JSONResponse([c.to_api_dict() for c in courses])
+
+
+async def api_get_course(request: Request) -> JSONResponse:
+    """GET /api/courses/{course_id} — 获取单个课程详情。"""
+    course_id = request.path_params.get("course_id", "")
+    store = _get_course_store()
+    course = store.get_by_id(course_id)
+    if course is None:
+        return JSONResponse({"detail": "课程不存在"}, status_code=404)
+    return JSONResponse(course.to_api_dict())
+
+
+async def api_get_user_courses(request: Request) -> JSONResponse:
+    """GET /api/user/courses — 获取当前用户的选课记录和进度。"""
+    user_id = request.query_params.get("user_id", "demo_user")
+    enrollments = _get_user_enrollments(user_id)
+    store = _get_course_store()
+
+    courses_detail = []
+    for cid, info in enrollments.get("courses", {}).items():
+        course = store.get_by_id(cid)
+        if course:
+            d = course.to_api_dict()
+            d["enrolled_at"] = info.get("enrolled_at", "")
+            d["progress"] = info.get("progress", 0.0)
+            d["completed_nodes"] = info.get("completed_nodes", 0)
+            courses_detail.append(d)
+
+    return JSONResponse({
+        "user_id": user_id,
+        "active_course": enrollments.get("active_course", ""),
+        "courses": courses_detail,
+    })
+
+
+async def api_enroll_course(request: Request) -> JSONResponse:
+    """POST /api/user/courses/enroll — 注册课程（body: {user_id, course_id}）。"""
+    body = await request.json()
+    user_id = body.get("user_id", "demo_user")
+    course_id = body.get("course_id", "").strip()
+
+    store = _get_course_store()
+    course = store.get_by_id(course_id)
+    if not course:
+        return JSONResponse({"detail": f"课程 '{course_id}' 不存在"}, status_code=404)
+
+    _get_enrollment_repo().enroll(user_id, course_id) if _get_enrollment_repo() else None
+
+    # 预热会话
+    get_or_create_session(user_id, course_id)
+
+    return JSONResponse({
+        "status": "enrolled",
+        "user_id": user_id,
+        "course_id": course_id,
+        "course": course.to_api_dict(),
+    })
+
+
+async def api_switch_course(request: Request) -> JSONResponse:
+    """POST /api/user/courses/switch — 切换当前活跃课程（body: {user_id, course_id}）。"""
+    body = await request.json()
+    user_id = body.get("user_id", "demo_user")
+    course_id = body.get("course_id", "").strip()
+
+    ok = _get_enrollment_repo().switch_course(user_id, course_id) if _get_enrollment_repo() else True
+    if not ok:
+        return JSONResponse({"detail": f"你尚未注册课程 '{course_id}'"}, status_code=404)
+
+    # 确保会话存在
+    session = get_or_create_session(user_id, course_id)
+    agent_state: AgentState = session["agent_state"]
+
+    return JSONResponse({
+        "status": "switched",
+        "user_id": user_id,
+        "course_id": course_id,
+        "active_path": agent_state.active_path,
+        "has_path": len(agent_state.active_path) > 0,
+    })
+
+
 # --- Auth API Handlers ------------------------------------------------
 
 async def api_auth_captcha(request: Request) -> Response:
@@ -1049,12 +1301,12 @@ async def api_auth_register(request: Request) -> JSONResponse:
     except ValueError as e:
         return JSONResponse({"detail": str(e)}, status_code=409)
 
-    token_pair = SecurityManager.create_token_pair(user.user_id, user.role)
+    token_pair = SecurityManager.create_token_pair(user["user_id"], user["role"])
     return JSONResponse({
         "access_token": token_pair["access_token"],
         "refresh_token": token_pair["refresh_token"],
         "token_type": "bearer",
-        "user": user.to_safe_dict(),
+        "user": {k: user[k] for k in ("user_id", "email", "role", "display_name", "created_at", "last_login_at") if k in user},
     })
 
 
@@ -1086,17 +1338,56 @@ async def api_auth_login(request: Request) -> JSONResponse:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    token_pair = SecurityManager.create_token_pair(user.user_id, user.role)
+    token_pair = SecurityManager.create_token_pair(user["user_id"], user["role"])
+
+    # Redis: 存储 Refresh Token JTI（高并发鉴权缓存）
+    store_refresh_token(user["user_id"], token_pair["refresh_jti"])
+
     return JSONResponse({
         "access_token": token_pair["access_token"],
         "refresh_token": token_pair["refresh_token"],
         "token_type": "bearer",
-        "user": user.to_safe_dict(),
+        "user": {k: user[k] for k in ("user_id", "email", "role", "display_name", "created_at", "last_login_at") if k in user},
     })
 
 
+async def api_auth_logout(request: Request) -> JSONResponse:
+    """POST /api/auth/logout — 注销登录（Redis 黑名单）。"""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    access_token = body.get("access_token", "")
+    refresh_token = body.get("refresh_token", "")
+
+    # 从 Authorization header 回退提取
+    if not access_token:
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            access_token = auth[7:]
+
+    from src.auth.security import SecurityManager
+    # 将 Access Token 加入黑名单
+    if access_token:
+        try:
+            payload = SecurityManager.decode_token(access_token)
+            blacklist_token(payload.get("jti", ""), ttl=900)
+        except ValueError:
+            pass
+
+    # 将 Refresh Token 加入黑名单
+    if refresh_token:
+        try:
+            payload = SecurityManager.decode_token(refresh_token)
+            blacklist_token(payload.get("jti", ""), ttl=604800)  # 7天
+        except ValueError:
+            pass
+
+    return JSONResponse({"status": "logged_out"})
+
+
 async def api_auth_refresh(request: Request) -> JSONResponse:
-    """POST /api/auth/refresh — 令牌刷新轮转。"""
+    """POST /api/auth/refresh — 令牌刷新轮转（Redis 重放检测）。"""
     from src.auth.security import SecurityManager
     try:
         body = await request.json()
@@ -1116,12 +1407,24 @@ async def api_auth_refresh(request: Request) -> JSONResponse:
         return JSONResponse({"detail": "INVALID_TOKEN_TYPE"}, status_code=401)
 
     user_id = payload.get("sub", "")
+    old_jti = payload.get("jti", "")
+
+    # Redis 重放攻击检测
+    if is_rotated(old_jti):
+        revoke_all_user_sessions(user_id)
+        return JSONResponse({"detail": "SECURITY_BREACH_REUSE_DETECTED"}, status_code=403)
+
     store, _ = _get_auth()
     user = store.get_by_id(user_id)
-    role = user.role if user else "STUDENT"
+    role = user["role"] if user else "STUDENT"
 
     token_pair = SecurityManager.create_token_pair(user_id, role)
-    user_info = user.to_safe_dict() if user else {}
+
+    # Redis: 旧令牌标记为已轮转（10s 宽限窗口），存储新令牌
+    mark_rotated(old_jti, ttl=10)
+    store_refresh_token(user_id, token_pair["refresh_jti"])
+
+    user_info = {k: user[k] for k in ("user_id", "email", "role", "display_name", "created_at", "last_login_at") if k in user} if user else {}
     return JSONResponse({
         "access_token": token_pair["access_token"],
         "refresh_token": token_pair["refresh_token"],
@@ -1152,12 +1455,17 @@ async def api_auth_me(request: Request) -> JSONResponse:
     if user is None:
         return JSONResponse({"detail": "用户不存在"}, status_code=404)
 
-    return JSONResponse(user.to_safe_dict())
+    return JSONResponse({k: user[k] for k in ("user_id", "email", "role", "display_name", "created_at", "last_login_at") if k in user})
 
 
 app = Starlette(
     debug=True,
     routes=[
+        Route("/api/courses", api_list_courses, methods=["GET"]),
+        Route("/api/courses/{course_id}", api_get_course, methods=["GET"]),
+        Route("/api/user/courses", api_get_user_courses, methods=["GET"]),
+        Route("/api/user/courses/enroll", api_enroll_course, methods=["POST"]),
+        Route("/api/user/courses/switch", api_switch_course, methods=["POST"]),
         Route("/api/reset", api_reset, methods=["POST"]),
         Route("/api/state", api_get_state, methods=["GET"]),
         Route("/api/cold-start/probe", api_cold_start_probe, methods=["GET"]),
@@ -1173,6 +1481,7 @@ app = Starlette(
         Route("/api/auth/register", api_auth_register, methods=["POST"]),
         Route("/api/auth/login", api_auth_login, methods=["POST"]),
         Route("/api/auth/refresh", api_auth_refresh, methods=["POST"]),
+        Route("/api/auth/logout", api_auth_logout, methods=["POST"]),
         Route("/api/auth/me", api_auth_me, methods=["GET"]),
         Mount("/", app=StaticFiles(directory=str(static_dir), html=True)),
     ],

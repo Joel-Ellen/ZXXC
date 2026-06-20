@@ -60,7 +60,8 @@ class PathPlanStrategy(str, Enum):
 class KnowledgeNode(BaseModel):
     """知识点节点 — Neo4j 中一个知识点的完整属性投影。"""
 
-    node_id: str = Field(..., min_length=1, description="知识点唯一 ID (Neo4j 原生 ID 或业务键)")
+    node_id: str = Field(..., min_length=1, description="知识点唯一 ID")
+    course_id: str = Field(default="", description="所属课程 ID")
     title: str = Field(default="", description="知识点标题")
     difficulty: float = Field(default=0.5, ge=0.0, le=1.0, description="难度系数 (0.0-1.0)")
     estimated_hours: float = Field(default=1.0, gt=0.0, description="预估学习时长 (小时)")
@@ -73,6 +74,7 @@ class KnowledgeEdge(BaseModel):
 
     source_id: str = Field(..., min_length=1, description="前置知识点 ID")
     target_id: str = Field(..., min_length=1, description="后继知识点 ID")
+    course_id: str = Field(default="", description="所属课程 ID")
     dependency_type: str = Field(
         default="strict",
         pattern=r"^(strict|recommended|optional)$",

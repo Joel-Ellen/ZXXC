@@ -20,6 +20,7 @@ Neo4jClient — 知识图谱 CRUD 与拓扑数据查询引擎
 
 from __future__ import annotations
 
+import json
 from typing import Dict, List, Optional, Any, Iterator, Tuple
 from dataclasses import dataclass, field
 from contextlib import contextmanager
@@ -191,15 +192,8 @@ class Neo4jClient:
 
         def _txn(tx: Any) -> List[Dict[str, Any]]:
             result = tx.run(cypher, **params)
+            records_list = [record.data() for record in result]
             summary = result.consume()
-            counters = {
-                "nodes_created": summary.counters.nodes_created,
-                "nodes_deleted": summary.counters.nodes_deleted,
-                "relationships_created": summary.counters.relationships_created,
-                "relationships_deleted": summary.counters.relationships_deleted,
-                "properties_set": summary.counters.properties_set,
-            }
-            records_list = [record.data() for record in result] if result else []
             return records_list
 
         with driver.session(database=self._config.database) as session:
@@ -231,6 +225,7 @@ class Neo4jClient:
         cypher = """
         CREATE (n:KnowledgeNode {
             node_id: $node_id,
+            course_id: $course_id,
             title: $title,
             difficulty: $difficulty,
             estimated_hours: $estimated_hours,
@@ -241,11 +236,12 @@ class Neo4jClient:
         """
         result = self.execute_write(cypher, {
             "node_id": node.node_id,
+            "course_id": node.course_id or "",
             "title": node.title,
             "difficulty": node.difficulty,
             "estimated_hours": node.estimated_hours,
             "category": node.category,
-            "metadata": node.metadata,
+            "metadata": json.dumps(node.metadata) if isinstance(node.metadata, dict) else str(node.metadata or ""),
         })
         return result.records[0]["node_id"] if result.records else ""
 
@@ -363,10 +359,10 @@ class Neo4jClient:
         if course_id:
             cypher = """
             MATCH (n:KnowledgeNode)
-            WHERE n.metadata CONTAINS $course_filter
+            WHERE n.course_id = $course_id
             RETURN n
             """
-            params = {"course_filter": f"course_id:{course_id}"}
+            params = {"course_id": course_id}
         else:
             cypher = "MATCH (n:KnowledgeNode) RETURN n"
             params = {}
@@ -375,13 +371,20 @@ class Neo4jClient:
         nodes: List[KnowledgeNode] = []
         for record in result.records:
             n = record["n"]
+            raw_meta = n.get("metadata", {})
+            if isinstance(raw_meta, str):
+                try:
+                    raw_meta = json.loads(raw_meta)
+                except Exception:
+                    raw_meta = {}
             nodes.append(KnowledgeNode(
                 node_id=n.get("node_id", ""),
+                course_id=n.get("course_id", ""),
                 title=n.get("title", ""),
                 difficulty=n.get("difficulty", 0.5),
                 estimated_hours=n.get("estimated_hours", 1.0),
                 category=n.get("category", "concept"),
-                metadata=n.get("metadata", {}),
+                metadata=raw_meta if isinstance(raw_meta, dict) else {},
             ))
         return nodes
 
@@ -413,22 +416,27 @@ class Neo4jClient:
     # ------------------------------------------------------------------
 
     def get_all_edges(self, course_id: Optional[str] = None) -> List[KnowledgeEdge]:
-        """获取所有前置依赖关系。
-
-        Returns:
-            KnowledgeEdge 列表。
-        """
-        cypher = """
-        MATCH (src:KnowledgeNode)-[r:PREREQUISITE]->(tgt:KnowledgeNode)
-        RETURN src.node_id AS source_id, tgt.node_id AS target_id,
-               r.dependency_type AS dep_type, r.weight AS weight
-        """
-        result = self.execute_read(cypher)
+        """获取所有前置依赖关系（可按课程筛选）。"""
+        if course_id:
+            cypher = """
+            MATCH (src:KnowledgeNode {course_id: $course_id})-[r:PREREQUISITE]->(tgt:KnowledgeNode {course_id: $course_id})
+            RETURN src.node_id AS source_id, tgt.node_id AS target_id,
+                   r.dependency_type AS dep_type, r.weight AS weight
+            """
+            result = self.execute_read(cypher, {"course_id": course_id})
+        else:
+            cypher = """
+            MATCH (src:KnowledgeNode)-[r:PREREQUISITE]->(tgt:KnowledgeNode)
+            RETURN src.node_id AS source_id, tgt.node_id AS target_id,
+                   r.dependency_type AS dep_type, r.weight AS weight
+            """
+            result = self.execute_read(cypher)
         edges: List[KnowledgeEdge] = []
         for record in result.records:
             edges.append(KnowledgeEdge(
                 source_id=record["source_id"],
                 target_id=record["target_id"],
+                course_id=course_id or "",
                 dependency_type=record.get("dep_type", "strict"),
                 weight=record.get("weight", 1.0),
             ))
@@ -674,15 +682,24 @@ class Neo4jClient:
           - User.user_id 唯一性约束
           - 难度 / 预估时长范围属性索引
         """
+        # 删除旧单列唯一约束（如果存在）以避免冲突
+        try:
+            self.execute_write("DROP CONSTRAINT IF EXISTS FOR (n:KnowledgeNode) REQUIRE n.node_id IS UNIQUE")
+        except Exception:
+            pass
+
         constraints = [
-            "CREATE CONSTRAINT IF NOT EXISTS FOR (n:KnowledgeNode) REQUIRE n.node_id IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (n:KnowledgeNode) REQUIRE (n.node_id, n.course_id) IS NODE KEY",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (u:User) REQUIRE u.user_id IS UNIQUE",
         ]
         for cypher in constraints:
-            self.execute_write(cypher)
+            try:
+                self.execute_write(cypher)
+            except Exception:
+                pass
 
-        # 可选：创建索引加速查询
         indices = [
+            "CREATE INDEX IF NOT EXISTS FOR (n:KnowledgeNode) ON (n.course_id)",
             "CREATE INDEX IF NOT EXISTS FOR (n:KnowledgeNode) ON (n.difficulty)",
             "CREATE INDEX IF NOT EXISTS FOR (n:KnowledgeNode) ON (n.category)",
         ]

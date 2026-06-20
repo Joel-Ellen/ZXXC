@@ -247,3 +247,8 @@ class PresetAccounts:
             else:
                 created.append(existing)
         return created
+
+    @classmethod
+    def ensure_presets_db(cls, repo) -> list:
+        """确保预设账号存在（数据库版本）。"""
+        return repo.ensure_presets(cls.PRESET_USERS)

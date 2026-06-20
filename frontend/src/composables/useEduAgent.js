@@ -1,8 +1,8 @@
 import { computed, reactive, ref } from "vue";
 import {
-  askTutor, fetchKnowledgeGraph, fetchMyProfile, fetchProbe, fetchState,
-  getCaptcha, initLearningPath, login, refreshToken, register,
-  runPipelineStep, submitProbeAnswer,
+  askTutor, enrollCourse, fetchCourses, fetchKnowledgeGraph, fetchMyProfile,
+  fetchProbe, fetchState, fetchUserCourses, getCaptcha, initLearningPath,
+  login, refreshToken, register, runPipelineStep, submitProbeAnswer, switchCourse,
 } from "../services/eduAgentApi";
 
 // ── 卡片类型 & 角色标签 (全中文) ──
@@ -31,8 +31,13 @@ export function useEduAgent() {
   const currentUser = ref(null);
   const userId = computed(() => currentUser.value?.user_id ?? "demo_user");
 
+  // --- 课程状态 ---
+  const activeCourse = ref(null);
+  const availableCourses = ref([]);
+  const enrolledCourses = ref([]);
+
   // --- 工作台状态 ---
-  const bootMode = ref("loading"); // loading | login | probe | ready
+  const bootMode = ref("loading"); // loading | login | course_selection | probe | ready
   const isBusy = ref(false);
   const isSubmittingProbe = ref(false);
   const isLoadingNode = ref(false);
@@ -99,7 +104,7 @@ export function useEduAgent() {
   // --- 知识图谱加载 ---
   async function loadKnowledgeGraph() {
     try {
-      const kg = await fetchKnowledgeGraph();
+      const kg = await fetchKnowledgeGraph(courseId.value);
       knowledgeGraph.value = kg;
       const titles = {};
       (kg.nodes || []).forEach(n => { titles[n.id] = n.title; });
@@ -165,7 +170,7 @@ export function useEduAgent() {
     isSubmittingProbe.value = true;
     try {
       const answer = Array.isArray(values) && values.length === 1 ? values[0] : values;
-      const resp = await submitProbeAnswer(userId.value, answer);
+      const resp = await submitProbeAnswer(userId.value, answer, courseId.value);
       if (resp.phase === "complete") {
         probe.value = null;
         probeCollected.value = probeTotal.value;
@@ -173,7 +178,7 @@ export function useEduAgent() {
         return;
       }
       probeCollected.value = resp.collected ?? probeCollected.value;
-      const next = await fetchProbe(userId.value);
+      const next = await fetchProbe(userId.value, courseId.value);
       probe.value = next.probe;
       probeCollected.value = next.collected ?? probeCollected.value;
     } catch { setInfo("提交失败，请重试"); }
@@ -181,13 +186,33 @@ export function useEduAgent() {
   }
 
   async function initPathAndEnter() {
-    await initLearningPath(userId.value);
-    const state = await fetchState(userId.value);
+    await initLearningPath(userId.value, courseId.value);
+    const state = await fetchState(userId.value, courseId.value);
     hydrateState(state);
     currentNode.value = activePath.value.find(id => (mastery.value[id] ?? 0) < 0.65) || activePath.value[0] || "";
     bootMode.value = "ready";
     refreshStatuses();
     if (currentNode.value) await loadNode(currentNode.value, true);
+  }
+
+  // --- 课程辅助 ---
+  const courseId = computed(() => activeCourse.value?.course_id || "data_structures");
+
+  async function loadAvailableCourses(search) {
+    try {
+      availableCourses.value = await fetchCourses(search);
+    } catch { /* ignore */ }
+  }
+
+  async function loadUserCourses() {
+    try {
+      const result = await fetchUserCourses(userId.value);
+      enrolledCourses.value = result.courses || [];
+      if (result.active_course) {
+        activeCourse.value = result.courses.find(c => c.course_id === result.active_course) || null;
+      }
+      return result;
+    } catch { return { courses: [], active_course: "" }; }
   }
 
   // --- 主启动流程 ---
@@ -196,17 +221,28 @@ export function useEduAgent() {
     isBusy.value = true;
     try {
       await loadKnowledgeGraph();
+      await loadAvailableCourses();
       const loggedIn = await tryAutoLogin();
       if (!loggedIn) { bootMode.value = "login"; isBusy.value = false; return; }
 
-      const state = await fetchState(userId.value);
+      // 检查用户是否有已注册课程
+      const enrollment = await loadUserCourses();
+      if (!enrollment.active_course || !enrollment.courses.length) {
+        // 没有课程 → 显示选课页面
+        bootMode.value = "course_selection";
+        isBusy.value = false;
+        return;
+      }
+
+      // 有活跃课程 → 加载该课程的学习状态
+      const state = await fetchState(userId.value, courseId.value);
       hydrateState(state);
       if (activePath.value.length) {
         bootMode.value = "ready";
         refreshStatuses();
         if (currentNode.value) await loadNode(currentNode.value, true);
       } else {
-        const ps = await fetchProbe(userId.value);
+        const ps = await fetchProbe(userId.value, courseId.value);
         if (ps.phase === "complete") {
           await initPathAndEnter();
         } else {
@@ -221,6 +257,63 @@ export function useEduAgent() {
     } finally { isBusy.value = false; }
   }
 
+  // --- 选课与切换 ---
+  async function handleEnrollCourse(courseIdInput) {
+    isBusy.value = true;
+    try {
+      const result = await enrollCourse(userId.value, courseIdInput);
+      activeCourse.value = result.course;
+      // 加入已选列表
+      await loadUserCourses();
+      // 开始冷启动测评
+      const ps = await fetchProbe(userId.value, courseId.value);
+      if (ps.phase === "complete") {
+        await initPathAndEnter();
+      } else {
+        probe.value = ps.probe;
+        probeCollected.value = ps.collected ?? 0;
+        bootMode.value = "probe";
+      }
+    } catch (e) {
+      setInfo("选课失败：" + (e?.response?.data?.detail || "请重试"));
+    } finally { isBusy.value = false; }
+  }
+
+  async function handleSwitchCourse(courseIdInput) {
+    if (courseIdInput === activeCourse.value?.course_id) return;
+    isBusy.value = true;
+    try {
+      await switchCourse(userId.value, courseIdInput);
+      await loadUserCourses();
+      // 重置工作台状态
+      currentNode.value = "";
+      activePath.value = [];
+      mastery.value = {};
+      resources.value = {};
+      messages.value = [];
+      probe.value = null;
+      // 加载新课程状态
+      const state = await fetchState(userId.value, courseId.value);
+      hydrateState(state);
+      if (activePath.value.length) {
+        bootMode.value = "ready";
+        refreshStatuses();
+        if (currentNode.value) await loadNode(currentNode.value, true);
+      } else {
+        const ps = await fetchProbe(userId.value, courseId.value);
+        if (ps.phase === "complete") {
+          await initPathAndEnter();
+        } else {
+          probe.value = ps.probe;
+          probeCollected.value = ps.collected ?? 0;
+          bootMode.value = "probe";
+        }
+      }
+    } catch (e) {
+      setInfo("切换课程失败：" + (e?.response?.data?.detail || "请重试"));
+    } finally { isBusy.value = false; }
+  }
+
   // --- 节点资源加载 ---
   async function loadNode(nodeId, silent = false) {
     if (!nodeId) return;
@@ -230,10 +323,10 @@ export function useEduAgent() {
     if (!silent) setInfo(`正在为「${nodeTitles.value[nodeId] || nodeId}」生成学习资源...`);
     try {
       await runPipelineStep({
-        user_id: userId.value, current_node_id: nodeId,
+        user_id: userId.value, course_id: courseId.value, current_node_id: nodeId,
         correctness: 0.7, time_spent_ratio: 1.0, code_pass_rate: 0.7,
       });
-      const state = await fetchState(userId.value);
+      const state = await fetchState(userId.value, courseId.value);
       hydrateState(state);
       currentNode.value = nodeId;
     } catch { setInfo("资源生成失败"); }
@@ -245,10 +338,10 @@ export function useEduAgent() {
     isLoadingNode.value = true;
     try {
       await runPipelineStep({
-        user_id: userId.value, correctness: score,
+        user_id: userId.value, course_id: courseId.value, correctness: score,
         time_spent_ratio: 1.0, code_pass_rate: score,
       });
-      const state = await fetchState(userId.value);
+      const state = await fetchState(userId.value, courseId.value);
       hydrateState(state);
       currentNode.value = activePath.value.includes(currentNode.value) ? currentNode.value : (activePath.value[0] || "");
     } catch { setInfo("提交失败"); }
@@ -288,8 +381,10 @@ export function useEduAgent() {
     knowledgeGraph, nodeTitles, probe, probeCollected, probeTotal,
     resources, currentCards, currentNodeTitle, currentPathNodes,
     messages, infoMessage, agentStatuses, overallProgress, masteredCount,
+    activeCourse, availableCourses, enrolledCourses, courseId,
     handleLogin, handleRegister, handleLogout, getCaptcha,
     bootstrap, submitProbe, loadNode, submitQuiz, sendTutorMessage,
     getCardLabel, getAgentLabel, parseQuiz, refreshStatuses,
+    loadAvailableCourses, handleEnrollCourse, handleSwitchCourse,
   };
 }

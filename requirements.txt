@@ -56,6 +56,11 @@ PyJWT>=2.8.0
 # FastAPI (for auth middleware)
 fastapi>=0.104.0,<1.0.0
 
+# --- Database ---
+psycopg2-binary>=2.9.0
+redis>=5.0.0
+fakeredis>=2.0.0
+
 # --- Backend Server ---
 uvicorn>=0.24.0,<1.0.0
 
