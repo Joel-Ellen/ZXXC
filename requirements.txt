@@ -1,0 +1,64 @@
+# ============================================================================
+# EduAgent — 第十五届"中国软件杯"科大讯飞出题
+# 《基于大模型的个性化资源生成与学习多智能体系统开发》
+# ============================================================================
+#
+# 核心依赖 (Phase 1: 底层基础设施 — 辅助算法一、三)
+#
+
+# --- Multi-Agent Orchestration ---
+# LangGraph: 有向图驱动的多智能体协同框架
+# 注意: LangGraph >= 0.2.0 需要 langchain-core 作为基座
+langgraph>=0.2.0,<1.0.0
+langchain-core>=0.3.0,<1.0.0
+
+# --- Graph Database ---
+# Neo4j 官方 Python Driver (Apache 2.0)
+neo4j>=5.20.0,<6.0.0
+
+# --- Vector Database ---
+# pymilvus: Milvus 官方 Python SDK (Apache 2.0)
+pymilvus>=2.3.0,<3.0.0
+elasticsearch>=8.17.0,<9.0.0
+
+# --- Data Validation ---
+# Pydantic v2: 强类型校验与序列化
+pydantic>=2.5.0,<3.0.0
+numpy>=1.24.0,<2.0.0
+
+# --- Text Splitting ---
+# Used for MarkdownHeaderTextSplitter-based chunking.
+langchain-text-splitters>=0.3.0,<1.0.0
+
+# --- Testing ---
+pytest>=7.4.0,<9.0.0
+pytest-asyncio>=0.21.0,<1.0.0
+
+# --- Async Support ---
+# (LangGraph 的异步 Node 支持)
+aiohttp>=3.9.0,<4.0.0
+
+# --- Embedding (可插拔) ---
+# 讯飞星火 Embedding / OpenAI / 本地模型的适配层
+# 按需安装:
+# openai>=1.0.0
+sentence-transformers>=5.0.0,<6.0.0
+
+# --- Streaming ---
+# SSE 流式输出支持
+sse-starlette>=1.8.0,<2.0.0
+starlette>=0.36.0,<1.0.0
+
+# --- Auth & Security ---
+# Argon2id password hashing + JWT token management
+argon2-cffi>=23.1.0
+PyJWT>=2.8.0
+# FastAPI (for auth middleware)
+fastapi>=0.104.0,<1.0.0
+
+# --- Backend Server ---
+uvicorn>=0.24.0,<1.0.0
+
+# --- Utilities ---
+python-dotenv>=1.0.0,<2.0.0
+tenacity>=8.2.0,<9.0.0  # 重试机制
