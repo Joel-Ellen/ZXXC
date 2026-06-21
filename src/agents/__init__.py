@@ -54,6 +54,9 @@ from .assessment_node import (
 
 # ── 新增 10 个 Agent（合并自 backend/）────────────────────────────────
 from .base_agent import BaseAgent, AgentMessage, BaseAgentState
+from .agent_factory import build_agent, get_default_llm
+from .prompt_registry import PROMPT_REGISTRY, build_user_prompt, get_prompt_definition, get_system_prompt
+from .prompt_adapters import run_assessment_report_with_llm, run_tutor_mode_with_llm
 from .student_profiler_agent import StudentProfilerAgent
 from .knowledge_analysis_agent import KnowledgeAnalysisAgent
 from .resource_planner_agent import ResourcePlannerAgent
@@ -62,6 +65,7 @@ from .question_generator_agent import QuestionGeneratorAgent
 from .mindmap_generator_agent import MindMapGeneratorAgent
 from .coding_practice_agent import CodingPracticeAgent
 from .video_script_agent import VideoScriptAgent
+from .resource_generation_agent import ResourceGenerationAgent
 __all__ = [
     # Existing 7
     "EvaluatorNode", "EvaluatorInput", "EvaluatorOutput",
@@ -85,9 +89,13 @@ __all__ = [
     "CapabilityRadar", "HysteresisStrategyController", "create_assessment_node",
     # New 10 + base
     "BaseAgent", "AgentMessage", "BaseAgentState",
+    "build_agent", "get_default_llm",
+    "PROMPT_REGISTRY", "build_user_prompt", "get_prompt_definition", "get_system_prompt",
+    "run_assessment_report_with_llm", "run_tutor_mode_with_llm",
     "StudentProfilerAgent", "KnowledgeAnalysisAgent", "ResourcePlannerAgent",
     "PPTGeneratorAgent", "QuestionGeneratorAgent", "MindMapGeneratorAgent",
     "CodingPracticeAgent", "VideoScriptAgent",
+    "ResourceGenerationAgent",
     # LearningCoachAgent → 已合并到 TutorAgentNode
     # EvaluationAgent → 已合并到 AssessmentReporterNode
 ]

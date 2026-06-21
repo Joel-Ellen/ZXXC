@@ -1,17 +1,19 @@
 <template>
   <article
-    class="relative w-full rounded-[22px] p-6 backdrop-blur-sm transition-all duration-300"
+    class="relative w-full overflow-hidden rounded-[24px] p-6 backdrop-blur-sm transition-all duration-300"
     :class="[
       !isReady
-        ? 'border border-subtle bg-card opacity-70'
-        : `${colorClasses.border} ${colorClasses.hoverBorder} bg-card hover:shadow-card hover:-translate-y-0.5`,
-      isActive ? 'shadow-[0_12px_36px_rgba(0,0,0,0.32)]' : '',
+        ? 'border border-subtle bg-card opacity-80'
+        : `${colorClasses.border} ${colorClasses.hoverBorder} bg-card hover:-translate-y-0.5 hover:shadow-card`,
+      isActive ? 'shadow-[0_12px_36px_rgba(0,0,0,0.32)] ring-1 ring-white/5' : '',
     ]"
   >
-    <div class="mb-5 flex items-center justify-between gap-3">
+    <div class="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/12 to-transparent" />
+
+    <div class="mb-5 flex items-start justify-between gap-3">
       <div class="flex min-w-0 items-center gap-3">
         <span
-          class="h-2.5 w-2.5 rounded-full"
+          class="mt-1 h-2.5 w-2.5 rounded-full"
           :class="isReady ? colorClasses.dot : 'bg-tertiary animate-pulse'"
           :style="isReady ? colorClasses.dotStyle : {}"
         />
@@ -19,23 +21,25 @@
           <h5 class="truncate font-mono text-[11px] font-black uppercase tracking-[0.14em] text-text-muted">
             {{ agentName }}
           </h5>
-          <p class="mt-0.5 truncate text-[11px] font-light uppercase tracking-[0.12em] text-text-muted/70">
+          <p class="mt-0.5 truncate text-[13px] font-semibold tracking-[0.02em] text-text-primary">
             {{ title }}
           </p>
         </div>
       </div>
 
-      <div class="flex items-center gap-2">
-        <div v-if="!isReady" class="text-right font-mono text-[10px] tracking-[0.14em] text-text-muted">
-          <div>{{ progressText }}</div>
-          <div>{{ progress }}%</div>
+      <div class="flex shrink-0 items-start gap-2">
+        <div class="rounded-full border border-subtle bg-space-surface/60 px-2.5 py-1 text-right">
+          <div class="font-mono text-[10px] uppercase tracking-[0.14em] text-text-muted">
+            {{ isReady ? "已就绪" : progressText }}
+          </div>
+          <div class="mt-1 text-[11px] font-semibold text-text-secondary">
+            {{ isReady ? "Ready" : `${progress}%` }}
+          </div>
         </div>
-        <span v-else class="font-mono text-[10px] tracking-[0.16em] text-text-muted">
-          已验证
-        </span>
+
         <button
           type="button"
-          class="focus-ring rounded-full border border-subtle p-2 text-text-muted transition-all duration-200 hover:border-primary/30 hover:text-primary hover:bg-card-hover active:scale-95"
+          class="focus-ring rounded-full border border-subtle p-2 text-text-muted transition-all duration-200 hover:border-primary/30 hover:bg-card-hover hover:text-primary active:scale-95"
           aria-label="置顶卡片"
           @click="$emit('pin')"
         >
@@ -43,7 +47,7 @@
         </button>
         <button
           type="button"
-          class="focus-ring rounded-full border border-subtle p-2 text-text-muted transition-all duration-200 hover:border-secondary/30 hover:text-secondary hover:bg-card-hover active:scale-95"
+          class="focus-ring rounded-full border border-subtle p-2 text-text-muted transition-all duration-200 hover:border-secondary/30 hover:bg-card-hover hover:text-secondary active:scale-95"
           aria-label="最小化卡片"
           @click="$emit('minimize')"
         >
@@ -52,7 +56,9 @@
       </div>
     </div>
 
-    <div class="relative min-h-[100px]">
+    <div class="mb-5 h-px w-full bg-gradient-to-r from-transparent via-[var(--border-strong)] to-transparent" />
+
+    <div class="relative min-h-[120px]">
       <div v-if="!isReady" class="absolute inset-0 space-y-3 overflow-hidden rounded-2xl">
         <div
           v-for="width in ['w-full', 'w-5/6', 'w-2/3']"
@@ -60,11 +66,11 @@
           class="h-4 overflow-hidden rounded-lg bg-card"
           :class="width"
         >
-          <div class="h-full w-1/2 bg-gradient-to-r from-transparent via-[var(--text-muted)]/10 to-transparent animate-shimmer" />
+          <div class="h-full w-1/2 animate-shimmer bg-gradient-to-r from-transparent via-[var(--text-muted)]/10 to-transparent" />
         </div>
-        <div class="mt-4 h-px w-full bg-[var(--border-strong)]">
+        <div class="mt-4 rounded-full bg-[var(--border-strong)]/80 p-[1px]">
           <div
-            class="h-px bg-gradient-to-r from-primary to-secondary transition-all duration-500"
+            class="h-1.5 rounded-full bg-gradient-to-r from-primary to-secondary transition-all duration-500"
             :style="{ width: `${progress}%` }"
           />
         </div>
@@ -78,6 +84,15 @@
         }"
       >
         <slot name="content" />
+      </div>
+    </div>
+
+    <div class="mt-6 flex flex-wrap items-center justify-between gap-2">
+      <p class="text-[11px] text-text-muted">{{ footerLabel }}</p>
+      <div class="flex items-center gap-2 text-[11px] text-text-muted">
+        <span class="rounded-full border border-subtle bg-space-surface/50 px-2.5 py-1">
+          {{ isActive ? "当前聚焦" : "可加入聚焦" }}
+        </span>
       </div>
     </div>
   </article>
@@ -154,4 +169,10 @@ const colorClasses = computed(() => {
     dotStyle: { boxShadow: `0 0 12px ${config.cssVar}` },
   };
 });
+
+const footerLabel = computed(() => (
+  props.isReady
+    ? "支持置顶、聚焦和最小化，便于按你的学习顺序重排内容。"
+    : "资源仍在装配中，建议暂时停留在当前节点等待生成完成。"
+));
 </script>

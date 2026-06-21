@@ -2,6 +2,8 @@ import { ref, watch } from "vue";
 
 const STORAGE_KEY = "eduagent-theme";
 const VALID_THEMES = ["dark", "light"];
+const theme = ref("dark");
+let isThemeInitialized = false;
 
 function getInitialTheme() {
   if (typeof window === "undefined") {
@@ -17,33 +19,50 @@ function getInitialTheme() {
   return "dark";
 }
 
-const theme = ref(getInitialTheme());
+function persistTheme(next) {
+  if (typeof document !== "undefined") {
+    document.documentElement.setAttribute("data-theme", next);
+  }
+
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(STORAGE_KEY, next);
+  }
+}
+
+function ensureThemeInitialized() {
+  if (isThemeInitialized) {
+    return;
+  }
+
+  theme.value = getInitialTheme();
+  persistTheme(theme.value);
+
+  watch(theme, (next) => {
+    persistTheme(next);
+  });
+
+  isThemeInitialized = true;
+}
 
 export function useTheme() {
+  ensureThemeInitialized();
+
   function applyTheme(next) {
     if (!VALID_THEMES.includes(next)) {
       return;
     }
-    theme.value = next;
-    if (typeof document !== "undefined") {
-      document.documentElement.setAttribute("data-theme", next);
-      window.localStorage.setItem(STORAGE_KEY, next);
+
+    if (theme.value === next) {
+      persistTheme(next);
+      return;
     }
+
+    theme.value = next;
   }
 
   function toggleTheme() {
     applyTheme(theme.value === "dark" ? "light" : "dark");
   }
-
-  // Apply immediately on import (client-side)
-  if (typeof document !== "undefined") {
-    document.documentElement.setAttribute("data-theme", theme.value);
-  }
-
-  // Keep reactive for any future changes
-  watch(theme, (next) => {
-    applyTheme(next);
-  });
 
   return {
     theme,

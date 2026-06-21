@@ -1,12 +1,32 @@
 <template>
-  <section class="dot-grid relative flex h-full min-h-0 flex-col px-8 pb-8">
-    <header class="pb-6">
-      <div class="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p class="text-[11px] font-black uppercase tracking-[0.12em] text-text-muted">多模态画布</p>
-          <h2 class="gradient-text mt-2 text-[28px] font-black tracking-tight">{{ nodeTitle || "等待装配" }}</h2>
+  <section class="dot-grid relative flex h-full min-h-0 flex-col px-4 pb-6 pt-5 sm:px-5 lg:px-8">
+    <header class="pb-5">
+      <div class="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_auto] 2xl:items-start">
+        <div class="min-w-0">
+          <p class="text-[11px] font-black uppercase tracking-[0.12em] text-text-muted">课程学习区</p>
+          <div class="mt-2 flex flex-wrap items-center gap-3">
+            <h2 class="gradient-text truncate text-[26px] font-black tracking-tight lg:text-[28px]">
+              {{ nodeTitle || "等待装配" }}
+            </h2>
+            <span class="rounded-full border border-primary/20 bg-primary-soft px-3 py-1 text-[11px] font-semibold text-primary">
+              {{ learningTone }}
+            </span>
+          </div>
+
+          <div class="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            <div
+              v-for="stage in learningStages"
+              :key="stage.label"
+              class="rounded-[16px] border px-3 py-3"
+              :class="stage.active ? 'border-primary/25 bg-primary-soft text-primary' : 'border-subtle bg-card text-text-muted'"
+            >
+              <p class="text-[10px] font-bold uppercase tracking-[0.12em]">{{ stage.label }}</p>
+              <p class="mt-1 text-[12px] leading-5">{{ stage.detail }}</p>
+            </div>
+          </div>
         </div>
-        <div class="flex items-center gap-2">
+
+        <div class="flex flex-wrap items-center gap-2 2xl:justify-end">
           <button
             type="button"
             class="focus-ring rounded-full border border-subtle bg-card px-3.5 py-2 text-[11px] font-semibold uppercase tracking-[0.10em] text-text-muted transition-all duration-200 hover:border-primary/30 hover:text-primary hover:bg-card-hover active:scale-95"
@@ -24,17 +44,50 @@
         </div>
       </div>
 
-      <div class="mt-5 flex flex-wrap gap-2">
+      <div class="mt-5 grid gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+        <div class="rounded-[22px] border border-subtle bg-card p-4 shadow-card">
+          <div class="flex flex-wrap items-start justify-between gap-4">
+            <div class="min-w-0">
+              <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">推荐下一步</p>
+              <p class="mt-2 text-base font-semibold text-text-primary">{{ recommendationTitle }}</p>
+              <p class="mt-2 text-sm leading-6 text-text-muted">{{ recommendationDetail }}</p>
+            </div>
+            <div class="rounded-[18px] border border-subtle bg-space-surface/70 px-4 py-3 text-right">
+              <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">当前掌握</p>
+              <p class="mt-2 text-2xl font-black text-text-primary">{{ currentMastery }}%</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid gap-3 sm:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
+          <div
+            v-for="brief in learningBriefs"
+            :key="brief.label"
+            class="rounded-[20px] border border-subtle bg-card px-4 py-3 shadow-card"
+          >
+            <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">{{ brief.label }}</p>
+            <p class="mt-2 text-lg font-black text-text-primary">{{ brief.value }}</p>
+            <p class="mt-1 text-[11px] leading-5 text-text-muted">{{ brief.detail }}</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-5 flex items-center justify-between gap-3">
+        <div class="min-w-0">
+          <p class="text-[11px] font-black uppercase tracking-[0.12em] text-text-muted">课程目录</p>
+          <p class="mt-1 text-xs leading-5 text-text-muted">
+            总进度 {{ overallProgress }}% · 已掌握 {{ masteredCount }} / {{ pathNodes.length }} · 当前节点掌握度 {{ currentMastery }}%
+          </p>
+        </div>
+      </div>
+
+      <div class="aurora-scroll mt-3 flex gap-2 overflow-x-auto pb-1">
         <button
           v-for="node in pathNodes"
           :key="node.id"
           type="button"
-          class="focus-ring rounded-full border px-3.5 py-1.5 text-[11px] font-medium uppercase tracking-[0.10em] transition-all duration-200 active:scale-95"
-          :class="node.id === currentNode
-            ? 'border-secondary/40 bg-secondary-soft text-secondary shadow-[0_0_12px_var(--color-secondary-soft)]'
-            : node.mastery >= 0.65
-              ? 'border-success/25 text-success hover:border-success/40 hover:bg-success-soft'
-              : 'border-subtle text-text-muted hover:border-hover hover:text-text-secondary hover:bg-card-hover'"
+          class="focus-ring shrink-0 rounded-full border px-3.5 py-1.5 text-[11px] font-medium tracking-[0.06em] transition-all duration-200 active:scale-95"
+          :class="nodeChipClass(node)"
           @click="$emit('select-node', node.id)"
         >
           {{ node.title }}
@@ -44,7 +97,7 @@
 
     <div class="aurora-scroll relative flex-1 overflow-y-auto">
       <div v-if="!cards.length && !loading" class="flex h-full min-h-[420px] items-center justify-center">
-        <div class="flex flex-col items-center text-center animate-fadeIn">
+        <div class="flex max-w-[44ch] flex-col items-center text-center animate-fadeIn">
           <div class="relative mb-6 flex h-24 w-24 items-center justify-center rounded-full">
             <div class="absolute inset-0 rounded-full bg-secondary/15 blur-2xl animate-halo" />
             <div class="absolute inset-0 rounded-full border border-secondary/20 animate-spin-slow" />
@@ -66,17 +119,18 @@
             </svg>
           </div>
           <p class="font-mono text-[12px] uppercase tracking-[0.22em] text-text-muted">
-            多智能体拓扑核心等待装配。
+            当前学习节点等待装配
           </p>
-          <p class="mt-2 max-w-[46ch] font-mono text-[12px] leading-6 text-text-muted">
-            当前节点资源尚未生成。请选择左侧路径节点，或等待编排流水线完成。
+          <p class="mt-2 font-mono text-[12px] leading-6 text-text-muted">
+            请选择课程目录中的节点，或等待智能体完成资源生成。装配完成后会自动进入可学习状态。
           </p>
         </div>
       </div>
 
       <div
         class="mx-auto grid max-w-6xl grid-cols-1 gap-5 transition-all duration-500 ease-snap md:grid-cols-12"
-        :class="isExpanded ? 'scale-100' : 'scale-[0.992]'">
+        :class="isExpanded ? 'scale-100' : 'scale-[0.992]'"
+      >
         <div
           v-for="(card, index) in visibleCards"
           :key="card.resource_id"
@@ -177,6 +231,8 @@ const props = defineProps({
   nodeTitle: { type: String, default: "" },
   pathNodes: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
+  overallProgress: { type: Number, default: 0 },
+  masteredCount: { type: Number, default: 0 },
   getCardLabel: { type: Function, required: true },
   getAgentLabel: { type: Function, required: true },
   buildQuiz: { type: Function, required: true },
@@ -237,6 +293,101 @@ const allAnswered = computed(
   () => quizQuestions.value.length > 0 && quizQuestions.value.every((question) => answers.value[question.id] !== undefined),
 );
 
+const currentNodeMeta = computed(() =>
+  props.pathNodes.find((node) => node.id === props.currentNode),
+);
+
+const currentMastery = computed(() =>
+  Math.round((currentNodeMeta.value?.mastery ?? 0) * 100),
+);
+
+const availableTypes = computed(() => new Set(props.cards.map((card) => card.card_type)));
+const nextPendingNode = computed(() =>
+  props.pathNodes.find((node) => (node.mastery ?? 0) < 0.65 && node.id !== props.currentNode) ?? null,
+);
+
+const learningTone = computed(() => {
+  if (props.loading) return "资源装配中";
+  if (!props.cards.length) return "等待资源";
+  if (currentMastery.value >= 65) return "节点达标";
+  return "继续学习";
+});
+
+const recommendationTitle = computed(() => {
+  if (props.loading) {
+    return "正在同步当前节点的学习材料";
+  }
+
+  if (!props.cards.length) {
+    return "优先装配本节点资源";
+  }
+
+  if (currentMastery.value < 65) {
+    return "先完成本节点的概念理解与练习";
+  }
+
+  return nextPendingNode.value ? `准备进入下一节点：${nextPendingNode.value.title}` : "当前路径已进入收束阶段";
+});
+
+const recommendationDetail = computed(() => {
+  if (props.loading) {
+    return "保持当前节点不切换，系统会先补齐概念、代码、练习与诊断四类材料。";
+  }
+
+  if (!props.cards.length) {
+    return "从知识目录选择节点后，系统会根据当前学习状态自动生成对应学习矩阵。";
+  }
+
+  if (currentMastery.value < 65) {
+    return "建议按“概念图 -> 代码示例 -> 互动练习 -> 诊断测评”的顺序推进，减少理解跳跃。";
+  }
+
+  return nextPendingNode.value
+    ? "当前节点已接近达标，可以在完成诊断后继续推进到下一薄弱点。"
+    : "路径中的主要薄弱点已经被覆盖，可以转入总结复盘或拓展练习。";
+});
+
+const learningBriefs = computed(() => [
+  {
+    label: "资源矩阵",
+    value: `${props.cards.length}`,
+    detail: props.cards.length ? "当前节点可用学习材料数" : "等待内容生成",
+  },
+  {
+    label: "未达标节点",
+    value: `${Math.max(props.pathNodes.length - props.masteredCount, 0)}`,
+    detail: nextPendingNode.value ? `下一关注：${nextPendingNode.value.title}` : "当前暂无新的薄弱节点",
+  },
+  {
+    label: "诊断状态",
+    value: availableTypes.value.has("diagnostic_quiz") ? "已就绪" : "待生成",
+    detail: availableTypes.value.has("diagnostic_quiz") ? "可以用测评确认掌握度" : "尚未生成诊断卡片",
+  },
+]);
+
+const learningStages = computed(() => [
+  {
+    label: "目标",
+    detail: currentNodeMeta.value ? "定位当前知识点" : "等待路径",
+    active: Boolean(currentNodeMeta.value),
+  },
+  {
+    label: "资源",
+    detail: props.loading ? "生成中" : `${props.cards.length} 份材料`,
+    active: props.loading || props.cards.length > 0,
+  },
+  {
+    label: "练习",
+    detail: availableTypes.value.has("interactive_exercise") ? "可训练" : "待生成",
+    active: availableTypes.value.has("interactive_exercise"),
+  },
+  {
+    label: "诊断",
+    detail: availableTypes.value.has("diagnostic_quiz") ? "可提交" : "待评估",
+    active: availableTypes.value.has("diagnostic_quiz"),
+  },
+]);
+
 function cardLabel(cardType) {
   return props.getCardLabel(cardType);
 }
@@ -278,6 +429,22 @@ function getGridSpanClass(cardType) {
     default:
       return "col-span-1 md:col-span-6";
   }
+}
+
+function nodeChipClass(node) {
+  if (node.id === props.currentNode) {
+    return "border-secondary/40 bg-secondary-soft text-secondary shadow-[0_0_12px_var(--color-secondary-soft)]";
+  }
+
+  if (node.mastery >= 0.65) {
+    return "border-success/25 text-success hover:border-success/40 hover:bg-success-soft";
+  }
+
+  if (nextPendingNode.value?.id === node.id) {
+    return "border-primary/30 bg-primary-soft/80 text-primary hover:border-primary/45";
+  }
+
+  return "border-subtle text-text-muted hover:border-hover hover:text-text-secondary hover:bg-card-hover";
 }
 
 function pinCard(cardId) {

@@ -1,14 +1,40 @@
 <template>
-  <section class="flex h-full min-h-0 flex-col px-6 pb-6 pt-6">
+  <section class="flex h-full min-h-0 flex-col px-4 pb-5 pt-5 sm:px-6">
     <header class="pb-5">
-      <p class="text-[11px] font-black uppercase tracking-[0.12em] text-text-muted">辅导通道</p>
-      <h2 class="mt-2 text-[24px] font-black tracking-tight text-text-primary">学习托盘</h2>
-      <p class="mt-2 max-w-[32ch] text-xs font-light leading-6 text-text-muted">
-        冷启动测评、辅导对话与智能体反馈都会直接嵌入此托盘。
-      </p>
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <p class="text-[11px] font-black uppercase tracking-[0.12em] text-text-muted">辅导通道</p>
+          <h2 class="mt-2 text-[24px] font-black tracking-tight text-text-primary">学习托盘</h2>
+          <p class="mt-2 max-w-[34ch] text-xs font-light leading-6 text-text-muted">
+            冷启动测评、过程追问和智能反馈都会在这里汇总，保证学习动作始终可回看、可追问、可延续。
+          </p>
+        </div>
+
+        <div class="hidden rounded-[18px] border border-subtle bg-card px-4 py-3 text-right shadow-card sm:block">
+          <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">当前模式</p>
+          <p class="mt-2 text-sm font-semibold text-text-primary">{{ modeLabel }}</p>
+          <p class="mt-1 text-[11px] text-text-muted">{{ modeHint }}</p>
+        </div>
+      </div>
+
+      <div
+        v-if="bootMode !== 'probe' && quickPrompts.length"
+        class="mt-4 flex flex-wrap gap-2"
+      >
+        <button
+          v-for="prompt in quickPrompts"
+          :key="prompt"
+          type="button"
+          class="focus-ring rounded-full border border-subtle bg-card px-3 py-1.5 text-[11px] font-medium text-text-secondary transition-all duration-200 hover:border-primary/30 hover:bg-card-hover hover:text-primary"
+          :disabled="busy"
+          @click="sendPrompt(prompt)"
+        >
+          {{ prompt }}
+        </button>
+      </div>
     </header>
 
-    <div class="aurora-scroll flex-1 overflow-y-auto pr-2" aria-live="polite">
+    <div ref="scrollRoot" class="aurora-scroll flex-1 overflow-y-auto pr-1" aria-live="polite">
       <ProbeDeck
         v-if="bootMode === 'probe' && probe"
         :probe="probe"
@@ -18,7 +44,39 @@
         @submit="$emit('submit-probe', $event)"
       />
 
-      <div class="space-y-6">
+      <div
+        v-else-if="!messages.length"
+        class="rounded-[24px] border border-subtle bg-card p-5 shadow-card"
+      >
+        <div class="flex items-start gap-4">
+          <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary-soft text-primary">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M12 5v14M5 12h14" stroke-linecap="round" />
+            </svg>
+          </div>
+          <div class="min-w-0">
+            <p class="text-sm font-semibold text-text-primary">从当前节点开始提问</p>
+            <p class="mt-2 text-sm leading-7 text-text-muted">
+              可以让辅导智能体解释概念、拆解代码、总结本节点和上一节点的关系，或者直接给你下一步练习建议。
+            </p>
+          </div>
+        </div>
+
+        <div class="mt-4 grid gap-3">
+          <button
+            v-for="prompt in quickPrompts"
+            :key="`empty-${prompt}`"
+            type="button"
+            class="focus-ring rounded-[18px] border border-subtle bg-space-surface/50 px-4 py-3 text-left text-sm text-text-secondary transition-all duration-200 hover:border-primary/25 hover:bg-card-hover hover:text-text-primary"
+            :disabled="busy"
+            @click="sendPrompt(prompt)"
+          >
+            {{ prompt }}
+          </button>
+        </div>
+      </div>
+
+      <div v-else class="space-y-6">
         <article
           v-for="(message, index) in messages"
           :key="message.id"
@@ -26,13 +84,10 @@
           :style="{ animationDelay: `${index * 40}ms` }"
           :class="message.role === 'user' ? 'justify-end' : 'justify-start'"
         >
-          <div
-            class="max-w-[92%]"
-            :class="message.role === 'user' ? 'pr-0' : 'pl-0'"
-          >
+          <div class="max-w-[92%]">
             <div
               v-if="message.role === 'assistant'"
-              class="rounded-r-2xl rounded-bl-2xl rounded-tl-md border-l-[3px] border-primary bg-card py-3 px-4 shadow-card"
+              class="rounded-r-2xl rounded-bl-2xl rounded-tl-md border-l-[3px] border-primary bg-card px-4 py-3 shadow-card"
             >
               <div class="mb-2 flex items-center gap-2">
                 <span class="h-1.5 w-1.5 rounded-full bg-primary shadow-[0_0_10px_var(--color-primary)] animate-breathe" />
@@ -40,10 +95,19 @@
                   辅导智能体
                 </span>
               </div>
+
               <StreamText
                 v-if="message.isStreaming && message.tokenStream"
                 :token-stream="message.tokenStream"
               />
+
+              <div
+                v-else-if="message.isStreaming && !message.content"
+                class="rounded-2xl border border-subtle bg-space-surface/40 px-4 py-3 text-sm text-text-muted"
+              >
+                正在整理当前节点的讲解脉络...
+              </div>
+
               <MarkdownContent
                 v-else
                 :content="message.content"
@@ -53,7 +117,7 @@
 
             <div
               v-else
-              class="rounded-l-2xl rounded-br-2xl rounded-tr-md border-r-[3px] border-secondary bg-gradient-to-br from-secondary-soft to-card py-3 px-4 text-right shadow-card"
+              class="rounded-l-2xl rounded-br-2xl rounded-tr-md border-r-[3px] border-secondary bg-gradient-to-br from-secondary-soft to-card px-4 py-3 text-right shadow-card"
             >
               <div class="mb-2 flex items-center justify-end gap-2">
                 <span class="text-[10px] font-mono uppercase tracking-[0.2em] text-secondary/90">我</span>
@@ -77,17 +141,22 @@
             v-model="draft"
             class="focus-ring min-h-[108px] flex-1 resize-none border-0 bg-transparent px-2 py-2 text-sm font-light leading-7 text-text-primary placeholder:text-text-muted"
             :disabled="bootMode === 'probe' || busy"
-            placeholder="询问某个知识点、代码路径，或某个概念为何如此工作。"
+            :placeholder="inputPlaceholder"
             @keydown.enter.exact.prevent="submit"
           />
           <button
             type="button"
-            class="focus-ring btn-capsule"
+            class="focus-ring btn-capsule shrink-0"
             :disabled="bootMode === 'probe' || busy || !draft.trim()"
             @click="submit"
           >
             {{ busy ? "调度中" : "发送" }}
           </button>
+        </div>
+
+        <div class="mt-3 flex flex-wrap items-center justify-between gap-2 px-2">
+          <p class="text-[11px] text-text-muted">`Enter` 发送，`Shift + Enter` 换行</p>
+          <p class="text-[11px] text-text-muted">{{ footerHint }}</p>
         </div>
       </div>
     </footer>
@@ -95,7 +164,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import MarkdownContent from "./MarkdownContent.vue";
 import ProbeDeck from "./ProbeDeck.vue";
 import StreamText from "./StreamText.vue";
@@ -108,10 +177,44 @@ const props = defineProps({
   probeTotal: { type: Number, default: 6 },
   isSubmittingProbe: { type: Boolean, default: false },
   busy: { type: Boolean, default: false },
+  nodeTitle: { type: String, default: "" },
+  suggestions: { type: Array, default: () => [] },
 });
 
 const emit = defineEmits(["send", "submit-probe"]);
+
 const draft = ref("");
+const scrollRoot = ref(null);
+
+const quickPrompts = computed(() => {
+  if (props.suggestions.length) {
+    return props.suggestions.slice(0, 4);
+  }
+
+  const label = props.nodeTitle || "当前知识点";
+  return [
+    `帮我梳理 ${label} 的核心概念`,
+    `用更直观的方式解释 ${label}`,
+    `给我一个 ${label} 的练习顺序`,
+  ];
+});
+
+const modeLabel = computed(() => (props.bootMode === "probe" ? "入学诊断" : "学习辅导"));
+const modeHint = computed(() => (
+  props.bootMode === "probe"
+    ? `已完成 ${Math.min(props.probeCollected, props.probeTotal)}/${props.probeTotal}`
+    : (props.nodeTitle ? `聚焦节点：${props.nodeTitle}` : "等待学习节点")
+));
+const inputPlaceholder = computed(() => (
+  props.bootMode === "probe"
+    ? "完成当前测评后即可进入辅导问答。"
+    : "询问某个知识点、代码路径，或这个概念为什么要这样设计。"
+));
+const footerHint = computed(() => (
+  props.bootMode === "probe"
+    ? "测评结束后会自动切换到学习辅导。"
+    : "建议围绕当前节点提问，反馈会更聚焦。"
+));
 
 watch(
   () => props.bootMode,
@@ -122,12 +225,31 @@ watch(
   },
 );
 
+watch(
+  () => props.messages.length,
+  async () => {
+    await nextTick();
+    if (scrollRoot.value) {
+      scrollRoot.value.scrollTop = scrollRoot.value.scrollHeight;
+    }
+  },
+);
+
 function submit() {
   const value = draft.value.trim();
   if (!value) {
     return;
   }
+
   emit("send", value);
   draft.value = "";
+}
+
+function sendPrompt(prompt) {
+  if (!prompt || props.busy || props.bootMode === "probe") {
+    return;
+  }
+
+  emit("send", prompt);
 }
 </script>

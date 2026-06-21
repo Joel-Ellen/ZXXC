@@ -1,10 +1,9 @@
 <template>
-  <aside class="hidden h-full w-[76px] flex-col items-center justify-start py-4 pl-3 pr-2 lg:flex z-50">
+  <aside class="z-50 hidden h-full w-[76px] flex-col items-center justify-start py-4 pl-3 pr-2 lg:flex">
     <div
-      class="relative flex h-full w-full flex-col items-center gap-2 border border-subtle bg-space-panel px-2 py-4 shadow-glass backdrop-blur-xl overflow-hidden transition-all duration-300"
+      class="relative flex h-full w-full flex-col items-center gap-2 overflow-hidden border border-subtle bg-space-panel px-2 py-4 shadow-glass backdrop-blur-xl transition-all duration-300"
       :class="drawerOpen ? 'rounded-l-[24px] rounded-r-none' : 'rounded-[24px]'"
     >
-      <!-- Active indicator pill -->
       <div
         class="absolute left-1.5 w-1 rounded-full bg-primary shadow-glow transition-all duration-300 ease-snap"
         :style="{ top: `${indicatorTop}px`, height: '28px', opacity: activeIndex >= 0 ? 1 : 0 }"
@@ -25,10 +24,9 @@
       >
         <component :is="item.icon" :size="22" />
 
-        <!-- Hover tooltip -->
         <span
           v-if="!drawerOpen || item.key !== activePanel"
-          class="pointer-events-none absolute left-full ml-2 rounded-lg border border-subtle bg-space-panel px-2.5 py-1 text-[11px] font-medium text-text-secondary opacity-0 shadow-lg backdrop-blur-md transition-all duration-200 group-hover:opacity-100 whitespace-nowrap z-50"
+          class="pointer-events-none absolute left-full z-50 ml-2 whitespace-nowrap rounded-lg border border-subtle bg-space-panel px-2.5 py-1 text-[11px] font-medium text-text-secondary opacity-0 shadow-lg backdrop-blur-md transition-all duration-200 group-hover:opacity-100"
         >
           {{ item.label }}
         </span>
@@ -42,12 +40,18 @@
       </button>
 
       <div class="mt-2 h-full w-px bg-gradient-to-b from-[var(--border-strong)] via-[var(--border-subtle)] to-transparent" />
+
+      <div class="mt-auto flex w-full flex-col gap-2 rounded-[18px] border border-subtle bg-space-surface/40 p-2">
+        <p class="text-center text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">路径</p>
+        <p class="text-center text-lg font-black text-text-primary">{{ pathCount }}</p>
+        <p class="text-center text-[10px] leading-4 text-text-muted">当前课程节点数</p>
+      </div>
     </div>
   </aside>
 </template>
 
 <script setup>
-import { computed, ref, watch, nextTick } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import IconRadar from "./icons/IconRadar.vue";
 import IconSettings from "./icons/IconSettings.vue";
 import IconTree from "./icons/IconTree.vue";

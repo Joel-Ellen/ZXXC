@@ -12,7 +12,7 @@
           :class="dotClass(status).class"
           :style="dotClass(status).style"
         />
-        <component :is="status.kind === 'quiz' ? IconQuiz : IconDoc" class="shrink-0 opacity-80" :size="14" />
+        <component :is="iconForStatus(status)" class="shrink-0 opacity-80" :size="14" />
         <span class="font-semibold text-text-primary">{{ status.label }}</span>
         <span class="text-text-muted">{{ status.phase }}</span>
         <span v-if="status.progress > 0" class="font-mono text-text-muted">{{ status.progress }}%</span>
@@ -24,6 +24,7 @@
 <script setup>
 import IconDoc from "./icons/IconDoc.vue";
 import IconQuiz from "./icons/IconQuiz.vue";
+import IconTree from "./icons/IconTree.vue";
 
 defineProps({
   statuses: {
@@ -64,6 +65,18 @@ const DOT_CLASSES = {
 
 function statusKindColor(kind) {
   return kind === "quiz" ? "secondary" : "primary";
+}
+
+function iconForStatus(status) {
+  if (status.kind === "quiz") {
+    return IconQuiz;
+  }
+
+  if (status.kind === "path") {
+    return IconTree;
+  }
+
+  return IconDoc;
 }
 
 function statusPhaseColor(status) {

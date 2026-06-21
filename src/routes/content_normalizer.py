@@ -31,6 +31,18 @@ def normalize_agent_output(
         return build_mindmap_response(raw)
     elif "question" in name_lower or "quiz" in name_lower:
         return build_quiz_response(raw)
+    elif "coding" in name_lower or "practice" in name_lower:
+        return build_markdown_response({
+            "title": raw.get("title", "编程练习"),
+            "content": raw.get("overview_markdown") or raw.get("raw") or str(raw),
+            "metadata": {"exercises": raw.get("exercises", [])},
+        })
+    elif "video" in name_lower:
+        return build_markdown_response({
+            "title": raw.get("title", "视频脚本"),
+            "content": raw.get("overview_markdown") or raw.get("raw") or str(raw),
+            "metadata": {"segments": raw.get("segments", []), "total_duration": raw.get("total_duration", "")},
+        })
     elif "planner" in name_lower or "resource" in name_lower:
         return build_learning_path_response(raw)
     elif "coach" in name_lower or "tutor" in name_lower:

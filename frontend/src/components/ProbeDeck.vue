@@ -6,10 +6,13 @@
         <h2 class="mt-2 text-xl font-black tracking-tight text-text-primary">
           学习画像采集
         </h2>
+        <p class="mt-2 max-w-[38ch] text-sm leading-6 text-text-muted">
+          这一步会决定系统如何给你安排起点、难度和资源密度，先回答真实情况，比快速跳过更有价值。
+        </p>
       </div>
-      <div class="text-right text-[11px] font-light text-text-muted">
-        <div>第 {{ collected + 1 }} 轮</div>
-        <div>{{ Math.min(collected, total) }}/{{ total }}</div>
+      <div class="rounded-[18px] border border-subtle bg-space-surface/60 px-4 py-3 text-right text-[11px] text-text-muted">
+        <div>第 {{ Math.min(collected + 1, total) }} 题</div>
+        <div class="mt-1 font-semibold text-text-primary">{{ Math.min(collected, total) }}/{{ total }}</div>
       </div>
     </div>
 
@@ -22,9 +25,12 @@
       />
     </div>
 
-    <p class="max-w-[42ch] text-base font-light leading-8 text-text-secondary">
-      {{ probe?.question }}
-    </p>
+    <div class="rounded-[20px] border border-subtle bg-space-surface/40 px-4 py-4">
+      <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">当前问题</p>
+      <p class="mt-3 max-w-[48ch] text-base font-light leading-8 text-text-secondary">
+        {{ probe?.question }}
+      </p>
+    </div>
 
     <div class="mt-5 space-y-3">
       <button
@@ -39,10 +45,15 @@
       </button>
     </div>
 
-    <div class="mt-6 flex items-center justify-between gap-4">
-      <p class="text-[11px] font-light text-text-muted">
-        {{ probe?.is_multi_select ? "本题支持多选。" : "本题仅支持单选。" }}
-      </p>
+    <div class="mt-6 flex flex-wrap items-center justify-between gap-4">
+      <div class="space-y-1">
+        <p class="text-[11px] font-light text-text-muted">
+          {{ probe?.is_multi_select ? "本题支持多选。" : "本题仅支持单选。" }}
+        </p>
+        <p class="text-[11px] text-text-muted">
+          {{ selectedSummary }}
+        </p>
+      </div>
       <button
         type="button"
         class="focus-ring btn-capsule"
@@ -77,6 +88,15 @@ watch(
 );
 
 const isDisabled = computed(() => selectedValues.value.length === 0);
+const selectedSummary = computed(() => {
+  if (!selectedValues.value.length) {
+    return "尚未选择答案。";
+  }
+
+  return props.probe?.is_multi_select
+    ? `已选择 ${selectedValues.value.length} 项。`
+    : "已选择 1 项。";
+});
 
 function toggleOption(optionLabel, optionValue) {
   const value = optionValue ?? optionLabel;

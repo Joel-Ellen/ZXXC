@@ -10,7 +10,7 @@
       class="fixed inset-x-0 top-0 z-50 transition-all duration-500"
       :class="navScrolled ? 'bg-space-panel/85 backdrop-blur-xl border-b border-subtle' : 'bg-transparent'"
     >
-      <div class="mx-auto flex h-14 max-w-7xl items-center justify-between px-6">
+      <div class="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6">
         <a href="#" class="flex items-center gap-2" @click.prevent="scrollToTop">
           <div class="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-primary to-secondary text-[10px] font-black text-primary-text">
             EA
@@ -29,7 +29,7 @@
           <a href="#faq" class="transition-colors hover:text-text-primary">FAQ</a>
         </div>
 
-        <div class="flex items-center gap-3">
+        <div class="flex shrink-0 items-center gap-3">
           <button
             type="button"
             class="focus-ring hidden rounded-full border border-subtle bg-card px-4 py-1.5 text-xs font-semibold text-text-secondary transition-all duration-200 hover:border-primary/30 hover:text-primary hover:bg-card-hover md:inline-flex"
@@ -39,14 +39,14 @@
           </button>
           <button
             type="button"
-            class="focus-ring rounded-full bg-text-primary px-4 py-1.5 text-xs font-semibold text-space-bg transition-transform duration-200 hover:scale-105 active:scale-95"
+            class="focus-ring hidden rounded-full bg-text-primary px-4 py-1.5 text-xs font-semibold text-space-bg transition-transform duration-200 hover:scale-105 active:scale-95 sm:inline-flex"
             @click="enterApp"
           >
             进入工作台
           </button>
           <button
             type="button"
-            class="focus-ring flex h-8 w-8 items-center justify-center rounded-full border border-subtle text-text-secondary md:hidden"
+            class="focus-ring flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-subtle bg-text-primary text-space-bg shadow-card md:hidden"
             aria-label="打开菜单"
             @click="mobileMenuOpen = true"
           >

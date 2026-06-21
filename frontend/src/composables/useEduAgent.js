@@ -352,15 +352,21 @@ export function useEduAgent() {
   async function sendTutorMessage(query) {
     if (!query.trim()) return;
     const userMsg = { id: `u-${Date.now()}`, role: "user", content: query.trim() };
-    const assistantMsg = { id: `a-${Date.now()}`, role: "assistant", content: "", mermaid: "", streaming: true };
+    const assistantMsg = {
+      id: `a-${Date.now()}`,
+      role: "assistant",
+      content: "",
+      mermaidSource: "",
+      isStreaming: true,
+    };
     messages.value = [...messages.value, userMsg, assistantMsg];
     try {
       const data = await askTutor({ user_id: userId.value, query: query.trim() });
       const r = data.tutor_response ?? {};
       assistantMsg.content = r.text_explanation || "当前暂无可用回答，请稍后再试。";
-      assistantMsg.mermaid = r.mermaid_src || "";
+      assistantMsg.mermaidSource = r.mermaid_src || "";
     } catch { assistantMsg.content = "辅导服务暂时不可用。"; }
-    finally { assistantMsg.streaming = false; }
+    finally { assistantMsg.isStreaming = false; }
   }
 
   // --- 工具导出 ---
