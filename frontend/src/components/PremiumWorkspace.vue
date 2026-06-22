@@ -325,6 +325,7 @@
                 :loading="isLoadingNode"
                 :overall-progress="overallProgress"
                 :mastered-count="masteredCount"
+                :last-diagnostic="lastDiagnostic"
                 :get-card-label="getCardLabel"
                 :get-agent-label="getAgentLabel"
                 :build-quiz="parseQuiz"
@@ -454,6 +455,7 @@ const props = defineProps({
   probe: { type: Object, default: null },
   probeCollected: { type: Number, default: 0 },
   probeTotal: { type: Number, default: 6 },
+  lastDiagnostic: { type: Object, default: null },
   getCardLabel: { type: Function, required: true },
   getAgentLabel: { type: Function, required: true },
   parseQuiz: { type: Function, required: true },

@@ -195,10 +195,10 @@
                   <pre
                     v-if="card.card_type === 'code_snippet'"
                     class="mt-3 overflow-x-auto rounded-[16px] border border-subtle/80 bg-[#08111f] px-4 py-3 text-xs leading-6 text-slate-100"
-                  >{{ codePreview(card.content) }}</pre>
+                  >{{ previewCode(card) }}</pre>
 
                   <p v-else class="mt-3 text-sm leading-7 text-text-secondary">
-                    {{ textPreview(card.content) }}
+                    {{ previewText(card) }}
                   </p>
                 </div>
 
@@ -213,12 +213,71 @@
 
               <div v-else class="space-y-5">
                 <MarkdownContent
-                  v-if="card.card_type !== 'diagnostic_quiz'"
-                  :content="card.content"
+                  v-if="card.card_type === 'concept_map'"
+                  :content="conceptMarkdown(card)"
+                  :mermaid-source="conceptMermaidSource(card)"
                 />
 
-                <div v-else class="space-y-4">
-                  <MarkdownContent :content="card.content" />
+                <div v-else-if="card.card_type === 'code_snippet'" class="space-y-4">
+                  <div class="rounded-[18px] border border-subtle bg-space-surface/55 p-4 shadow-card">
+                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">
+                      {{ codeLanguage(card).toUpperCase() }}
+                    </p>
+                    <pre class="mt-3 overflow-x-auto rounded-[16px] border border-subtle/80 bg-[#08111f] px-4 py-3 text-xs leading-6 text-slate-100">{{ fullCode(card) }}</pre>
+                  </div>
+                  <MarkdownContent
+                    v-if="codeExplanation(card)"
+                    :content="codeExplanation(card)"
+                  />
+                </div>
+
+                <div v-else-if="card.card_type === 'interactive_exercise'" class="space-y-4">
+                  <div class="rounded-[18px] border border-subtle bg-card p-4 shadow-card">
+                    <p class="text-sm font-medium text-text-primary">{{ exercisePrompt(card) }}</p>
+                    <div v-if="exerciseSteps(card).length" class="mt-4 space-y-3">
+                      <div
+                        v-for="(step, stepIndex) in exerciseSteps(card)"
+                        :key="`${card.resource_id}-step-${stepIndex}`"
+                        class="rounded-[16px] border border-subtle bg-space-surface/40 px-4 py-3"
+                      >
+                        <p class="text-[11px] font-black uppercase tracking-[0.12em] text-text-muted">步骤 {{ stepIndex + 1 }}</p>
+                        <p class="mt-2 text-sm leading-6 text-text-secondary">{{ step }}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div v-if="exerciseCheckpoints(card).length" class="rounded-[18px] border border-subtle bg-card p-4 shadow-card">
+                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">检查点</p>
+                    <ul class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
+                      <li v-for="(checkpoint, checkpointIndex) in exerciseCheckpoints(card)" :key="`${card.resource_id}-checkpoint-${checkpointIndex}`">
+                        {{ checkpoint }}
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+
+                <div v-else-if="card.card_type === 'video_summary'" class="space-y-4">
+                  <div class="rounded-[18px] border border-subtle bg-card p-4 shadow-card">
+                    <p class="text-sm leading-7 text-text-secondary">{{ videoSummary(card) }}</p>
+                    <ul v-if="videoKeyPoints(card).length" class="mt-4 space-y-2 text-sm leading-6 text-text-secondary">
+                      <li v-for="(point, pointIndex) in videoKeyPoints(card)" :key="`${card.resource_id}-point-${pointIndex}`">
+                        {{ point }}
+                      </li>
+                    </ul>
+                  </div>
+
+                  <a
+                    v-if="videoUrl(card)"
+                    :href="videoUrl(card)"
+                    target="_blank"
+                    rel="noreferrer"
+                    class="inline-flex rounded-full border border-secondary/25 bg-secondary-soft px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.10em] text-secondary transition-all duration-200 hover:border-secondary/35 hover:bg-secondary-soft/80"
+                  >
+                    打开视频链接
+                  </a>
+                </div>
+
+                <div v-else-if="card.card_type === 'diagnostic_quiz'" class="space-y-4">
                   <div
                     v-for="question in quizQuestions"
                     :key="question.id"
@@ -241,7 +300,7 @@
 
                   <div class="flex flex-wrap items-center justify-between gap-3 rounded-[18px] border border-subtle bg-card p-4 shadow-card">
                     <div class="text-sm font-light text-text-muted">
-                      {{ submittedScore === null ? "请先回答所有题目，再提交诊断得分。" : `上次诊断得分 ${Math.round(submittedScore * 100)}%` }}
+                      {{ diagnosticStatusText }}
                     </div>
                     <button
                       type="button"
@@ -253,6 +312,11 @@
                     </button>
                   </div>
                 </div>
+
+                <MarkdownContent
+                  v-else
+                  :content="card.content"
+                />
               </div>
             </template>
           </ResourceCard>
@@ -309,6 +373,7 @@ const props = defineProps({
   loading: { type: Boolean, default: false },
   overallProgress: { type: Number, default: 0 },
   masteredCount: { type: Number, default: 0 },
+  lastDiagnostic: { type: Object, default: null },
   getCardLabel: { type: Function, required: true },
   getAgentLabel: { type: Function, required: true },
   buildQuiz: { type: Function, required: true },
@@ -343,11 +408,28 @@ watch(
 
 const sortedCards = computed(() => {
   const orderIndex = new Map(orderedIds.value.map((id, index) => [id, index]));
-  return [...props.cards].sort(
-    (left, right) =>
-      (orderIndex.get(left.resource_id) ?? Number.MAX_SAFE_INTEGER) -
-      (orderIndex.get(right.resource_id) ?? Number.MAX_SAFE_INTEGER),
-  );
+  const latestByType = new Map();
+  const extras = [];
+
+  [...props.cards]
+    .sort(
+      (left, right) =>
+        (orderIndex.get(left.resource_id) ?? Number.MAX_SAFE_INTEGER) -
+        (orderIndex.get(right.resource_id) ?? Number.MAX_SAFE_INTEGER),
+    )
+    .forEach((card) => {
+      if (["concept_map", "code_snippet", "interactive_exercise", "video_summary", "diagnostic_quiz"].includes(card.card_type)) {
+        latestByType.set(card.card_type, card);
+      } else {
+        extras.push(card);
+      }
+    });
+
+  const ordered = ["concept_map", "code_snippet", "interactive_exercise", "video_summary", "diagnostic_quiz"]
+    .map((cardType) => latestByType.get(cardType))
+    .filter(Boolean);
+
+  return [...ordered, ...extras];
 });
 
 const minimizedCards = computed(() =>
@@ -363,10 +445,29 @@ const visibleCards = computed(() => {
 });
 
 const quizCard = computed(() =>
-  props.cards.find((card) => card.card_type === "diagnostic_quiz"),
+  sortedCards.value.find((card) => card.card_type === "diagnostic_quiz"),
 );
 
-const quizQuestions = computed(() => props.buildQuiz(quizCard.value?.content ?? ""));
+const quizQuestions = computed(() => {
+  const structuredQuestions = quizCard.value?.metadata?.questions;
+  if (Array.isArray(structuredQuestions) && structuredQuestions.length) {
+    return structuredQuestions.map((question) => ({
+      id: question.id,
+      prompt: question.prompt,
+      options: question.options || [],
+      answerIndex: question.answer_index ?? question.answerIndex ?? 0,
+      explanation: question.explanation || "",
+    }));
+  }
+
+  return props.buildQuiz(quizCard.value?.content ?? "").map((question) => ({
+    id: question.id,
+    prompt: question.prompt,
+    options: question.options,
+    answerIndex: question.answer ?? 0,
+    explanation: "",
+  }));
+});
 const allAnswered = computed(
   () => quizQuestions.value.length > 0 && quizQuestions.value.every((question) => answers.value[question.id] !== undefined),
 );
@@ -465,6 +566,102 @@ const learningStages = computed(() => [
     active: availableTypes.value.has("diagnostic_quiz"),
   },
 ]);
+
+const diagnosticStatusText = computed(() => {
+  if (props.lastDiagnostic) {
+    const scorePercent = Math.round((props.lastDiagnostic.score ?? 0) * 100);
+    const beforePercent = Math.round((props.lastDiagnostic.masteryBefore ?? 0) * 100);
+    const afterPercent = Math.round((props.lastDiagnostic.masteryAfter ?? 0) * 100);
+    if (props.lastDiagnostic.advancedToNextNode) {
+      return `上次诊断得分 ${scorePercent}% · 掌握度 ${beforePercent}% -> ${afterPercent}% · 已推进到 ${props.lastDiagnostic.nextNodeTitle || "下一节点"}`;
+    }
+    return `上次诊断得分 ${scorePercent}% · 掌握度 ${beforePercent}% -> ${afterPercent}% · 继续停留当前节点`;
+  }
+
+  if (submittedScore.value !== null) {
+    return `上次诊断得分 ${Math.round(submittedScore.value * 100)}%`;
+  }
+
+  return "请先回答所有题目，再提交诊断得分。";
+});
+
+function cardMetadata(card) {
+  return card?.metadata || {};
+}
+
+function previewText(card) {
+  const metadata = cardMetadata(card);
+  if (card.card_type === "concept_map") {
+    return metadata.summary || textPreview(card.content);
+  }
+  if (card.card_type === "interactive_exercise") {
+    return metadata.prompt || textPreview(card.content);
+  }
+  if (card.card_type === "video_summary") {
+    return metadata.summary || textPreview(card.content);
+  }
+  if (card.card_type === "diagnostic_quiz") {
+    return quizQuestions.value[0]?.prompt || textPreview(card.content);
+  }
+  return textPreview(card.content);
+}
+
+function previewCode(card) {
+  const metadata = cardMetadata(card);
+  return metadata.code ? extractCodePreview(`\`\`\`\n${metadata.code}\n\`\`\``, 8) : codePreview(card.content);
+}
+
+function conceptMarkdown(card) {
+  const metadata = cardMetadata(card);
+  if (!metadata.title && !metadata.summary && !Array.isArray(metadata.bullets)) {
+    return card.content;
+  }
+
+  const bullets = Array.isArray(metadata.bullets) && metadata.bullets.length
+    ? `\n\n${metadata.bullets.map((bullet) => `- ${bullet}`).join("\n")}`
+    : "";
+  return `## ${metadata.title || cardLabel(card.card_type)}\n\n${metadata.summary || ""}${bullets}`.trim();
+}
+
+function conceptMermaidSource(card) {
+  return cardMetadata(card).mermaid_source || "";
+}
+
+function codeLanguage(card) {
+  return cardMetadata(card).language || "python";
+}
+
+function fullCode(card) {
+  return cardMetadata(card).code || extractCodePreview(card.content, 40);
+}
+
+function codeExplanation(card) {
+  return cardMetadata(card).explanation || "";
+}
+
+function exercisePrompt(card) {
+  return cardMetadata(card).prompt || textPreview(card.content);
+}
+
+function exerciseSteps(card) {
+  return Array.isArray(cardMetadata(card).steps) ? cardMetadata(card).steps : [];
+}
+
+function exerciseCheckpoints(card) {
+  return Array.isArray(cardMetadata(card).checkpoints) ? cardMetadata(card).checkpoints : [];
+}
+
+function videoSummary(card) {
+  return cardMetadata(card).summary || textPreview(card.content);
+}
+
+function videoKeyPoints(card) {
+  return Array.isArray(cardMetadata(card).key_points) ? cardMetadata(card).key_points : [];
+}
+
+function videoUrl(card) {
+  return cardMetadata(card).video_url || "";
+}
 
 watch(
   () => focusMode.value,
@@ -653,7 +850,7 @@ function answerClass(questionId, optionIndex) {
 function submitQuizScore() {
   let correct = 0;
   quizQuestions.value.forEach((question) => {
-    if (answers.value[question.id] === question.answer) {
+    if (answers.value[question.id] === question.answerIndex) {
       correct += 1;
     }
   });

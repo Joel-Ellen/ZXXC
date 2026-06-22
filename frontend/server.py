@@ -57,6 +57,7 @@ import time
 import uuid
 import asyncio
 import traceback
+import re
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
@@ -141,7 +142,15 @@ def _get_auth():
             created = PresetAccounts.ensure_presets(_user_repo)
         print(f"[Auth] {len(created)} preset accounts ready")
         for u in created:
-            print(f"  - {u['user_id']} ({u['role']}): {u['email']}")
+            if isinstance(u, dict):
+                user_id = u.get("user_id", "")
+                role = u.get("role", "")
+                email = u.get("email", "")
+            else:
+                user_id = getattr(u, "user_id", "")
+                role = getattr(u, "role", "")
+                email = getattr(u, "email", "")
+            print(f"  - {user_id} ({role}): {email}")
         _auth_captcha = CaptchaGenerator()
     return _user_repo, _auth_captcha
 
@@ -185,9 +194,9 @@ from src.infrastructure.pid_controller import PIDController, PIDConfig
 _kg = get_kg_manager()
 
 
-def _get_node_title(node_id: str) -> str:
+def _get_node_title(node_id: str, default: Optional[str] = None) -> str:
     """鑾峰彇鑺傜偣鏍囬銆?"""
-    return _kg.get_node_title(node_id)
+    return _kg.get_node_title(node_id) or default or node_id
 
 
 def _apply_kb_premastery(kb_item: str, agent_state: AgentState, course_id: str = "data_structures") -> None:
@@ -195,6 +204,256 @@ def _apply_kb_premastery(kb_item: str, agent_state: AgentState, course_id: str =
     for nid, mastery in node_map.items():
         if nid not in agent_state.dynamic_profile.knowledge_mastery:
             agent_state.dynamic_profile.knowledge_mastery[nid] = mastery
+
+
+RESOURCE_CONTRACT_VERSION = 1
+MASTERY_ADVANCE_THRESHOLD = 0.65
+RESOURCE_CARD_ORDER = [
+    "concept_map",
+    "code_snippet",
+    "interactive_exercise",
+    "video_summary",
+    "diagnostic_quiz",
+]
+
+
+def _strip_markdown(source: str) -> str:
+    text = str(source or "")
+    text = re.sub(r"```mermaid[\s\S]*?```", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"```[^\n]*\n?([\s\S]*?)```", r"\1", text)
+    text = re.sub(r"^#{1,6}\s*", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^\s*[-*+]\s+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^\s*\d+\.\s+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    text = re.sub(r"\[[^\]]*\]\(([^)]+)\)", r"\1", text)
+    text = re.sub(r"\r", "", text)
+    text = re.sub(r"\n{2,}", "\n", text)
+    return text.strip()
+
+
+def _extract_mermaid_source(content: str) -> str:
+    match = re.search(r"```mermaid\s*([\s\S]*?)```", str(content or ""), re.IGNORECASE)
+    return match.group(1).strip() if match else ""
+
+
+def _extract_code_block(content: str) -> tuple[str, str]:
+    match = re.search(r"```([a-zA-Z0-9_+-]*)\s*([\s\S]*?)```", str(content or ""))
+    if match:
+        language = match.group(1).strip() or "python"
+        code = match.group(2).strip()
+        return language, code
+    return "python", _strip_markdown(content)
+
+
+def _extract_bullets(content: str, limit: int = 4) -> List[str]:
+    bullets = []
+    for line in str(content or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith(("- ", "* ", "+ ")):
+            bullets.append(stripped[2:].strip())
+    if bullets:
+        return bullets[:limit]
+
+    text = _strip_markdown(content)
+    segments = [segment.strip() for segment in re.split(r"[。\n；;]+", text) if segment.strip()]
+    return segments[:limit]
+
+
+def _extract_sentences(content: str, limit: int = 6) -> List[str]:
+    text = _strip_markdown(content)
+    if not text:
+        return []
+    parts = re.split(r"[。\n！？!?；;]+", text)
+    return [part.strip() for part in parts if part.strip()][:limit]
+
+
+def _build_mermaid_from_bullets(title: str, bullets: List[str]) -> str:
+    safe_title = title.replace('"', "'")
+    lines = [f'ROOT["{safe_title}"]']
+    if not bullets:
+        lines.append('ROOT --> ITEM1["核心概念"]')
+    else:
+        for index, bullet in enumerate(bullets[:4], start=1):
+            safe_bullet = bullet.replace('"', "'")
+            lines.append(f'ROOT --> ITEM{index}["{safe_bullet}"]')
+    return "graph TD\n    " + "\n    ".join(lines)
+
+
+def _build_quiz_questions(title: str, content: str) -> List[Dict[str, Any]]:
+    seeds = _extract_sentences(content, limit=3)
+    if not seeds:
+        seeds = [f"{title} 的核心概念需要结合当前资源继续理解。"]
+
+    questions: List[Dict[str, Any]] = []
+    for index, seed in enumerate(seeds, start=1):
+        prompt = f"根据当前资源，关于“{title}”哪项说法最符合内容？"
+        options = [
+            seed,
+            f"{title} 与当前主题无关",
+            f"{title} 只适用于单一特例",
+            "以上都不对",
+        ]
+        questions.append(
+            {
+                "id": f"q{index}",
+                "prompt": prompt,
+                "options": options,
+                "answer_index": 0,
+                "explanation": seed,
+            }
+        )
+    return questions
+
+
+def _build_resource_metadata(card_type: str, node_title: str, content: str) -> Dict[str, Any]:
+    summary = _strip_markdown(content)
+    summary_text = summary[:220].strip() if summary else f"{node_title} 的学习资源已生成。"
+    bullets = _extract_bullets(content)
+    mermaid_source = _extract_mermaid_source(content) or _build_mermaid_from_bullets(node_title, bullets)
+
+    if card_type == "concept_map":
+        return {
+            "render_type": "concept_map",
+            "title": node_title,
+            "summary": summary_text,
+            "bullets": bullets,
+            "mermaid_source": mermaid_source,
+        }
+
+    if card_type == "code_snippet":
+        language, code = _extract_code_block(content)
+        explanation = summary_text if summary_text != code else ""
+        return {
+            "render_type": "code_snippet",
+            "title": f"{node_title} 代码示例",
+            "language": language,
+            "code": code,
+            "explanation": explanation,
+        }
+
+    if card_type == "interactive_exercise":
+        steps = _extract_sentences(content, limit=4)
+        checkpoints = bullets[:3] if bullets else steps[:3]
+        return {
+            "render_type": "interactive_exercise",
+            "title": f"{node_title} 互动练习",
+            "prompt": summary_text,
+            "steps": steps,
+            "checkpoints": checkpoints,
+        }
+
+    if card_type == "video_summary":
+        key_points = bullets[:4] if bullets else _extract_sentences(content, limit=4)
+        return {
+            "render_type": "video_summary",
+            "title": f"{node_title} 视频摘要",
+            "summary": summary_text,
+            "key_points": key_points,
+            "duration_minutes": 10,
+            "video_url": None,
+        }
+
+    if card_type == "diagnostic_quiz":
+        return {
+            "render_type": "diagnostic_quiz",
+            "title": f"{node_title} 诊断测验",
+            "questions": _build_quiz_questions(node_title, content),
+            "pass_threshold": MASTERY_ADVANCE_THRESHOLD,
+        }
+
+    return {
+        "render_type": card_type,
+        "title": node_title,
+        "summary": summary_text,
+    }
+
+
+def _normalize_resource_card(card: ResourceCard) -> ResourceCard:
+    node_title = _get_node_title(card.node_id) or card.node_id
+    base_metadata = _build_resource_metadata(card.card_type, node_title, card.content)
+    existing_metadata = dict(card.metadata or {})
+    card.metadata = {**base_metadata, **existing_metadata}
+    return card
+
+
+def _dedupe_and_sort_cards(cards: List[ResourceCard]) -> List[ResourceCard]:
+    latest_by_type: Dict[str, ResourceCard] = {}
+    extras: List[ResourceCard] = []
+
+    for raw_card in cards:
+        card = _normalize_resource_card(raw_card)
+        if card.card_type in RESOURCE_CARD_ORDER:
+            latest_by_type[card.card_type] = card
+        else:
+            extras.append(card)
+
+    ordered = [latest_by_type[card_type] for card_type in RESOURCE_CARD_ORDER if card_type in latest_by_type]
+    return ordered + extras
+
+
+def _normalize_state_resources(agent_state: AgentState) -> None:
+    normalized: Dict[str, List[ResourceCard]] = {}
+    for node_id, cards in agent_state.generated_resources.items():
+        normalized[node_id] = _dedupe_and_sort_cards(cards)
+    agent_state.generated_resources = normalized
+
+
+def _upsert_resource_card(agent_state: AgentState, card: ResourceCard) -> None:
+    cards = list(agent_state.generated_resources.get(card.node_id, []))
+    cards = [existing for existing in cards if existing.card_type != card.card_type]
+    cards.append(_normalize_resource_card(card))
+    agent_state.generated_resources[card.node_id] = _dedupe_and_sort_cards(cards)
+
+
+def _build_card_content_from_kb(node_id: str, card_type: str, difficulty: float) -> str:
+    title = _get_node_title(node_id) or node_id
+    chunks = _search_knowledge_base(title, top_k=2)
+    if not chunks:
+        chunks = _search_knowledge_base(node_id, top_k=2)
+    context = "\n\n".join(chunks) if chunks else f"知识点 {title} 的相关内容正在准备中。"
+
+    templates = {
+        "concept_map": f"## {title}\n\n### 概念解析\n\n{context}\n\n---\n*难度: {difficulty:.0%}*",
+        "code_snippet": f"## {title} · 代码示例\n\n```python\n# 相关实现代码\n{context[:800]}\n```\n\n---\n*难度: {difficulty:.0%}*",
+        "interactive_exercise": f"## 互动练习 · {title}\n\n阅读以下内容并完成练习：\n\n{context[:600]}\n\n---\n*难度: {difficulty:.0%}*",
+        "video_summary": f"## 视频摘要 · {title}\n\n{context[:500]}\n\n---\n*难度: {difficulty:.0%}*",
+        "diagnostic_quiz": f"## 诊断测验 · {title}\n\n根据以下知识点完成自测：\n\n{context[:600]}\n\n---\n*难度: {difficulty:.0%}*",
+    }
+    return templates.get(card_type, context)
+
+
+def _ensure_node_resource_set(agent_state: AgentState, node_id: str) -> None:
+    difficulty = max(0.1, 1.0 - agent_state.dynamic_profile.knowledge_mastery.get(node_id, 0.5))
+    existing = {
+        card.card_type: card
+        for card in agent_state.generated_resources.get(node_id, [])
+    }
+
+    for card_type in RESOURCE_CARD_ORDER:
+        if card_type in existing:
+            _upsert_resource_card(agent_state, existing[card_type])
+            continue
+
+        card = ResourceCard(
+            resource_id=f"{node_id}_{card_type}_supp",
+            node_id=node_id,
+            card_type=card_type,
+            content=_build_card_content_from_kb(node_id, card_type, difficulty),
+            difficulty=difficulty,
+            cognitive_style=agent_state.recommended_resource_style or "textual",
+        )
+        _upsert_resource_card(agent_state, card)
+
+
+def _find_next_pending_node(active_path: List[str], mastery_map: Dict[str, float], current_node: str) -> Optional[str]:
+    if not active_path:
+        return None
+
+    start_index = active_path.index(current_node) + 1 if current_node in active_path else 0
+    for node_id in active_path[start_index:]:
+        if mastery_map.get(node_id, 0.0) < MASTERY_ADVANCE_THRESHOLD:
+            return node_id
+    return None
 
 # ─── 全局会话存储 (user_id → course_id → session) ──────────
 sessions: Dict[str, Dict[str, Dict[str, Any]]] = {}
@@ -465,6 +724,8 @@ def get_or_create_session(user_id: str, course_id: str = "data_structures") -> D
                     session["cold_state"] = ColdStartState.model_validate_json(saved["cold_state_json"])
             except Exception:
                 pass  # 反序列化失败则使用新创建的
+    if session.get("agent_state") is not None:
+        _normalize_state_resources(session["agent_state"])
     return session
 
 
@@ -487,7 +748,9 @@ async def api_get_state(request: Request) -> JSONResponse:
     course_id = request.query_params.get("course_id", "data_structures")
     session = get_or_create_session(user_id, course_id)
     state: AgentState = session["agent_state"]
+    _normalize_state_resources(state)
     return JSONResponse({
+        "resource_contract_version": RESOURCE_CONTRACT_VERSION,
         "user_id": state.user_id,
         "course_id": state.course_id,
         "current_node_id": state.current_node_id,
@@ -899,6 +1162,216 @@ async def api_run_pipeline_step(request: Request) -> JSONResponse:
         "step_logs": logs,
         "all_logs": session["pipeline_log"],
     })
+
+
+async def api_run_pipeline_step_v2(request: Request) -> JSONResponse:
+    """Run one workspace step with metadata-first resources and explicit interaction semantics."""
+    body = await request.json()
+    user_id = body.get("user_id", "demo_user")
+    course_id = body.get("course_id", "data_structures")
+    interaction_type = body.get("interaction_type", "practice")
+    correctness = body.get("correctness", 0.75)
+    time_spent_ratio = body.get("time_spent_ratio", 1.0)
+    code_pass_rate = body.get("code_pass_rate", 0.70)
+    help_count = body.get("help_count", 0)
+    tutor_query = body.get("tutor_query", None)
+    target_node = body.get("current_node_id", None)
+
+    session = get_or_create_session(user_id, course_id)
+    agent_state: AgentState = session["agent_state"]
+    if target_node:
+        agent_state.current_node_id = target_node
+
+    evaluator: EvaluatorNode = session["evaluator"]
+    profiler: ProfilerNode = session["profiler"]
+    tutor: TutorAgentNode = session["tutor"]
+    mesh: ContentMeshNode = session["mesh"]
+    validator: ValidatorNode = session["validator"]
+    assessment: AssessmentReporterNode = session["assessment"]
+    path_planner: PathPlanner = session["path_planner"]
+
+    logs: List[Dict[str, Any]] = []
+    current_node = agent_state.current_node_id or (agent_state.active_path[0] if agent_state.active_path else "N01")
+    previous_mastery = agent_state.dynamic_profile.knowledge_mastery.get(current_node, 0.0)
+    eval_output = None
+
+    if interaction_type == "load_node":
+        logs.append({"agent": "Evaluator", "status": "skipped", "reason": "interaction_type=load_node"})
+        logs.append({"agent": "Profiler", "status": "skipped", "reason": "interaction_type=load_node"})
+    else:
+        raw_behavior = BehaviorVector(
+            answer_correctness=correctness,
+            code_pass_rate=code_pass_rate,
+            time_spent_ratio=time_spent_ratio,
+            help_request_count=help_count,
+            node_id=current_node,
+        )
+        agent_state.latest_behavior = LatestBehavior(
+            node_id=current_node,
+            correctness=correctness,
+            time_spent_ratio=time_spent_ratio,
+            error_types=[],
+            resource_feedback={},
+            help_request_count=help_count,
+            tutor_query=tutor_query,
+            accuracy_rate=correctness,
+            code_pass_rate=code_pass_rate,
+            duration_ratio=time_spent_ratio,
+        )
+
+        eval_input = EvaluatorInput(agent_state=agent_state, raw_behavior=raw_behavior)
+        eval_output = evaluator(eval_input)
+        agent_state = eval_output.agent_state
+        logs.append({
+            "agent": "Evaluator",
+            "effective_correctness": eval_output.cleaned_behavior.effective_correctness,
+            "anomaly_type": eval_output.cleaned_behavior.anomaly.anomaly_type.value,
+            "anomaly_detected": eval_output.anomaly_detected,
+            "mastery_delta": round(eval_output.mastery_delta, 4),
+            "pid_error": round(eval_output.pid_error, 4),
+            "replan_decision": eval_output.replan_decision.value,
+            "updated_mastery": round(eval_output.updated_mastery, 4),
+        })
+
+        prof_input = ProfilerInput(
+            agent_state=agent_state,
+            evaluator_mastery_delta=eval_output.mastery_delta,
+            evaluator_pid_error=eval_output.pid_error,
+            resource_style_delivered=agent_state.recommended_resource_style or "visual",
+            node_id=current_node,
+        )
+        prof_output = profiler(prof_input)
+        agent_state = prof_output.agent_state
+        logs.append({
+            "agent": "Profiler",
+            "selected_style": prof_output.style_result.selected_style,
+            "sample_values": prof_output.style_result.sample_values,
+            "intervention_triggered": prof_output.intervention_active,
+            "forgetting_decay": (
+                round(prof_output.forgetting_result.decay_factor, 4)
+                if prof_output.forgetting_result else None
+            ),
+        })
+
+    if not agent_state.active_path or agent_state.re_plan_triggered:
+        topo = path_planner.compute_topological_order()
+        agent_state.active_path = topo
+        agent_state.re_plan_triggered = False
+        logs.append({"agent": "Planner", "replan": True, "new_path": agent_state.active_path})
+    else:
+        logs.append({"agent": "Planner", "replan": False, "active_path": agent_state.active_path})
+
+    if not agent_state.active_path and current_node:
+        agent_state.active_path = [current_node]
+    if current_node and current_node in agent_state.active_path:
+        agent_state.active_path = [current_node, *[node for node in agent_state.active_path if node != current_node]]
+
+    if tutor_query and interaction_type != "load_node":
+        tut_input = TutorInput(agent_state=agent_state)
+        tut_output = tutor(tut_input)
+        agent_state = tut_output.agent_state
+        logs.append({
+            "agent": "Tutor",
+            "query": tutor_query,
+            "has_mermaid": bool(agent_state.tutor_response.get("mermaid_src", "") if agent_state.tutor_response else False),
+        })
+
+    mesh_input = MeshInput(agent_state=agent_state)
+    mesh_output = mesh(mesh_input)
+    agent_state = mesh_output.agent_state
+    logs.append({
+        "agent": "ContentMesh",
+        "generated_cards": len(mesh_output.generated_cards),
+        "card_types": [c.card_type for c in mesh_output.generated_cards],
+    })
+
+    _normalize_state_resources(agent_state)
+    _ensure_node_resource_set(agent_state, current_node)
+
+    cards_to_validate = list(agent_state.generated_resources.get(current_node, []))
+    if cards_to_validate:
+        val_input = ValidatorInput(
+            agent_state=agent_state,
+            cards_to_validate=cards_to_validate[-5:],
+            ground_truth_context="数据结构是计算机存储、组织数据的方式。",
+            enable_pole2=False,
+        )
+        val_output = validator(val_input)
+        agent_state = val_output.agent_state
+        logs.append({
+            "agent": "Validator",
+            "valid_cards": len(val_output.valid_cards),
+            "rejected_cards": len(val_output.rejected_cards),
+            "refined_cards": len(val_output.refined_cards),
+            "overall_pass_rate": round(val_output.overall_pass_rate, 2),
+        })
+    else:
+        logs.append({"agent": "Validator", "status": "no_cards_to_validate"})
+
+    if interaction_type == "load_node":
+        logs.append({"agent": "Assessment", "status": "skipped", "reason": "interaction_type=load_node"})
+    else:
+        assess_input = AssessmentInput(agent_state=agent_state)
+        assess_output = assessment(assess_input)
+        agent_state = assess_output.agent_state
+        logs.append({
+            "agent": "Assessment",
+            "capability_radar": agent_state.dynamic_profile.capability_radar,
+            "pedagogical_strategy": agent_state.pedagogical_strategy,
+            "a_mix": round(sum(agent_state.dynamic_profile.capability_radar) / 5, 4),
+        })
+
+    evaluated_mastery = agent_state.dynamic_profile.knowledge_mastery.get(current_node, previous_mastery)
+    next_node_id = None
+    advanced_to_next_node = False
+
+    if interaction_type == "diagnostic" and evaluated_mastery >= MASTERY_ADVANCE_THRESHOLD:
+        next_node_id = _find_next_pending_node(
+            agent_state.active_path,
+            agent_state.dynamic_profile.knowledge_mastery,
+            current_node,
+        )
+        if next_node_id:
+            agent_state.current_node_id = next_node_id
+            advanced_to_next_node = True
+        else:
+            agent_state.current_node_id = current_node
+    else:
+        agent_state.current_node_id = current_node
+
+    _normalize_state_resources(agent_state)
+    session["agent_state"] = agent_state
+    session["pipeline_log"].extend(logs)
+    _persist_state(user_id, course_id, agent_state, session.get("cold_state"))
+
+    return JSONResponse({
+        "resource_contract_version": RESOURCE_CONTRACT_VERSION,
+        "iteration": agent_state.iteration,
+        "interaction_type": interaction_type,
+        "current_node_id": agent_state.current_node_id,
+        "evaluated_node_id": current_node,
+        "evaluated_node_mastery": round(evaluated_mastery, 4),
+        "previous_mastery": round(previous_mastery, 4),
+        "advanced_to_next_node": advanced_to_next_node,
+        "next_node_id": next_node_id,
+        "mastery_threshold": MASTERY_ADVANCE_THRESHOLD,
+        "active_path": agent_state.active_path,
+        "pedagogical_strategy": agent_state.pedagogical_strategy,
+        "capability_radar": agent_state.dynamic_profile.capability_radar,
+        "diagnostic_report": agent_state.dynamic_profile.diagnostic_report_md,
+        "knowledge_mastery": {
+            key: round(value, 4) for key, value in agent_state.dynamic_profile.knowledge_mastery.items()
+        },
+        "generated_cards_count": sum(len(v) for v in agent_state.generated_resources.values()),
+        "tutor_response": agent_state.tutor_response,
+        "re_plan_triggered": agent_state.re_plan_triggered,
+        "errors": agent_state.errors[-5:],
+        "step_logs": logs,
+        "all_logs": session["pipeline_log"],
+    })
+
+
+api_run_pipeline_step = api_run_pipeline_step_v2
 
 
 async def api_ask_tutor(request: Request) -> JSONResponse:

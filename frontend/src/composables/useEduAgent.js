@@ -58,6 +58,7 @@ export function useEduAgent() {
   const probeCollected = ref(0);
   const probeTotal = ref(6);
   const resources = ref({});
+  const lastDiagnostic = ref(null);
   const messages = ref([]);
   const infoMessage = ref("");
   const agentStatuses = ref([
@@ -88,6 +89,17 @@ export function useEduAgent() {
     setInfo._timer = setTimeout(() => {
       infoMessage.value = "";
     }, 3000);
+  }
+
+  function resetLearningState() {
+    currentNode.value = "";
+    activePath.value = [];
+    mastery.value = {};
+    resources.value = {};
+    lastDiagnostic.value = null;
+    messages.value = [];
+    probe.value = null;
+    probeCollected.value = 0;
   }
 
   function hydrateState(state) {
@@ -207,7 +219,7 @@ export function useEduAgent() {
     currentUser.value = null;
     isLoggedIn.value = false;
     bootMode.value = "login";
-    messages.value = [];
+    resetLearningState();
   }
 
   async function submitProbe(values) {
@@ -252,6 +264,7 @@ export function useEduAgent() {
     } catch {
       return null;
     }
+    return availableCourses.value;
   }
 
   async function loadUserCourses() {
@@ -346,13 +359,7 @@ export function useEduAgent() {
     try {
       await switchCourse(userId.value, courseIdInput);
       await loadUserCourses();
-
-      currentNode.value = "";
-      activePath.value = [];
-      mastery.value = {};
-      resources.value = {};
-      messages.value = [];
-      probe.value = null;
+      resetLearningState();
 
       const state = await fetchState(userId.value, courseId.value);
       hydrateState(state);
@@ -385,11 +392,6 @@ export function useEduAgent() {
     }
 
     currentNode.value = nodeId;
-    if (resources.value[nodeId]?.length) {
-      refreshStatuses();
-      return;
-    }
-
     isLoadingNode.value = true;
     if (!silent) {
       setInfo(`正在为「${nodeTitles.value[nodeId] || nodeId}」生成学习资源...`);
@@ -397,6 +399,7 @@ export function useEduAgent() {
 
     try {
       await runPipelineStep({
+        interaction_type: "load_node",
         user_id: userId.value,
         course_id: courseId.value,
         current_node_id: nodeId,
@@ -406,7 +409,7 @@ export function useEduAgent() {
       });
       const state = await fetchState(userId.value, courseId.value);
       hydrateState(state);
-      currentNode.value = nodeId;
+      currentNode.value = state.current_node_id || nodeId;
     } catch {
       setInfo("资源生成失败。");
     } finally {
@@ -417,17 +420,41 @@ export function useEduAgent() {
 
   async function submitQuiz(score) {
     isLoadingNode.value = true;
+    const evaluatedNodeId = currentNode.value;
+    const previousMastery = mastery.value[evaluatedNodeId] ?? 0;
+
     try {
-      await runPipelineStep({
+      const response = await runPipelineStep({
+        interaction_type: "diagnostic",
         user_id: userId.value,
         course_id: courseId.value,
+        current_node_id: evaluatedNodeId,
         correctness: score,
         time_spent_ratio: 1.0,
         code_pass_rate: score,
       });
       const state = await fetchState(userId.value, courseId.value);
       hydrateState(state);
-      currentNode.value = activePath.value.includes(currentNode.value) ? currentNode.value : (activePath.value[0] || "");
+      currentNode.value = response.current_node_id || state.current_node_id || evaluatedNodeId;
+
+      const nextNodeId = response.next_node_id || response.current_node_id || "";
+      lastDiagnostic.value = {
+        score,
+        evaluatedNodeId: response.evaluated_node_id || evaluatedNodeId,
+        evaluatedNodeTitle: nodeTitles.value[response.evaluated_node_id || evaluatedNodeId] || response.evaluated_node_id || evaluatedNodeId,
+        masteryBefore: response.previous_mastery ?? previousMastery,
+        masteryAfter: response.evaluated_node_mastery ?? state.dynamic_profile?.knowledge_mastery?.[evaluatedNodeId] ?? previousMastery,
+        advancedToNextNode: Boolean(response.advanced_to_next_node),
+        nextNodeId,
+        nextNodeTitle: nodeTitles.value[nextNodeId] || nextNodeId,
+        masteryThreshold: response.mastery_threshold ?? 0.65,
+      };
+
+      if (lastDiagnostic.value.advancedToNextNode) {
+        setInfo(`诊断通过，已推进到「${lastDiagnostic.value.nextNodeTitle || "下一节点"}」。`);
+      } else {
+        setInfo("诊断已记录，当前节点暂未达标，已保留并刷新本节点学习资源。");
+      }
     } catch {
       setInfo("提交诊断失败。");
     } finally {
@@ -522,6 +549,7 @@ export function useEduAgent() {
     probeCollected,
     probeTotal,
     resources,
+    lastDiagnostic,
     currentCards,
     currentNodeTitle,
     currentPathNodes,
