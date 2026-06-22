@@ -10,9 +10,9 @@
 </template>
 
 <script setup>
-import { computed, nextTick, ref, watch } from "vue";
-import { renderMarkdown } from "../utils/markdown";
+import { ref, watch } from "vue";
 import { useTheme } from "../composables/useTheme.js";
+import { hasRichMarkdownContent, renderPlainTextHtml } from "../utils/markdownPreview.js";
 
 const props = defineProps({
   content: { type: String, default: "" },
@@ -21,33 +21,60 @@ const props = defineProps({
 
 const { theme } = useTheme();
 const mermaidRoot = ref(null);
-const html = computed(() => renderMarkdown(props.content));
+const html = ref("");
 
-let mermaidModule = null;
+let markdownRuntimePromise = null;
+let mermaidRuntimePromise = null;
+
+function loadMarkdownRuntime() {
+  if (!markdownRuntimePromise) {
+    markdownRuntimePromise = import("../utils/markdownRuntime.js");
+  }
+  return markdownRuntimePromise;
+}
+
+function loadMermaidRuntime() {
+  if (!mermaidRuntimePromise) {
+    mermaidRuntimePromise = import("../utils/mermaidRuntime.js");
+  }
+  return mermaidRuntimePromise;
+}
+
+async function renderHtml() {
+  if (!props.content) {
+    html.value = "";
+    return;
+  }
+
+  if (!hasRichMarkdownContent(props.content, props.mermaidSource)) {
+    html.value = renderPlainTextHtml(props.content);
+    return;
+  }
+
+  const { renderMarkdownRuntime } = await loadMarkdownRuntime();
+  html.value = await renderMarkdownRuntime(props.content);
+}
 
 async function renderMermaid() {
   if (!props.mermaidSource || !mermaidRoot.value) {
     return;
   }
 
-  const isLight = theme.value === "light";
-
-  if (!mermaidModule) {
-    mermaidModule = await import("mermaid");
-  }
-
-  mermaidModule.default.initialize({
-    startOnLoad: false,
-    theme: isLight ? "default" : "dark",
-    securityLevel: "strict",
+  const { renderMermaidDiagram } = await loadMermaidRuntime();
+  await renderMermaidDiagram({
+    source: props.mermaidSource,
+    element: mermaidRoot.value,
+    isLight: theme.value === "light",
   });
-
-  await nextTick();
-  mermaidRoot.value.innerHTML = props.mermaidSource;
-  mermaidRoot.value.classList.add("mermaid");
-  mermaidRoot.value.removeAttribute("data-processed");
-  await mermaidModule.default.run({ nodes: [mermaidRoot.value] });
 }
+
+watch(
+  () => props.content,
+  () => {
+    renderHtml();
+  },
+  { immediate: true },
+);
 
 watch(
   () => props.mermaidSource,

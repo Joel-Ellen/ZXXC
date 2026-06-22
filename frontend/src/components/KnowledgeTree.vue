@@ -46,9 +46,7 @@
           {{ String(node.order).padStart(2, "0") }}
         </span>
 
-        <span
-          class="relative mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-subtle bg-card"
-        >
+        <span class="relative mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-subtle bg-card">
           <IconCheck
             v-if="node.mastery >= 0.65"
             class="text-success"

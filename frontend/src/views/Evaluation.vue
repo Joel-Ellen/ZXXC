@@ -125,10 +125,9 @@
 </template>
 
 <script setup>
-import { ref, nextTick } from 'vue'
+import { onBeforeUnmount, ref, nextTick } from 'vue'
 import { evaluationAPI } from '../api'
 import { renderChatMessage } from '../composables/useContentRenderer'
-import * as echarts from 'echarts'
 
 const courses = ['人工智能', '机器学习', '深度学习', '数据结构', '操作系统', '计算机网络', '大模型应用开发']
 
@@ -136,6 +135,9 @@ const evalConfig = ref({ course_name: '人工智能', period_days: 30 })
 const evaluating = ref(false)
 const report = ref(null)
 const radarChart = ref(null)
+let echartsModulePromise = null
+let chartInstance = null
+let resizeHandler = null
 
 function renderMarkdown(text) { return renderChatMessage(text) }
 
@@ -146,17 +148,30 @@ async function generateReport() {
     if (res.success && res.data?.report) {
       report.value = res.data.report
       await nextTick()
-      renderRadarChart()
+      await renderRadarChart()
     }
   } catch (e) { console.error('Failed to generate report:', e) }
   evaluating.value = false
 }
 
-function renderRadarChart() {
+async function loadEcharts() {
+  if (!echartsModulePromise) {
+    echartsModulePromise = import('echarts')
+  }
+  return echartsModulePromise
+}
+
+async function renderRadarChart() {
   if (!radarChart.value || !report.value?.radar_chart_data) return
-  const chart = echarts.init(radarChart.value)
+
+  const echarts = await loadEcharts()
+  if (chartInstance) {
+    chartInstance.dispose()
+  }
+
+  chartInstance = echarts.init(radarChart.value)
   const data = report.value.radar_chart_data
-  chart.setOption({
+  chartInstance.setOption({
     radar: {
       indicator: data.labels.map(l => ({ name: l, max: 100 })),
       shape: 'polygon',
@@ -170,8 +185,24 @@ function renderRadarChart() {
       lineStyle: { color: '#7CB342', width: 2 },
     }],
   })
-  window.addEventListener('resize', () => chart.resize())
+
+  if (!resizeHandler) {
+    resizeHandler = () => chartInstance?.resize()
+    window.addEventListener('resize', resizeHandler)
+  }
 }
+
+onBeforeUnmount(() => {
+  if (resizeHandler) {
+    window.removeEventListener('resize', resizeHandler)
+    resizeHandler = null
+  }
+
+  if (chartInstance) {
+    chartInstance.dispose()
+    chartInstance = null
+  }
+})
 </script>
 
 <style scoped>

@@ -3,18 +3,26 @@
     <div
       v-if="open"
       class="fixed inset-0 z-40 lg:z-30"
-      aria-hidden="true"
       @click.self="$emit('close')"
     >
       <div
-        class="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity lg:bg-black/10 lg:backdrop-blur-none"
+        class="absolute inset-0 bg-black/42 backdrop-blur-[3px] transition-opacity lg:bg-[color:rgba(8,14,28,0.16)] lg:backdrop-blur-[1px]"
       />
 
       <transition name="drawer-panel">
         <aside
-          class="absolute bottom-4 left-4 right-4 top-24 z-10 flex overflow-hidden rounded-[28px] border border-subtle bg-space-panel shadow-2xl backdrop-blur-xl lg:inset-y-4 lg:left-[68px] lg:right-auto lg:top-4 lg:w-[396px] lg:rounded-l-none lg:border-l-0"
+          ref="drawerPanel"
+          :id="panelId"
+          class="drawer-surface absolute bottom-4 left-4 right-4 top-24 z-10 flex overflow-hidden rounded-[28px] border border-[color:rgba(255,255,255,0.55)] shadow-[0_28px_80px_rgba(15,23,42,0.24)] lg:inset-y-4 lg:left-[68px] lg:right-auto lg:top-4 lg:w-[408px] lg:rounded-l-none lg:border-l-0"
+          role="dialog"
+          aria-modal="true"
+          :aria-label="panelTitle"
+          :style="panelSurfaceStyle"
+          tabindex="-1"
         >
-          <div class="flex w-full flex-col">
+          <div class="drawer-surface__glow pointer-events-none absolute inset-0" />
+
+          <div class="relative flex w-full flex-col">
             <div class="relative flex items-start gap-4 px-6 pb-5 pt-6">
               <div class="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-[var(--border-strong)] to-transparent" />
 
@@ -31,14 +39,44 @@
               </div>
             </div>
 
+            <div class="px-6 pb-4 pt-4">
+              <nav
+                class="grid grid-cols-3 gap-2 rounded-[20px] border border-subtle bg-card/92 p-1.5 shadow-card"
+                aria-label="工作台抽屉视图切换"
+                role="tablist"
+              >
+                <button
+                  v-for="panel in panelTabs"
+                  :id="panelTabId(panel.key)"
+                  :key="panel.key"
+                  type="button"
+                  role="tab"
+                  class="focus-ring rounded-[16px] px-3 py-2 text-xs font-semibold tracking-[0.08em] transition-all duration-200"
+                  :class="activePanel === panel.key
+                    ? 'bg-primary-soft text-primary shadow-sm'
+                    : 'text-text-muted hover:bg-card-hover hover:text-text-secondary'"
+                  :aria-controls="panelRegionId(panel.key)"
+                  :aria-selected="String(activePanel === panel.key)"
+                  @click="$emit('switch-panel', panel.key)"
+                >
+                  {{ panel.label }}
+                </button>
+              </nav>
+            </div>
+
             <div class="aurora-scroll flex-1 overflow-y-auto px-5 pb-6">
               <template v-if="activePanel === 'tree'">
-                <section class="mb-5 rounded-[22px] border border-subtle bg-card p-5 shadow-card">
+                <section
+                  :id="panelRegionId('tree')"
+                  class="mb-5 rounded-[22px] border border-subtle bg-card p-5 shadow-card"
+                  role="tabpanel"
+                  :aria-labelledby="panelTabId('tree')"
+                >
                   <div class="grid gap-3 sm:grid-cols-3">
                     <div
                       v-for="stat in pathStats"
                       :key="stat.label"
-                      class="rounded-[18px] border border-subtle bg-space-surface/50 px-4 py-3"
+                      class="rounded-[18px] border border-subtle bg-space-surface px-4 py-3"
                     >
                       <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">{{ stat.label }}</p>
                       <p class="mt-2 text-lg font-black text-text-primary">{{ stat.value }}</p>
@@ -55,7 +93,12 @@
               </template>
 
               <template v-else-if="activePanel === 'radar'">
-                <section class="mb-5 rounded-[22px] border border-subtle bg-card p-5 shadow-card">
+                <section
+                  :id="panelRegionId('radar')"
+                  class="mb-5 rounded-[22px] border border-subtle bg-card p-5 shadow-card"
+                  role="tabpanel"
+                  :aria-labelledby="panelTabId('radar')"
+                >
                   <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">能力说明</p>
                   <p class="mt-2 text-sm leading-7 text-text-muted">
                     雷达图用于帮助学习者判断自己的薄弱象限，不是单纯展示分数。建议结合当前节点和最近诊断一起阅读。
@@ -67,7 +110,13 @@
                 />
               </template>
 
-              <div v-else class="space-y-5">
+              <div
+                v-else
+                :id="panelRegionId('settings')"
+                class="space-y-5"
+                role="tabpanel"
+                :aria-labelledby="panelTabId('settings')"
+              >
                 <section class="rounded-[22px] border border-subtle bg-card p-5 shadow-card">
                   <h3 class="text-sm font-bold tracking-wide text-text-secondary">配色主题</h3>
                   <p class="mt-2 text-sm font-light leading-7 text-text-muted">
@@ -104,7 +153,7 @@
                     <div>
                       <h3 class="text-sm font-bold tracking-wide text-text-secondary">高对比度</h3>
                       <p class="mt-2 text-sm font-light leading-7 text-text-muted">
-                        提升主题对比度，适合长时间阅读或节点较多时的快速扫描。
+                        提升主题对比度，适合长时间阅读或节点较多时的快速扫读。
                       </p>
                     </div>
                     <button
@@ -160,8 +209,9 @@
             </div>
 
             <button
+              ref="closeButton"
               type="button"
-              class="focus-ring absolute right-4 top-4 rounded-full p-2 text-text-muted transition hover:bg-card-hover hover:text-text-primary lg:hidden"
+              class="focus-ring absolute right-4 top-4 rounded-full border border-subtle/70 bg-card/82 p-2 text-text-muted shadow-sm backdrop-blur-sm transition hover:bg-card-hover hover:text-text-primary"
               aria-label="关闭侧边栏"
               @click="$emit('close')"
             >
@@ -178,19 +228,21 @@
 </template>
 
 <script setup>
-import { computed } from "vue";
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import KnowledgeTree from "./KnowledgeTree.vue";
-import RadarCanvas from "./RadarCanvas.vue";
 import IconRadar from "./icons/IconRadar.vue";
 import IconSettings from "./icons/IconSettings.vue";
 import IconTree from "./icons/IconTree.vue";
 import { useTheme } from "../composables/useTheme.js";
+
+const RadarCanvas = defineAsyncComponent(() => import("./RadarCanvas.vue"));
 
 const { theme, setTheme } = useTheme();
 
 const props = defineProps({
   open: { type: Boolean, default: false },
   activePanel: { type: String, default: "tree" },
+  panelId: { type: String, default: "workspace-sidebar-drawer" },
   nodes: { type: Array, default: () => [] },
   currentNode: { type: String, default: "" },
   radarValues: { type: Array, default: () => [] },
@@ -199,19 +251,32 @@ const props = defineProps({
   fontSize: { type: Number, default: 16 },
 });
 
-defineEmits([
+const emit = defineEmits([
   "select-node",
+  "switch-panel",
   "toggle-contrast",
   "toggle-motion",
   "set-font-size",
   "close",
 ]);
 
+let previousBodyOverflow = "";
+let previousFocusedElement = null;
+
+const drawerPanel = ref(null);
+const closeButton = ref(null);
+
 const panelIcons = {
   tree: IconTree,
   radar: IconRadar,
   settings: IconSettings,
 };
+
+const panelTabs = [
+  { key: "tree", label: "路径" },
+  { key: "radar", label: "诊断" },
+  { key: "settings", label: "设置" },
+];
 
 const titles = {
   tree: "知识路径",
@@ -257,10 +322,160 @@ const pathStats = computed(() => [
 
 const panelIcon = computed(() => panelIcons[props.activePanel] ?? IconSettings);
 const panelTitle = computed(() => titles[props.activePanel] ?? "工作台");
-const panelDescription = computed(() => descriptions[props.activePanel] ?? "工作台控制。");
+const panelDescription = computed(() => descriptions[props.activePanel] ?? "工作台控制台。");
+const panelSurfaceStyle = computed(() => ({
+  backgroundColor: theme.value === "light" ? "#f7f3e8" : "#0b1120",
+}));
+
+watch(
+  () => props.open,
+  async (isOpen) => {
+    if (typeof window !== "undefined") {
+      if (isOpen) {
+        window.addEventListener("keydown", handleKeydown);
+      } else {
+        window.removeEventListener("keydown", handleKeydown);
+      }
+    }
+
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    const { body } = document;
+    if (isOpen) {
+      previousFocusedElement = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+      previousBodyOverflow = body.style.overflow;
+      body.style.overflow = "hidden";
+      await nextTick();
+      focusInitialElement();
+      return;
+    }
+
+    body.style.overflow = previousBodyOverflow;
+    restoreFocus();
+  },
+  { immediate: true },
+);
+
+onBeforeUnmount(() => {
+  if (typeof window !== "undefined") {
+    window.removeEventListener("keydown", handleKeydown);
+  }
+
+  if (typeof document !== "undefined") {
+    document.body.style.overflow = previousBodyOverflow;
+  }
+});
+
+function handleKeydown(event) {
+  if (!props.open) {
+    return;
+  }
+
+  if (event.key === "Escape") {
+    event.preventDefault();
+    emit("close");
+    return;
+  }
+
+  if (event.key === "Tab") {
+    trapFocus(event);
+  }
+}
+
+function focusInitialElement() {
+  if (closeButton.value instanceof HTMLElement) {
+    closeButton.value.focus();
+    return;
+  }
+
+  if (drawerPanel.value instanceof HTMLElement) {
+    drawerPanel.value.focus();
+  }
+}
+
+function restoreFocus() {
+  if (previousFocusedElement instanceof HTMLElement && previousFocusedElement.isConnected) {
+    previousFocusedElement.focus();
+  }
+
+  previousFocusedElement = null;
+}
+
+function trapFocus(event) {
+  if (!(drawerPanel.value instanceof HTMLElement)) {
+    return;
+  }
+
+  const focusableElements = getFocusableElements();
+  if (!focusableElements.length) {
+    event.preventDefault();
+    drawerPanel.value.focus();
+    return;
+  }
+
+  const firstElement = focusableElements[0];
+  const lastElement = focusableElements[focusableElements.length - 1];
+  const activeElement = document.activeElement;
+
+  if (event.shiftKey) {
+    if (activeElement === firstElement || !drawerPanel.value.contains(activeElement)) {
+      event.preventDefault();
+      lastElement.focus();
+    }
+    return;
+  }
+
+  if (activeElement === lastElement || !drawerPanel.value.contains(activeElement)) {
+    event.preventDefault();
+    firstElement.focus();
+  }
+}
+
+function getFocusableElements() {
+  if (!(drawerPanel.value instanceof HTMLElement)) {
+    return [];
+  }
+
+  const selector = [
+    "a[href]",
+    "button:not([disabled])",
+    "input:not([disabled])",
+    "select:not([disabled])",
+    "textarea:not([disabled])",
+    "[tabindex]:not([tabindex='-1'])",
+  ].join(",");
+
+  return Array.from(drawerPanel.value.querySelectorAll(selector)).filter((element) => (
+    element instanceof HTMLElement
+    && !element.hasAttribute("disabled")
+    && element.getAttribute("aria-hidden") !== "true"
+  ));
+}
+
+function panelTabId(panelKey) {
+  return `${props.panelId}-tab-${panelKey}`;
+}
+
+function panelRegionId(panelKey) {
+  return `${props.panelId}-panel-${panelKey}`;
+}
 </script>
 
 <style scoped>
+.drawer-surface {
+  isolation: isolate;
+}
+
+.drawer-surface__glow {
+  background:
+    radial-gradient(circle at top, rgba(63, 222, 205, 0.1), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.05));
+}
+
 .drawer-backdrop-enter-active,
 .drawer-backdrop-leave-active {
   transition: opacity 280ms ease;

@@ -19,7 +19,10 @@
           ? 'bg-gradient-to-br from-primary to-primary-dark text-primary-text shadow-glow-primary'
           : 'hover:bg-card-hover hover:text-text-secondary active:scale-[0.95]'"
         :aria-label="item.label"
-        :aria-pressed="item.key === activePanel"
+        :aria-controls="panelId"
+        :aria-expanded="String(drawerOpen && item.key === activePanel)"
+        aria-haspopup="dialog"
+        :aria-pressed="String(drawerOpen && item.key === activePanel)"
         @click="$emit('select', item.key)"
       >
         <component :is="item.icon" :size="22" />
@@ -59,6 +62,7 @@ import IconTree from "./icons/IconTree.vue";
 const props = defineProps({
   activePanel: { type: String, default: "tree" },
   drawerOpen: { type: Boolean, default: false },
+  panelId: { type: String, default: "workspace-sidebar-drawer" },
   pathCount: { type: Number, default: 0 },
 });
 

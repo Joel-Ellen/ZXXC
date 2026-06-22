@@ -161,14 +161,16 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '../stores/user'
 import { agentsAPI, resourcesAPI } from '../api'
-import mermaid from 'mermaid'
+import { useTheme } from '../composables/useTheme.js'
+import { renderMermaidSvg } from '../utils/mermaidRuntime.js'
 
 const router = useRouter()
 const userStore = useUserStore()
+const { theme } = useTheme()
 
 const showLogin = ref(false)
 const showRegister = ref(false)
@@ -177,6 +179,7 @@ const errorMsg = ref('')
 const authForm = ref({ username: '', email: '', password: '' })
 const selectedCourse = ref('人工智能')
 const renderedMermaid = ref('')
+const workflowSource = ref('')
 const courses = ['人工智能', '机器学习', '深度学习', '数据结构', '操作系统', '计算机网络', '大模型应用开发']
 
 async function handleAuth() {
@@ -224,15 +227,35 @@ async function loadWorkflowDiagram() {
   try {
     const res = await agentsAPI.getWorkflowDiagram()
     if (res.success && res.data?.mermaid) {
-      const code = res.data.mermaid.replace('```mermaid', '').replace('```', '').trim()
-      const { svg } = await mermaid.render('workflow-svg', code)
-      renderedMermaid.value = svg
+      workflowSource.value = res.data.mermaid
+      await updateWorkflowDiagram()
     }
   } catch (e) { console.error('Failed to load workflow diagram:', e) }
 }
 
+async function updateWorkflowDiagram() {
+  if (!workflowSource.value) {
+    renderedMermaid.value = ''
+    return
+  }
+
+  try {
+    renderedMermaid.value = await renderMermaidSvg({
+      source: workflowSource.value,
+      id: 'workflow-svg',
+      isLight: theme.value === 'light',
+    })
+  } catch (e) {
+    console.error('Failed to render workflow diagram:', e)
+    renderedMermaid.value = ''
+  }
+}
+
+watch(theme, () => {
+  if (workflowSource.value) updateWorkflowDiagram()
+})
+
 onMounted(() => {
-  mermaid.initialize({ startOnLoad: false, theme: 'default' })
   if (userStore.isAuthenticated) loadWorkflowDiagram()
 })
 </script>

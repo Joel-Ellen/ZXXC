@@ -7,7 +7,7 @@
           学习画像采集
         </h2>
         <p class="mt-2 max-w-[38ch] text-sm leading-6 text-text-muted">
-          这一步会决定系统如何给你安排起点、难度和资源密度，先回答真实情况，比快速跳过更有价值。
+          这一步会决定系统如何为你安排起点、难度和资源密度。先按真实情况作答，比直接跳过更有效。
         </p>
       </div>
       <div class="rounded-[18px] border border-subtle bg-space-surface/60 px-4 py-3 text-right text-[11px] text-text-muted">

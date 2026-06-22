@@ -2,7 +2,7 @@
  * useContentRenderer — 统一内容渲染调度器
  *
  * 根据后端返回的 content_type 字段自动选择渲染策略：
- *   - "markdown"   → marked + highlight.js 代码高亮
+ *   - "markdown"   → 懒加载 Markdown 运行时
  *   - "structured" → 根据 content_subtype 路由到专用组件
  *
  * 用法：
@@ -13,75 +13,18 @@
  */
 
 import { computed } from 'vue'
-import { marked } from 'marked'
-import hljs from 'highlight.js'
 
-// ============================================================
-// highlight.js — 按需注册语言（减小打包体积）
-// ============================================================
-import javascript from 'highlight.js/lib/languages/javascript'
-import python from 'highlight.js/lib/languages/python'
-import bash from 'highlight.js/lib/languages/bash'
-import json from 'highlight.js/lib/languages/json'
-import css from 'highlight.js/lib/languages/css'
-import xml from 'highlight.js/lib/languages/xml'      // HTML
-import sql from 'highlight.js/lib/languages/sql'
-import markdown from 'highlight.js/lib/languages/markdown'
-import yaml from 'highlight.js/lib/languages/yaml'
-import java from 'highlight.js/lib/languages/java'
-import cpp from 'highlight.js/lib/languages/cpp'
-import rust from 'highlight.js/lib/languages/rust'
-import go from 'highlight.js/lib/languages/go'
-import typescript from 'highlight.js/lib/languages/typescript'
+const runtime = await Promise.all([
+  import('dompurify'),
+  import('marked'),
+])
 
-hljs.registerLanguage('javascript', javascript)
-hljs.registerLanguage('js', javascript)
-hljs.registerLanguage('python', python)
-hljs.registerLanguage('py', python)
-hljs.registerLanguage('bash', bash)
-hljs.registerLanguage('sh', bash)
-hljs.registerLanguage('json', json)
-hljs.registerLanguage('css', css)
-hljs.registerLanguage('html', xml)
-hljs.registerLanguage('xml', xml)
-hljs.registerLanguage('sql', sql)
-hljs.registerLanguage('markdown', markdown)
-hljs.registerLanguage('md', markdown)
-hljs.registerLanguage('yaml', yaml)
-hljs.registerLanguage('yml', yaml)
-hljs.registerLanguage('java', java)
-hljs.registerLanguage('cpp', cpp)
-hljs.registerLanguage('c++', cpp)
-hljs.registerLanguage('rust', rust)
-hljs.registerLanguage('go', go)
-hljs.registerLanguage('typescript', typescript)
-hljs.registerLanguage('ts', typescript)
-
-// ============================================================
-// Configure marked with highlight.js
-// ============================================================
-const renderer = new marked.Renderer()
-
-renderer.code = function ({ text, lang }) {
-  // Attempt to highlight
-  const language = hljs.getLanguage(lang || '') ? lang : 'plaintext'
-  try {
-    const highlighted = hljs.highlight(text, { language }).value
-    return `<pre><code class="hljs language-${language}">${highlighted}</code></pre>`
-  } catch {
-    // Fallback: escape HTML and wrap anyway
-    const escaped = text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-    return `<pre><code class="hljs">${escaped}</code></pre>`
-  }
-}
+const DOMPurify = runtime[0].default
+const marked = runtime[1].marked ?? runtime[1].default ?? runtime[1]
 
 marked.setOptions({
   breaks: true,
   gfm: true,
-  renderer,
 })
 
 // ============================================================
@@ -97,7 +40,10 @@ marked.setOptions({
  */
 export function renderMarkdown(md) {
   if (!md) return ''
-  return marked.parse(md)
+  const html = marked.parse(md)
+  return DOMPurify.sanitize(html, {
+    USE_PROFILES: { html: true },
+  })
 }
 
 // ============================================================

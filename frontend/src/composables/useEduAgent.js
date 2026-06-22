@@ -1,11 +1,23 @@
-import { computed, reactive, ref } from "vue";
+import { computed, ref } from "vue";
 import {
-  askTutor, enrollCourse, fetchCourses, fetchKnowledgeGraph, fetchMyProfile,
-  fetchProbe, fetchState, fetchUserCourses, getCaptcha, initLearningPath,
-  login, refreshToken, register, runPipelineStep, submitProbeAnswer, switchCourse,
+  askTutor,
+  enrollCourse,
+  fetchCourses,
+  fetchKnowledgeGraph,
+  fetchMyProfile,
+  fetchProbe,
+  fetchState,
+  fetchUserCourses,
+  getCaptcha,
+  initLearningPath,
+  login,
+  refreshToken,
+  register,
+  runPipelineStep,
+  submitProbeAnswer,
+  switchCourse,
 } from "../services/eduAgentApi";
 
-// ── 卡片类型 & 角色标签 (全中文) ──
 const CARD_CN = {
   concept_map: "概念导图",
   code_snippet: "代码示例",
@@ -22,22 +34,16 @@ const AGENT_CN = {
   diagnostic_quiz: "评估智能体",
 };
 
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-// ── 导出入口 ──
 export function useEduAgent() {
-  // --- 认证状态 ---
   const isLoggedIn = ref(false);
   const currentUser = ref(null);
   const userId = computed(() => currentUser.value?.user_id ?? "demo_user");
 
-  // --- 课程状态 ---
   const activeCourse = ref(null);
   const availableCourses = ref([]);
   const enrolledCourses = ref([]);
 
-  // --- 工作台状态 ---
-  const bootMode = ref("loading"); // loading | login | course_selection | probe | ready
+  const bootMode = ref("loading");
   const isBusy = ref(false);
   const isSubmittingProbe = ref(false);
   const isLoadingNode = ref(false);
@@ -60,62 +66,96 @@ export function useEduAgent() {
     { key: "path", kind: "path", label: "路径规划", phase: "未启动", progress: 0, active: false },
   ]);
 
-  // --- 计算属性 ---
   const currentCards = computed(() => resources.value[currentNode.value] ?? []);
   const currentNodeTitle = computed(() => nodeTitles.value[currentNode.value] || currentNode.value || "未选择");
-  const masteredCount = computed(() => Object.values(mastery.value).filter(v => (v ?? 0) >= 0.65).length);
-  const overallProgress = computed(() => activePath.value.length ? Math.round((masteredCount.value / activePath.value.length) * 100) : 0);
+  const masteredCount = computed(() => Object.values(mastery.value).filter((value) => (value ?? 0) >= 0.65).length);
+  const overallProgress = computed(() => (
+    activePath.value.length ? Math.round((masteredCount.value / activePath.value.length) * 100) : 0
+  ));
   const currentPathNodes = computed(() =>
-    activePath.value.map((id, i) => ({
-      id, order: i + 1,
+    activePath.value.map((id, index) => ({
+      id,
+      order: index + 1,
       title: nodeTitles.value[id] || id,
       mastery: mastery.value[id] ?? 0,
-    }))
+    })),
   );
+  const courseId = computed(() => activeCourse.value?.course_id || "data_structures");
 
-  // --- 工具 ---
-  function setInfo(msg) {
-    infoMessage.value = msg;
-    clearTimeout(setInfo._t);
-    setInfo._t = setTimeout(() => infoMessage.value = "", 3000);
+  function setInfo(message) {
+    infoMessage.value = message;
+    clearTimeout(setInfo._timer);
+    setInfo._timer = setTimeout(() => {
+      infoMessage.value = "";
+    }, 3000);
   }
 
   function hydrateState(state) {
-    if (!state) return;
+    if (!state) {
+      return;
+    }
+
     activePath.value = state.active_path ?? [];
     mastery.value = state.dynamic_profile?.knowledge_mastery ?? {};
     capabilityRadar.value = state.dynamic_profile?.capability_radar ?? capabilityRadar.value;
     diagnosticReport.value = state.dynamic_profile?.diagnostic_report_md ?? "";
     resources.value = state.generated_resources ?? {};
+
     if (!currentNode.value) {
-      const first = activePath.value.find(id => (mastery.value[id] ?? 0) < 0.65);
-      currentNode.value = state.current_node_id || first || activePath.value[0] || "";
+      const firstPending = activePath.value.find((id) => (mastery.value[id] ?? 0) < 0.65);
+      currentNode.value = state.current_node_id || firstPending || activePath.value[0] || "";
     }
   }
 
   function refreshStatuses() {
     agentStatuses.value = [
-      { key: "doc", kind: "doc", label: "文档智能体", phase: currentCards.value.length ? "资源就绪" : "待命", progress: currentCards.value.length ? 100 : 0, active: true },
-      { key: "quiz", kind: "quiz", label: "评估智能体", phase: currentCards.value.some(c => c.card_type === "diagnostic_quiz") ? "测验可用" : "等待中", progress: 50, active: true },
-      { key: "path", kind: "path", label: "路径规划", phase: activePath.value.length ? `${activePath.value.length} 个节点` : "生成中", progress: activePath.value.length ? 100 : 10, active: true },
+      {
+        key: "doc",
+        kind: "doc",
+        label: "文档智能体",
+        phase: currentCards.value.length ? "资源就绪" : "待命",
+        progress: currentCards.value.length ? 100 : 0,
+        active: true,
+      },
+      {
+        key: "quiz",
+        kind: "quiz",
+        label: "评估智能体",
+        phase: currentCards.value.some((card) => card.card_type === "diagnostic_quiz") ? "测验可用" : "等待中",
+        progress: 50,
+        active: true,
+      },
+      {
+        key: "path",
+        kind: "path",
+        label: "路径规划",
+        phase: activePath.value.length ? `${activePath.value.length} 个节点` : "生成中",
+        progress: activePath.value.length ? 100 : 10,
+        active: true,
+      },
     ];
   }
 
-  // --- 知识图谱加载 ---
   async function loadKnowledgeGraph() {
     try {
       const kg = await fetchKnowledgeGraph(courseId.value);
       knowledgeGraph.value = kg;
       const titles = {};
-      (kg.nodes || []).forEach(n => { titles[n.id] = n.title; });
+      (kg.nodes || []).forEach((node) => {
+        titles[node.id] = node.title;
+      });
       nodeTitles.value = titles;
-    } catch { setInfo("知识图谱加载失败，使用本地缓存"); }
+    } catch {
+      setInfo("知识图谱加载失败，已回退到本地缓存。");
+    }
   }
 
-  // --- 认证 ---
   async function tryAutoLogin() {
     const token = window.localStorage.getItem("access_token");
-    if (!token) return false;
+    if (!token) {
+      return false;
+    }
+
     try {
       const user = await fetchMyProfile();
       currentUser.value = user;
@@ -138,8 +178,10 @@ export function useEduAgent() {
 
   async function handleLogin(userIdInput, password, captchaToken, captchaAnswer) {
     const result = await login({
-      user_id: userIdInput, password,
-      captcha_token: captchaToken, captcha_answer: captchaAnswer,
+      user_id: userIdInput,
+      password,
+      captcha_token: captchaToken,
+      captcha_answer: captchaAnswer,
     });
     currentUser.value = result.user;
     isLoggedIn.value = true;
@@ -148,8 +190,11 @@ export function useEduAgent() {
 
   async function handleRegister(userIdInput, email, password, captchaToken, captchaAnswer) {
     const result = await register({
-      user_id: userIdInput, email, password,
-      captcha_token: captchaToken, captcha_answer: captchaAnswer,
+      user_id: userIdInput,
+      email,
+      password,
+      captcha_token: captchaToken,
+      captcha_answer: captchaAnswer,
     });
     currentUser.value = result.user;
     isLoggedIn.value = true;
@@ -165,43 +210,48 @@ export function useEduAgent() {
     messages.value = [];
   }
 
-  // --- 冷启动 ---
   async function submitProbe(values) {
     isSubmittingProbe.value = true;
     try {
       const answer = Array.isArray(values) && values.length === 1 ? values[0] : values;
-      const resp = await submitProbeAnswer(userId.value, answer, courseId.value);
-      if (resp.phase === "complete") {
+      const response = await submitProbeAnswer(userId.value, answer, courseId.value);
+
+      if (response.phase === "complete") {
         probe.value = null;
         probeCollected.value = probeTotal.value;
         await initPathAndEnter();
         return;
       }
-      probeCollected.value = resp.collected ?? probeCollected.value;
+
+      probeCollected.value = response.collected ?? probeCollected.value;
       const next = await fetchProbe(userId.value, courseId.value);
       probe.value = next.probe;
       probeCollected.value = next.collected ?? probeCollected.value;
-    } catch { setInfo("提交失败，请重试"); }
-    finally { isSubmittingProbe.value = false; }
+    } catch {
+      setInfo("提交测评失败，请重试。");
+    } finally {
+      isSubmittingProbe.value = false;
+    }
   }
 
   async function initPathAndEnter() {
     await initLearningPath(userId.value, courseId.value);
     const state = await fetchState(userId.value, courseId.value);
     hydrateState(state);
-    currentNode.value = activePath.value.find(id => (mastery.value[id] ?? 0) < 0.65) || activePath.value[0] || "";
+    currentNode.value = activePath.value.find((id) => (mastery.value[id] ?? 0) < 0.65) || activePath.value[0] || "";
     bootMode.value = "ready";
     refreshStatuses();
-    if (currentNode.value) await loadNode(currentNode.value, true);
+    if (currentNode.value) {
+      await loadNode(currentNode.value, true);
+    }
   }
-
-  // --- 课程辅助 ---
-  const courseId = computed(() => activeCourse.value?.course_id || "data_structures");
 
   async function loadAvailableCourses(search) {
     try {
       availableCourses.value = await fetchCourses(search);
-    } catch { /* ignore */ }
+    } catch {
+      return null;
+    }
   }
 
   async function loadUserCourses() {
@@ -209,148 +259,188 @@ export function useEduAgent() {
       const result = await fetchUserCourses(userId.value);
       enrolledCourses.value = result.courses || [];
       if (result.active_course) {
-        activeCourse.value = result.courses.find(c => c.course_id === result.active_course) || null;
+        activeCourse.value = result.courses.find((course) => course.course_id === result.active_course) || null;
       }
       return result;
-    } catch { return { courses: [], active_course: "" }; }
+    } catch {
+      return { courses: [], active_course: "" };
+    }
   }
 
-  // --- 主启动流程 ---
   async function bootstrap() {
     bootMode.value = "loading";
     isBusy.value = true;
     try {
       await loadKnowledgeGraph();
       await loadAvailableCourses();
-      const loggedIn = await tryAutoLogin();
-      if (!loggedIn) { bootMode.value = "login"; isBusy.value = false; return; }
 
-      // 检查用户是否有已注册课程
+      const loggedIn = await tryAutoLogin();
+      if (!loggedIn) {
+        bootMode.value = "login";
+        isBusy.value = false;
+        return;
+      }
+
       const enrollment = await loadUserCourses();
       if (!enrollment.active_course || !enrollment.courses.length) {
-        // 没有课程 → 显示选课页面
         bootMode.value = "course_selection";
         isBusy.value = false;
         return;
       }
 
-      // 有活跃课程 → 加载该课程的学习状态
       const state = await fetchState(userId.value, courseId.value);
       hydrateState(state);
+
       if (activePath.value.length) {
         bootMode.value = "ready";
         refreshStatuses();
-        if (currentNode.value) await loadNode(currentNode.value, true);
+        if (currentNode.value) {
+          await loadNode(currentNode.value, true);
+        }
       } else {
-        const ps = await fetchProbe(userId.value, courseId.value);
-        if (ps.phase === "complete") {
+        const probeState = await fetchProbe(userId.value, courseId.value);
+        if (probeState.phase === "complete") {
           await initPathAndEnter();
         } else {
-          probe.value = ps.probe;
-          probeCollected.value = ps.collected ?? 0;
+          probe.value = probeState.probe;
+          probeCollected.value = probeState.collected ?? 0;
           bootMode.value = "probe";
         }
       }
     } catch {
-      setInfo("初始化失败，请检查后端服务");
+      setInfo("初始化失败，请检查后端服务。");
       bootMode.value = "login";
-    } finally { isBusy.value = false; }
+    } finally {
+      isBusy.value = false;
+    }
   }
 
-  // --- 选课与切换 ---
   async function handleEnrollCourse(courseIdInput) {
     isBusy.value = true;
     try {
       const result = await enrollCourse(userId.value, courseIdInput);
       activeCourse.value = result.course;
-      // 加入已选列表
       await loadUserCourses();
-      // 开始冷启动测评
-      const ps = await fetchProbe(userId.value, courseId.value);
-      if (ps.phase === "complete") {
+
+      const probeState = await fetchProbe(userId.value, courseId.value);
+      if (probeState.phase === "complete") {
         await initPathAndEnter();
       } else {
-        probe.value = ps.probe;
-        probeCollected.value = ps.collected ?? 0;
+        probe.value = probeState.probe;
+        probeCollected.value = probeState.collected ?? 0;
         bootMode.value = "probe";
       }
-    } catch (e) {
-      setInfo("选课失败：" + (e?.response?.data?.detail || "请重试"));
-    } finally { isBusy.value = false; }
+    } catch (error) {
+      setInfo(`选课失败：${error?.response?.data?.detail || "请稍后重试"}`);
+    } finally {
+      isBusy.value = false;
+    }
   }
 
   async function handleSwitchCourse(courseIdInput) {
-    if (courseIdInput === activeCourse.value?.course_id) return;
+    if (courseIdInput === activeCourse.value?.course_id) {
+      return;
+    }
+
     isBusy.value = true;
     try {
       await switchCourse(userId.value, courseIdInput);
       await loadUserCourses();
-      // 重置工作台状态
+
       currentNode.value = "";
       activePath.value = [];
       mastery.value = {};
       resources.value = {};
       messages.value = [];
       probe.value = null;
-      // 加载新课程状态
+
       const state = await fetchState(userId.value, courseId.value);
       hydrateState(state);
       if (activePath.value.length) {
         bootMode.value = "ready";
         refreshStatuses();
-        if (currentNode.value) await loadNode(currentNode.value, true);
+        if (currentNode.value) {
+          await loadNode(currentNode.value, true);
+        }
       } else {
-        const ps = await fetchProbe(userId.value, courseId.value);
-        if (ps.phase === "complete") {
+        const probeState = await fetchProbe(userId.value, courseId.value);
+        if (probeState.phase === "complete") {
           await initPathAndEnter();
         } else {
-          probe.value = ps.probe;
-          probeCollected.value = ps.collected ?? 0;
+          probe.value = probeState.probe;
+          probeCollected.value = probeState.collected ?? 0;
           bootMode.value = "probe";
         }
       }
-    } catch (e) {
-      setInfo("切换课程失败：" + (e?.response?.data?.detail || "请重试"));
-    } finally { isBusy.value = false; }
+    } catch (error) {
+      setInfo(`切换课程失败：${error?.response?.data?.detail || "请稍后重试"}`);
+    } finally {
+      isBusy.value = false;
+    }
   }
 
-  // --- 节点资源加载 ---
   async function loadNode(nodeId, silent = false) {
-    if (!nodeId) return;
+    if (!nodeId) {
+      return;
+    }
+
     currentNode.value = nodeId;
-    if (resources.value[nodeId]?.length) { refreshStatuses(); return; }
+    if (resources.value[nodeId]?.length) {
+      refreshStatuses();
+      return;
+    }
+
     isLoadingNode.value = true;
-    if (!silent) setInfo(`正在为「${nodeTitles.value[nodeId] || nodeId}」生成学习资源...`);
+    if (!silent) {
+      setInfo(`正在为「${nodeTitles.value[nodeId] || nodeId}」生成学习资源...`);
+    }
+
     try {
       await runPipelineStep({
-        user_id: userId.value, course_id: courseId.value, current_node_id: nodeId,
-        correctness: 0.7, time_spent_ratio: 1.0, code_pass_rate: 0.7,
+        user_id: userId.value,
+        course_id: courseId.value,
+        current_node_id: nodeId,
+        correctness: 0.7,
+        time_spent_ratio: 1.0,
+        code_pass_rate: 0.7,
       });
       const state = await fetchState(userId.value, courseId.value);
       hydrateState(state);
       currentNode.value = nodeId;
-    } catch { setInfo("资源生成失败"); }
-    finally { isLoadingNode.value = false; refreshStatuses(); }
+    } catch {
+      setInfo("资源生成失败。");
+    } finally {
+      isLoadingNode.value = false;
+      refreshStatuses();
+    }
   }
 
-  // --- 测验提交 ---
   async function submitQuiz(score) {
     isLoadingNode.value = true;
     try {
       await runPipelineStep({
-        user_id: userId.value, course_id: courseId.value, correctness: score,
-        time_spent_ratio: 1.0, code_pass_rate: score,
+        user_id: userId.value,
+        course_id: courseId.value,
+        correctness: score,
+        time_spent_ratio: 1.0,
+        code_pass_rate: score,
       });
       const state = await fetchState(userId.value, courseId.value);
       hydrateState(state);
       currentNode.value = activePath.value.includes(currentNode.value) ? currentNode.value : (activePath.value[0] || "");
-    } catch { setInfo("提交失败"); }
-    finally { isLoadingNode.value = false; refreshStatuses(); }
+    } catch {
+      setInfo("提交诊断失败。");
+    } finally {
+      isLoadingNode.value = false;
+      refreshStatuses();
+    }
   }
 
-  // --- 辅导对话 ---
   async function sendTutorMessage(query) {
-    if (!query.trim()) return;
+    if (!query.trim()) {
+      return;
+    }
+
     const userMsg = { id: `u-${Date.now()}`, role: "user", content: query.trim() };
     const assistantMsg = {
       id: `a-${Date.now()}`,
@@ -360,37 +450,105 @@ export function useEduAgent() {
       isStreaming: true,
     };
     messages.value = [...messages.value, userMsg, assistantMsg];
+
     try {
       const data = await askTutor({ user_id: userId.value, query: query.trim() });
-      const r = data.tutor_response ?? {};
-      assistantMsg.content = r.text_explanation || "当前暂无可用回答，请稍后再试。";
-      assistantMsg.mermaidSource = r.mermaid_src || "";
-    } catch { assistantMsg.content = "辅导服务暂时不可用。"; }
-    finally { assistantMsg.isStreaming = false; }
+      const response = data.tutor_response ?? {};
+      assistantMsg.content = response.text_explanation || "当前暂无可用回答，请稍后再试。";
+      assistantMsg.mermaidSource = response.mermaid_src || "";
+    } catch {
+      assistantMsg.content = "辅导服务暂时不可用。";
+    } finally {
+      assistantMsg.isStreaming = false;
+    }
   }
 
-  // --- 工具导出 ---
-  function getCardLabel(type) { return CARD_CN[type] || type; }
-  function getAgentLabel(type) { return AGENT_CN[type] || "文档智能体"; }
+  function getCardLabel(type) {
+    return CARD_CN[type] || type;
+  }
+
+  function getAgentLabel(type) {
+    return AGENT_CN[type] || "文档智能体";
+  }
+
   function parseQuiz(content = "") {
-    const lines = content.split(/[\n。；;]/).map(s => s.trim()).filter(s => s.length > 12);
+    const lines = content
+      .split(/[\n。；;]/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 12);
+
     return [
-      { id: "q1", prompt: "根据当前资源，选择最贴合核心概念的一项。", options: [lines[0] || "继续阅读后作答", "与时间复杂度无关", "仅适用于图算法", "以上都不对"], answer: 0 },
-      { id: "q2", prompt: "以下哪项描述与资源内容一致？", options: [lines[1] || lines[0] || "继续阅读", "二分查找总是最优", "所有算法都是 O(1)", "以上都不对"], answer: 0 },
+      {
+        id: "q1",
+        prompt: "根据当前资源，选择最贴合核心概念的一项。",
+        options: [
+          lines[0] || "继续阅读后作答",
+          "与时间复杂度无关",
+          "仅适用于图算法",
+          "以上都不对",
+        ],
+        answer: 0,
+      },
+      {
+        id: "q2",
+        prompt: "以下哪项描述与资源内容一致？",
+        options: [
+          lines[1] || lines[0] || "继续阅读",
+          "二分查找总是最优",
+          "所有算法都是 O(1)",
+          "以上都不对",
+        ],
+        answer: 0,
+      },
     ];
   }
 
   return {
-    isLoggedIn, currentUser, userId,
-    bootMode, isBusy, isSubmittingProbe, isLoadingNode,
-    currentNode, activePath, mastery, capabilityRadar, diagnosticReport,
-    knowledgeGraph, nodeTitles, probe, probeCollected, probeTotal,
-    resources, currentCards, currentNodeTitle, currentPathNodes,
-    messages, infoMessage, agentStatuses, overallProgress, masteredCount,
-    activeCourse, availableCourses, enrolledCourses, courseId,
-    handleLogin, handleRegister, handleLogout, getCaptcha,
-    bootstrap, submitProbe, loadNode, submitQuiz, sendTutorMessage,
-    getCardLabel, getAgentLabel, parseQuiz, refreshStatuses,
-    loadAvailableCourses, handleEnrollCourse, handleSwitchCourse,
+    isLoggedIn,
+    currentUser,
+    userId,
+    bootMode,
+    isBusy,
+    isSubmittingProbe,
+    isLoadingNode,
+    currentNode,
+    activePath,
+    mastery,
+    capabilityRadar,
+    diagnosticReport,
+    knowledgeGraph,
+    nodeTitles,
+    probe,
+    probeCollected,
+    probeTotal,
+    resources,
+    currentCards,
+    currentNodeTitle,
+    currentPathNodes,
+    messages,
+    infoMessage,
+    agentStatuses,
+    overallProgress,
+    masteredCount,
+    activeCourse,
+    availableCourses,
+    enrolledCourses,
+    courseId,
+    handleLogin,
+    handleRegister,
+    handleLogout,
+    getCaptcha,
+    bootstrap,
+    submitProbe,
+    loadNode,
+    submitQuiz,
+    sendTutorMessage,
+    getCardLabel,
+    getAgentLabel,
+    parseQuiz,
+    refreshStatuses,
+    loadAvailableCourses,
+    handleEnrollCourse,
+    handleSwitchCourse,
   };
 }

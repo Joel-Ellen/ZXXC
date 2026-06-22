@@ -1,23 +1,19 @@
 <template>
   <div class="min-h-screen text-text-primary font-sans relative">
-    <!-- Dynamic aurora background -->
     <AuroraBackground :reduce-motion="false" />
 
-    <!-- Landing page -->
     <LandingView
       v-if="showLanding"
       @enter="onEnterApp"
     />
 
-    <!-- App states -->
     <template v-else>
-      <!-- 加载中 -->
       <div
         v-if="bootMode === 'loading'"
-        class="relative z-10 flex items-center justify-center h-screen animate-fadeIn"
+        class="relative z-10 flex h-screen items-center justify-center animate-fadeIn"
       >
         <div class="text-center animate-fadeIn">
-          <div class="relative w-20 h-20 mx-auto mb-6">
+          <div class="relative mx-auto mb-6 h-20 w-20">
             <div class="absolute inset-0 rounded-full border-2 border-primary/15 animate-spin-slow" />
             <div class="absolute inset-1 rounded-full border-2 border-t-secondary border-r-transparent border-b-transparent border-l-transparent animate-spin" style="animation-duration: 1.1s;" />
             <div class="absolute inset-2 rounded-full border-2 border-b-tertiary border-t-transparent border-r-transparent border-l-transparent animate-spin" style="animation-duration: 1.6s; animation-direction: reverse;" />
@@ -25,12 +21,11 @@
               <span class="text-xl font-black gradient-text">EA</span>
             </div>
           </div>
-          <p class="text-sm font-medium text-text-secondary tracking-wide">正在初始化学习工作台...</p>
+          <p class="text-sm font-medium tracking-wide text-text-secondary">正在初始化学习工作台...</p>
           <p class="mt-2 text-xs text-text-muted">多智能体协作编排中</p>
         </div>
       </div>
 
-      <!-- 登录 / 注册 -->
       <AuthView
         v-else-if="bootMode === 'login'"
         @login="onLogin"
@@ -38,7 +33,6 @@
         @go-home="goHome"
       />
 
-      <!-- 课程选择 -->
       <CourseSelectionView
         v-else-if="bootMode === 'course_selection'"
         :courses="availableCourses"
@@ -48,7 +42,6 @@
         @go-home="goHome"
       />
 
-      <!-- 主工作台 (探针 + 就绪) -->
       <PremiumWorkspace
         v-else-if="bootMode === 'probe' || bootMode === 'ready'"
         :boot-mode="bootMode"
@@ -76,7 +69,7 @@
         :enrolled-courses="workspaceEnrolledCourses"
         @select-node="loadNode"
         @submit-quiz="submitQuiz"
-        @send-tutor="sendTutorMessage"
+        @send-tutor="onSendTutorMessage"
         @submit-probe="submitProbe"
         @logout="handleLogout"
         @go-home="goHome"
@@ -87,20 +80,21 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, defineAsyncComponent, onMounted, ref } from "vue";
 import AuroraBackground from "./components/AuroraBackground.vue";
-import AuthView from "./components/AuthView.vue";
-import CourseSelectionView from "./components/CourseSelectionView.vue";
-import LandingView from "./components/LandingView.vue";
-import PremiumWorkspace from "./components/PremiumWorkspace.vue";
 import { useEduAgent } from "./composables/useEduAgent";
 import { useTheme } from "./composables/useTheme.js";
 
-// Initialize theme system
+const LandingView = defineAsyncComponent(() => import("./components/LandingView.vue"));
+const AuthView = defineAsyncComponent(() => import("./components/AuthView.vue"));
+const CourseSelectionView = defineAsyncComponent(() => import("./components/CourseSelectionView.vue"));
+const PremiumWorkspace = defineAsyncComponent(() => import("./components/PremiumWorkspace.vue"));
+
 useTheme();
 
-const showLanding = ref(true);
-const workspacePreview = ref(false);
+const initialPreviewWorkspace = detectPreviewWorkspace();
+const showLanding = ref(!initialPreviewWorkspace);
+const workspacePreview = ref(initialPreviewWorkspace);
 
 const previewCourse = {
   course_id: "data_structures",
@@ -121,17 +115,40 @@ const previewCards = [
   {
     resource_id: "preview-concept",
     card_type: "concept_map",
-    content: "## 学习目标\n栈与队列是受限线性表，重点掌握操作约束、复杂度边界以及典型应用场景。\n\n- 栈：后进先出，适合递归模拟、括号匹配、单调结构。\n- 队列：先进先出，适合层序遍历、缓冲调度、广度优先搜索。",
+    content: `## 学习目标
+栈与队列都是受限线性表，重点不是会写 API，而是理解它们对顺序约束的差异。
+
+- 栈：后进先出，适合处理最近未闭合的问题。
+- 队列：先进先出，适合按到达顺序处理任务。
+- 当你需要解释“为什么这样设计”时，优先回到约束本身。`,
   },
   {
     resource_id: "preview-code",
     card_type: "code_snippet",
-    content: "```js\nclass Queue {\n  constructor() {\n    this.items = [];\n    this.head = 0;\n  }\n\n  enqueue(value) {\n    this.items.push(value);\n  }\n\n  dequeue() {\n    return this.head < this.items.length ? this.items[this.head++] : undefined;\n  }\n}\n```",
+    content: `\`\`\`js
+class Queue {
+  constructor() {
+    this.items = [];
+    this.head = 0;
+  }
+
+  enqueue(value) {
+    this.items.push(value);
+  }
+
+  dequeue() {
+    return this.head < this.items.length ? this.items[this.head++] : undefined;
+  }
+}
+\`\`\``,
   },
   {
     resource_id: "preview-exercise",
     card_type: "interactive_exercise",
-    content: "## 互动练习\n给定一个只包含 `(`、`)`、`[`、`]` 的字符串，判断括号是否有效。先写出栈状态变化，再提交代码。",
+    content: `## 互动练习
+给定一个只包含 \`(\`、\`)\`、\`[\`、\`]\` 的字符串，判断括号是否有效。
+
+先写出栈状态如何变化，再补完整体代码。`,
   },
   {
     resource_id: "preview-quiz",
@@ -140,11 +157,11 @@ const previewCards = [
   },
 ];
 
-const previewMessages = [
+const previewMessages = ref([
   {
     id: "preview-a1",
     role: "assistant",
-    content: "你现在处在“栈与队列”节点。建议先完成概念目标，再看代码示例，最后提交诊断测验。",
+    content: "你现在位于“栈与队列”节点。建议先完成概念目标，再看代码示例，最后提交诊断测验。",
   },
   {
     id: "preview-u1",
@@ -154,9 +171,9 @@ const previewMessages = [
   {
     id: "preview-a2",
     role: "assistant",
-    content: "因为每个右括号都需要匹配最近出现且尚未闭合的左括号，这正好符合后进先出的结构约束。",
+    content: "因为每个右括号都需要匹配最近出现且尚未闭合的左括号，这正好符合后进先出的约束。",
   },
-];
+]);
 
 const previewStatuses = [
   { key: "doc", kind: "doc", label: "文档智能体", phase: "资源就绪", progress: 100, active: true },
@@ -165,16 +182,40 @@ const previewStatuses = [
 ];
 
 const {
-  bootMode, isSubmittingProbe, isBusy, isLoadingNode,
-  currentNode, currentUser, capabilityRadar, diagnosticReport,
-  currentCards, currentNodeTitle, currentPathNodes,
-  messages, infoMessage, agentStatuses, probe, probeCollected, probeTotal,
-  overallProgress, masteredCount,
-  activeCourse, availableCourses, enrolledCourses,
-  handleLogin, handleRegister, handleLogout,
-  bootstrap, submitProbe, loadNode, submitQuiz, sendTutorMessage,
-  getCardLabel, getAgentLabel, parseQuiz,
-  handleEnrollCourse, handleSwitchCourse,
+  bootMode,
+  isSubmittingProbe,
+  isBusy,
+  isLoadingNode,
+  currentNode,
+  currentUser,
+  capabilityRadar,
+  currentCards,
+  currentNodeTitle,
+  currentPathNodes,
+  messages,
+  infoMessage,
+  agentStatuses,
+  probe,
+  probeCollected,
+  probeTotal,
+  overallProgress,
+  masteredCount,
+  activeCourse,
+  availableCourses,
+  enrolledCourses,
+  handleLogin,
+  handleRegister,
+  handleLogout,
+  bootstrap,
+  submitProbe,
+  loadNode,
+  submitQuiz,
+  sendTutorMessage,
+  getCardLabel,
+  getAgentLabel,
+  parseQuiz,
+  handleEnrollCourse,
+  handleSwitchCourse,
 } = useEduAgent();
 
 const workspaceUser = computed(() =>
@@ -184,12 +225,16 @@ const workspaceCurrentNode = computed(() => (workspacePreview.value ? "stack-que
 const workspaceCards = computed(() => (workspacePreview.value ? previewCards : currentCards.value));
 const workspacePathNodes = computed(() => (workspacePreview.value ? previewPathNodes : currentPathNodes.value));
 const workspaceNodeTitle = computed(() => (workspacePreview.value ? "栈与队列" : currentNodeTitle.value));
-const workspaceMessages = computed(() => (workspacePreview.value ? previewMessages : messages.value));
+const workspaceMessages = computed(() => (workspacePreview.value ? previewMessages.value : messages.value));
 const workspaceCapabilityRadar = computed(() => (workspacePreview.value ? [0.78, 0.64, 0.71, 0.52, 0.68] : capabilityRadar.value));
 const workspaceOverallProgress = computed(() => (workspacePreview.value ? 40 : overallProgress.value));
 const workspaceMasteredCount = computed(() => (workspacePreview.value ? 2 : masteredCount.value));
 const workspaceStatuses = computed(() => (workspacePreview.value ? previewStatuses : agentStatuses.value));
-const workspaceInfoMessage = computed(() => (workspacePreview.value ? "当前为工作台预览模式，交互数据不会写入学习进度。" : infoMessage.value));
+const workspaceInfoMessage = computed(() => (
+  workspacePreview.value
+    ? "当前为工作台预览模式，交互数据不会写入学习进度。"
+    : infoMessage.value
+));
 const workspaceActiveCourse = computed(() => (workspacePreview.value ? previewCourse : activeCourse.value));
 const workspaceEnrolledCourses = computed(() => (workspacePreview.value ? [previewCourse] : enrolledCourses.value));
 
@@ -217,23 +262,88 @@ function onCourseSelect(courseId) {
   handleEnrollCourse(courseId);
 }
 
+async function onSendTutorMessage(query) {
+  if (workspacePreview.value) {
+    await sendPreviewTutorMessage(query);
+    return;
+  }
+
+  await sendTutorMessage(query);
+}
+
 function onSwitchCourse(courseId) {
   handleSwitchCourse(courseId);
 }
 
 onMounted(() => {
-  const params = new URLSearchParams(window.location.search);
-  if (params.get("previewWorkspace") === "1") {
+  if (workspacePreview.value) {
     workspacePreview.value = true;
     showLanding.value = false;
     bootMode.value = "ready";
     return;
   }
 
-  // Check URL hash for direct app access
   if (window.location.hash === "#app") {
     showLanding.value = false;
     bootstrap();
   }
 });
+
+function detectPreviewWorkspace() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  return params.get("previewWorkspace") === "1";
+}
+
+async function sendPreviewTutorMessage(query) {
+  const normalizedQuery = query.trim();
+  if (!normalizedQuery) {
+    return;
+  }
+
+  const timestamp = Date.now();
+  const userMsg = {
+    id: `preview-u-${timestamp}`,
+    role: "user",
+    content: normalizedQuery,
+  };
+  const assistantMsg = {
+    id: `preview-a-${timestamp}`,
+    role: "assistant",
+    content: "",
+    mermaidSource: "",
+    isStreaming: true,
+  };
+
+  previewMessages.value = [...previewMessages.value, userMsg, assistantMsg];
+  await new Promise((resolve) => window.setTimeout(resolve, 420));
+  previewMessages.value = previewMessages.value.map((message) => (
+    message.id === assistantMsg.id
+      ? {
+          ...message,
+          content: buildPreviewTutorReply(normalizedQuery),
+          isStreaming: false,
+        }
+      : message
+  ));
+}
+
+function buildPreviewTutorReply(query) {
+  if (/[括号栈]/.test(query)) {
+    return "可以先把问题还原成顺序约束：每个右括号都要匹配最近一个尚未闭合的左括号，所以先检查最近入栈的元素是否正确，这正是后进先出的典型场景。";
+  }
+
+  if (/队列|调度|任务/.test(query)) {
+    return "如果题目强调按到达顺序处理任务、请求或事件，优先考虑队列。判断关键不在名字，而在系统是否要求先到先处理。";
+  }
+
+  if (/区别|比较|对比/.test(query)) {
+    return "比较栈和队列时，最稳的表达方式是先说顺序约束，再说典型场景：栈处理最近未完成状态，队列处理按到达顺序排队的任务。";
+  }
+
+  return "预览模式下，这里会用本地演示回答来模拟辅导链路。围绕“顺序约束、典型场景、为什么这样设计”三个角度提问，会最接近真实学习过程。";
+}
 </script>

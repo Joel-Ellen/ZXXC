@@ -1,11 +1,13 @@
 <template>
   <div class="aurora-scroll flex items-center gap-2 overflow-x-auto" aria-live="polite">
-    <transition-group name="status-pill" tag="div" class="flex items-center gap-2">
+    <transition-group name="status-pill" tag="div" class="flex items-center gap-2" role="list" aria-label="工作台状态摘要">
       <span
         v-for="status in statuses"
         :key="status.key"
         class="inline-flex items-center gap-2 rounded-full border-[0.5px] bg-card px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.10em] backdrop-blur-sm transition-all duration-200"
         :class="statusClass(status)"
+        :aria-label="statusA11yLabel(status)"
+        role="listitem"
       >
         <span
           class="h-1.5 w-1.5 rounded-full"
@@ -104,6 +106,14 @@ function statusClass(status) {
     return BORDER_CLASSES[phaseColor];
   }
   return "border-subtle text-text-muted";
+}
+
+function statusA11yLabel(status) {
+  const segments = [status.label, status.phase];
+  if (status.progress > 0) {
+    segments.push(`${status.progress}%`);
+  }
+  return segments.filter(Boolean).join("，");
 }
 </script>
 

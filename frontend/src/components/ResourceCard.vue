@@ -6,7 +6,18 @@
         ? 'border border-subtle bg-card opacity-80'
         : `${colorClasses.border} ${colorClasses.hoverBorder} bg-card hover:-translate-y-0.5 hover:shadow-card`,
       isActive ? 'shadow-[0_12px_36px_rgba(0,0,0,0.32)] ring-1 ring-white/5' : '',
+      activatable ? 'cursor-pointer' : '',
     ]"
+    :aria-label="activationLabel"
+    :aria-current="isActive ? 'true' : undefined"
+    :aria-expanded="activatable ? String(isExpanded) : undefined"
+    :aria-keyshortcuts="activatable ? 'Enter Space' : undefined"
+    :aria-pressed="activatable ? String(isActive) : undefined"
+    :role="activatable ? 'button' : undefined"
+    :tabindex="activatable ? 0 : undefined"
+    @click="handleActivate"
+    @keydown.enter.prevent="handleActivate"
+    @keydown.space.prevent="handleActivate"
   >
     <div class="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/12 to-transparent" />
 
@@ -33,7 +44,7 @@
             {{ isReady ? "已就绪" : progressText }}
           </div>
           <div class="mt-1 text-[11px] font-semibold text-text-secondary">
-            {{ isReady ? "Ready" : `${progress}%` }}
+            {{ isReady ? "100%" : `${progress}%` }}
           </div>
         </div>
 
@@ -41,7 +52,7 @@
           type="button"
           class="focus-ring rounded-full border border-subtle p-2 text-text-muted transition-all duration-200 hover:border-primary/30 hover:bg-card-hover hover:text-primary active:scale-95"
           aria-label="置顶卡片"
-          @click="$emit('pin')"
+          @click.stop="$emit('pin')"
         >
           <IconPin />
         </button>
@@ -49,7 +60,7 @@
           type="button"
           class="focus-ring rounded-full border border-subtle p-2 text-text-muted transition-all duration-200 hover:border-secondary/30 hover:bg-card-hover hover:text-secondary active:scale-95"
           aria-label="最小化卡片"
-          @click="$emit('minimize')"
+          @click.stop="$emit('minimize')"
         >
           <IconMinimize />
         </button>
@@ -91,7 +102,7 @@
       <p class="text-[11px] text-text-muted">{{ footerLabel }}</p>
       <div class="flex items-center gap-2 text-[11px] text-text-muted">
         <span class="rounded-full border border-subtle bg-space-surface/50 px-2.5 py-1">
-          {{ isActive ? "当前聚焦" : "可加入聚焦" }}
+          {{ isExpanded ? "内容已展开" : isActive ? "当前卡片" : "可设为当前" }}
         </span>
       </div>
     </div>
@@ -106,14 +117,16 @@ import IconPin from "./icons/IconPin.vue";
 const props = defineProps({
   agentName: { type: String, default: "" },
   title: { type: String, default: "" },
-  progressText: { type: String, default: "网格同步" },
+  progressText: { type: String, default: "栅格同步" },
   progress: { type: Number, default: 0 },
   isReady: { type: Boolean, default: false },
   isActive: { type: Boolean, default: false },
+  isExpanded: { type: Boolean, default: false },
+  activatable: { type: Boolean, default: false },
   color: { type: String, default: "primary" },
 });
 
-defineEmits(["pin", "minimize"]);
+const emit = defineEmits(["activate", "pin", "minimize"]);
 
 const COLOR_MAP = {
   primary: {
@@ -170,9 +183,28 @@ const colorClasses = computed(() => {
   };
 });
 
+const activationLabel = computed(() => {
+  if (props.isExpanded) {
+    return "当前卡片内容已展开";
+  }
+
+  if (props.isActive) {
+    return "展开当前卡片内容";
+  }
+
+  return "设为当前卡片并展开内容";
+});
+
 const footerLabel = computed(() => (
   props.isReady
-    ? "支持置顶、聚焦和最小化，便于按你的学习顺序重排内容。"
+    ? "支持置顶、切换与最小化，便于按你的学习顺序重排内容。"
     : "资源仍在装配中，建议暂时停留在当前节点等待生成完成。"
 ));
+function handleActivate() {
+  if (!props.activatable) {
+    return;
+  }
+
+  emit("activate");
+}
 </script>

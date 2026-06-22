@@ -72,15 +72,18 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { agentsAPI } from '../api'
-import mermaid from 'mermaid'
+import { useTheme } from '../composables/useTheme.js'
+import { renderMermaidSvg } from '../utils/mermaidRuntime.js'
 
 const agents = ref([])
 const orchStatus = ref(null)
 const workflowDiagram = ref('')
+const workflowSource = ref('')
 const autoRefresh = ref(true)
 let refreshTimer = null
+const { theme } = useTheme()
 
 const agentDescriptions = [
   { name: 'StudentProfiler', icon: '👤', role: '学生画像构建', description: '通过对话自动构建8维学习画像', dependsOn: [] },
@@ -111,15 +114,38 @@ async function refreshStatus() {
       agents.value = res.data.agents || []
       orchStatus.value = res.data.orchestrator || {}
       if (res.data.workflow_diagram) {
-        const code = res.data.workflow_diagram.replace('```mermaid', '').replace('```', '').trim()
-        try { const { svg } = await mermaid.render('agent-workflow-svg', code); workflowDiagram.value = svg } catch (e) { /* ignore */ }
+        workflowSource.value = res.data.workflow_diagram
+        await renderWorkflowDiagram()
+      } else {
+        workflowSource.value = ''
+        workflowDiagram.value = ''
       }
     }
   } catch (e) { console.error('Failed to refresh agent status:', e) }
 }
 
+async function renderWorkflowDiagram() {
+  if (!workflowSource.value) {
+    workflowDiagram.value = ''
+    return
+  }
+
+  try {
+    workflowDiagram.value = await renderMermaidSvg({
+      source: workflowSource.value,
+      id: 'agent-workflow-svg',
+      isLight: theme.value === 'light',
+    })
+  } catch (e) {
+    workflowDiagram.value = ''
+  }
+}
+
+watch(theme, () => {
+  if (workflowSource.value) renderWorkflowDiagram()
+})
+
 onMounted(() => {
-  mermaid.initialize({ startOnLoad: false, theme: 'default' })
   refreshStatus()
   refreshTimer = setInterval(() => { if (autoRefresh.value) refreshStatus() }, 3000)
 })

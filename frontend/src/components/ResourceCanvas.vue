@@ -1,11 +1,11 @@
-<template>
-  <section class="dot-grid relative flex h-full min-h-0 flex-col px-4 pb-6 pt-5 sm:px-5 lg:px-8">
-    <header class="pb-5">
+﻿<template>
+  <section class="dot-grid relative flex h-full min-h-0 flex-col px-4 pb-5 pt-4 sm:px-5 lg:px-8">
+    <header class="pb-4 lg:pb-5">
       <div class="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_auto] 2xl:items-start">
         <div class="min-w-0">
-          <p class="text-[11px] font-black uppercase tracking-[0.12em] text-text-muted">课程学习区</p>
+          <p class="text-[10px] font-black uppercase tracking-[0.12em] text-text-muted sm:text-[11px]">课程学习区</p>
           <div class="mt-2 flex flex-wrap items-center gap-3">
-            <h2 class="gradient-text truncate text-[26px] font-black tracking-tight lg:text-[28px]">
+            <h2 class="gradient-text truncate text-[22px] font-black tracking-tight sm:text-[24px] lg:text-[28px]">
               {{ nodeTitle || "等待装配" }}
             </h2>
             <span class="rounded-full border border-primary/20 bg-primary-soft px-3 py-1 text-[11px] font-semibold text-primary">
@@ -13,7 +13,7 @@
             </span>
           </div>
 
-          <div class="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <div class="mt-4 hidden gap-2 xl:grid xl:grid-cols-4">
             <div
               v-for="stage in learningStages"
               :key="stage.label"
@@ -22,6 +22,20 @@
             >
               <p class="text-[10px] font-bold uppercase tracking-[0.12em]">{{ stage.label }}</p>
               <p class="mt-1 text-[12px] leading-5">{{ stage.detail }}</p>
+            </div>
+          </div>
+
+          <div class="aurora-scroll mt-4 hidden gap-2 overflow-x-auto pb-1 sm:flex xl:hidden">
+            <div
+              v-for="stage in learningStages"
+              :key="`mobile-${stage.label}`"
+              class="shrink-0 rounded-full border px-3 py-2"
+              :class="stage.active ? 'border-primary/25 bg-primary-soft text-primary' : 'border-subtle bg-card text-text-muted'"
+            >
+              <div class="flex items-center gap-1.5 whitespace-nowrap">
+                <p class="text-[10px] font-bold uppercase tracking-[0.12em]">{{ stage.label }}</p>
+                <p class="text-[10px] leading-5">{{ stage.detail }}</p>
+              </div>
             </div>
           </div>
         </div>
@@ -44,7 +58,22 @@
         </div>
       </div>
 
-      <div class="mt-5 grid gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+      <div class="mt-4 hidden rounded-[18px] border border-subtle bg-card px-4 py-3 shadow-card sm:block xl:hidden">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">推荐下一步</p>
+            <p class="mt-1 text-sm font-semibold text-text-primary">{{ recommendationTitle }}</p>
+            <p class="mt-1 text-[11px] leading-5 text-text-muted">
+              掌握 {{ currentMastery }}% · 材料 {{ cards.length }} 份 · {{ availableTypes.has("diagnostic_quiz") ? "可提交诊断" : "诊断待生成" }}
+            </p>
+          </div>
+          <span class="rounded-full border border-subtle bg-space-surface/70 px-3 py-1 text-[11px] font-semibold text-text-secondary">
+            {{ overallProgress }}%
+          </span>
+        </div>
+      </div>
+
+      <div class="mt-5 hidden gap-3 xl:grid xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
         <div class="rounded-[22px] border border-subtle bg-card p-4 shadow-card">
           <div class="flex flex-wrap items-start justify-between gap-4">
             <div class="min-w-0">
@@ -59,7 +88,7 @@
           </div>
         </div>
 
-        <div class="grid gap-3 sm:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
+        <div class="hidden gap-3 xl:grid xl:grid-cols-1 2xl:grid-cols-3">
           <div
             v-for="brief in learningBriefs"
             :key="brief.label"
@@ -72,7 +101,7 @@
         </div>
       </div>
 
-      <div class="mt-5 flex items-center justify-between gap-3">
+      <div class="mt-4 hidden items-center justify-between gap-3 sm:flex sm:mt-5">
         <div class="min-w-0">
           <p class="text-[11px] font-black uppercase tracking-[0.12em] text-text-muted">课程目录</p>
           <p class="mt-1 text-xs leading-5 text-text-muted">
@@ -81,7 +110,7 @@
         </div>
       </div>
 
-      <div class="aurora-scroll mt-3 flex gap-2 overflow-x-auto pb-1">
+      <div class="aurora-scroll mt-3 hidden gap-2 overflow-x-auto pb-1 sm:flex">
         <button
           v-for="node in pathNodes"
           :key="node.id"
@@ -145,16 +174,44 @@
           <ResourceCard
             :agent-name="agentLabel(card.card_type)"
             :title="cardLabel(card.card_type)"
-            :progress-text="loading ? '网格同步' : '资源就绪'"
+            :progress-text="loading ? '栅格同步' : '资源就绪'"
             :progress="loading ? progressHint(card.card_type) : 100"
             :is-ready="!loading"
             :is-active="card.resource_id === activeCardId"
+            :is-expanded="isCardHydrated(card.resource_id)"
+            :activatable="!loading"
             :color="cardColor(card.card_type)"
+            @activate="activateCard(card.resource_id)"
             @pin="pinCard(card.resource_id)"
             @minimize="minimizeCard(card.resource_id)"
           >
             <template #content>
-              <div class="space-y-5">
+              <div v-if="!isCardHydrated(card.resource_id)" class="space-y-4">
+                <div class="rounded-[18px] border border-subtle bg-space-surface/55 p-4 shadow-card">
+                  <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">
+                    {{ previewLabel(card.card_type) }}
+                  </p>
+
+                  <pre
+                    v-if="card.card_type === 'code_snippet'"
+                    class="mt-3 overflow-x-auto rounded-[16px] border border-subtle/80 bg-[#08111f] px-4 py-3 text-xs leading-6 text-slate-100"
+                  >{{ codePreview(card.content) }}</pre>
+
+                  <p v-else class="mt-3 text-sm leading-7 text-text-secondary">
+                    {{ textPreview(card.content) }}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  class="focus-ring rounded-full border border-primary/20 bg-primary-soft px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.10em] text-primary transition-all duration-200 hover:border-primary/35 hover:bg-primary-soft/80"
+                  @click.stop="activateCard(card.resource_id)"
+                >
+                  {{ card.resource_id === activeCardId ? "展开完整内容" : "设为当前并展开" }}
+                </button>
+              </div>
+
+              <div v-else class="space-y-5">
                 <MarkdownContent
                   v-if="card.card_type !== 'diagnostic_quiz'"
                   :content="card.content"
@@ -201,6 +258,24 @@
           </ResourceCard>
         </div>
       </div>
+
+      <div class="mt-5 grid gap-3 xl:hidden">
+        <div class="rounded-[20px] border border-subtle bg-card px-4 py-3 shadow-card">
+          <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">推荐说明</p>
+          <p class="mt-2 text-sm leading-6 text-text-muted">{{ recommendationDetail }}</p>
+        </div>
+        <div class="grid gap-3 sm:grid-cols-3">
+          <div
+            v-for="brief in learningBriefs"
+            :key="`mobile-${brief.label}`"
+            class="rounded-[20px] border border-subtle bg-card px-4 py-3 shadow-card"
+          >
+            <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">{{ brief.label }}</p>
+            <p class="mt-2 text-lg font-black text-text-primary">{{ brief.value }}</p>
+            <p class="mt-1 text-[11px] leading-5 text-text-muted">{{ brief.detail }}</p>
+          </div>
+        </div>
+      </div>
     </div>
 
     <footer v-if="minimizedCards.length" class="pt-5">
@@ -224,6 +299,7 @@
 import { computed, ref, watch } from "vue";
 import MarkdownContent from "./MarkdownContent.vue";
 import ResourceCard from "./ResourceCard.vue";
+import { extractCodePreview, extractTextPreview } from "../utils/markdownPreview.js";
 
 const props = defineProps({
   cards: { type: Array, default: () => [] },
@@ -247,6 +323,7 @@ const dragId = ref("");
 const focusMode = ref(false);
 const isExpanded = ref(false);
 const answers = ref({});
+const hydratedCardIds = ref([]);
 const submittedScore = ref(null);
 
 watch(
@@ -256,6 +333,7 @@ watch(
     orderedIds.value = nextIds;
     minimizedIds.value = [];
     activeCardId.value = nextIds[0] ?? "";
+    hydratedCardIds.value = [];
     focusMode.value = false;
     answers.value = {};
     submittedScore.value = null;
@@ -331,7 +409,7 @@ const recommendationTitle = computed(() => {
 
 const recommendationDetail = computed(() => {
   if (props.loading) {
-    return "保持当前节点不切换，系统会先补齐概念、代码、练习与诊断四类材料。";
+    return "保持当前节点不切换，系统会优先补齐概念、代码、练习与诊断四类材料。";
   }
 
   if (!props.cards.length) {
@@ -343,7 +421,7 @@ const recommendationDetail = computed(() => {
   }
 
   return nextPendingNode.value
-    ? "当前节点已接近达标，可以在完成诊断后继续推进到下一薄弱点。"
+    ? "当前节点已接近达标，可以在完成本轮诊断后继续推进到下一个薄弱点。"
     : "路径中的主要薄弱点已经被覆盖，可以转入总结复盘或拓展练习。";
 });
 
@@ -387,6 +465,24 @@ const learningStages = computed(() => [
     active: availableTypes.value.has("diagnostic_quiz"),
   },
 ]);
+
+watch(
+  () => focusMode.value,
+  (enabled) => {
+    if (enabled && activeCardId.value) {
+      hydrateCard(activeCardId.value);
+    }
+  },
+);
+
+watch(
+  () => activeCardId.value,
+  (cardId) => {
+    if (focusMode.value && cardId) {
+      hydrateCard(cardId);
+    }
+  },
+);
 
 function cardLabel(cardType) {
   return props.getCardLabel(cardType);
@@ -447,10 +543,66 @@ function nodeChipClass(node) {
   return "border-subtle text-text-muted hover:border-hover hover:text-text-secondary hover:bg-card-hover";
 }
 
+function isCardHydrated(cardId) {
+  return hydratedCardIds.value.includes(cardId);
+}
+
+function hydrateCard(cardId) {
+  if (!cardId || hydratedCardIds.value.includes(cardId)) {
+    return;
+  }
+
+  hydratedCardIds.value = [...hydratedCardIds.value, cardId];
+}
+
+function activateCard(cardId) {
+  if (!cardId) {
+    return;
+  }
+
+  setActiveCard(cardId, true);
+}
+
+function setActiveCard(cardId, shouldHydrate = false) {
+  if (!cardId) {
+    return;
+  }
+
+  activeCardId.value = cardId;
+
+  if (shouldHydrate) {
+    hydrateCard(cardId);
+  }
+}
+
+function textPreview(content) {
+  return extractTextPreview(content, 190);
+}
+
+function codePreview(content) {
+  return extractCodePreview(content, 8);
+}
+
+function previewLabel(cardType) {
+  switch (cardType) {
+    case "code_snippet":
+      return "代码预览";
+    case "interactive_exercise":
+      return "练习预览";
+    case "diagnostic_quiz":
+      return "诊断预览";
+    case "video_summary":
+      return "摘要预览";
+    case "concept_map":
+    default:
+      return "内容预览";
+  }
+}
+
 function pinCard(cardId) {
   const next = orderedIds.value.filter((id) => id !== cardId);
   orderedIds.value = [cardId, ...next];
-  activeCardId.value = cardId;
+  setActiveCard(cardId);
 }
 
 function minimizeCard(cardId) {
@@ -465,7 +617,7 @@ function minimizeCard(cardId) {
 
 function restoreCard(cardId) {
   minimizedIds.value = minimizedIds.value.filter((id) => id !== cardId);
-  activeCardId.value = cardId;
+  setActiveCard(cardId);
 }
 
 function onDragStart(cardId) {
@@ -480,7 +632,7 @@ function onDrop(targetId) {
   const targetIndex = next.indexOf(targetId);
   next.splice(targetIndex, 0, dragId.value);
   orderedIds.value = next;
-  activeCardId.value = dragId.value;
+  setActiveCard(dragId.value);
   dragId.value = "";
 }
 

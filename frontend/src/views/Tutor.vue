@@ -82,10 +82,11 @@
 </template>
 
 <script setup>
-import { ref, nextTick } from 'vue'
+import { ref, nextTick, watch } from 'vue'
 import { tutoringAPI } from '../api'
 import { renderChatMessage } from '../composables/useContentRenderer'
-import mermaid from 'mermaid'
+import { useTheme } from '../composables/useTheme.js'
+import { renderMermaidSvg } from '../utils/mermaidRuntime.js'
 
 const chatMessages = ref([])
 const question = ref('')
@@ -94,6 +95,7 @@ const selectedContext = ref('concept')
 const codeSnippet = ref('')
 const errorMsg = ref('')
 const chatContainer = ref(null)
+const { theme } = useTheme()
 
 const contextTypes = [
   { value: 'concept', label: '概念讲解', icon: '📖' },
@@ -114,7 +116,15 @@ const quickQuestions = [
 function renderMarkdown(text) { return renderChatMessage(text) }
 
 async function renderMermaidDiagram(code) {
-  try { const { svg } = await mermaid.render('tutor-mermaid-' + Date.now(), code); return svg } catch (e) { return null }
+  try {
+    return await renderMermaidSvg({
+      source: code,
+      id: 'tutor-mermaid-' + Date.now(),
+      isLight: theme.value === 'light',
+    })
+  } catch (e) {
+    return null
+  }
 }
 
 async function askTutor() {
@@ -151,6 +161,15 @@ async function askTutor() {
 async function debugCode() { selectedContext.value = 'code_debug'; question.value = '请帮我调试这段代码'; await askTutor() }
 
 function scrollToBottom() { if (chatContainer.value) chatContainer.value.scrollTop = chatContainer.value.scrollHeight }
+
+watch(theme, async () => {
+  const diagramMessages = chatMessages.value.filter((msg) => msg.diagram)
+  if (!diagramMessages.length) return
+
+  await Promise.all(diagramMessages.map(async (msg, index) => {
+    msg.renderedDiagram = await renderMermaidDiagram(msg.diagram, index)
+  }))
+})
 </script>
 
 <style scoped>

@@ -1,6 +1,6 @@
 <template>
   <section class="flex h-full min-h-0 flex-col px-4 pb-5 pt-5 sm:px-6">
-    <header class="pb-5">
+    <header class="shrink-0 pb-3">
       <div class="flex items-start justify-between gap-4">
         <div>
           <p class="text-[11px] font-black uppercase tracking-[0.12em] text-text-muted">辅导通道</p>
@@ -10,7 +10,7 @@
           </p>
         </div>
 
-        <div class="hidden rounded-[18px] border border-subtle bg-card px-4 py-3 text-right shadow-card sm:block">
+        <div class="hidden rounded-[18px] border border-subtle bg-card px-4 py-3 text-right shadow-card 2xl:block">
           <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">当前模式</p>
           <p class="mt-2 text-sm font-semibold text-text-primary">{{ modeLabel }}</p>
           <p class="mt-1 text-[11px] text-text-muted">{{ modeHint }}</p>
@@ -19,13 +19,13 @@
 
       <div
         v-if="bootMode !== 'probe' && quickPrompts.length"
-        class="mt-4 flex flex-wrap gap-2"
+        class="aurora-scroll mt-4 flex gap-2 overflow-x-auto pb-1"
       >
         <button
           v-for="prompt in quickPrompts"
           :key="prompt"
           type="button"
-          class="focus-ring rounded-full border border-subtle bg-card px-3 py-1.5 text-[11px] font-medium text-text-secondary transition-all duration-200 hover:border-primary/30 hover:bg-card-hover hover:text-primary"
+          class="focus-ring shrink-0 rounded-full border border-subtle bg-card px-3 py-1.5 text-[11px] font-medium text-text-secondary transition-all duration-200 hover:border-primary/30 hover:bg-card-hover hover:text-primary"
           :disabled="busy"
           @click="sendPrompt(prompt)"
         >
@@ -34,7 +34,13 @@
       </div>
     </header>
 
-    <div ref="scrollRoot" class="aurora-scroll flex-1 overflow-y-auto pr-1" aria-live="polite">
+    <div
+      ref="scrollRoot"
+      class="aurora-scroll min-h-0 flex-1 overflow-y-auto pr-1"
+      data-chat-scroll="true"
+      aria-live="polite"
+      @scroll.passive="handleScroll"
+    >
       <ProbeDeck
         v-if="bootMode === 'probe' && probe"
         :probe="probe"
@@ -57,7 +63,7 @@
           <div class="min-w-0">
             <p class="text-sm font-semibold text-text-primary">从当前节点开始提问</p>
             <p class="mt-2 text-sm leading-7 text-text-muted">
-              可以让辅导智能体解释概念、拆解代码、总结本节点和上一节点的关系，或者直接给你下一步练习建议。
+              你可以让辅导智能体解释概念、拆解代码、总结本节点和上一节点的关系，或者直接给出下一步练习建议。
             </p>
           </div>
         </div>
@@ -91,9 +97,7 @@
             >
               <div class="mb-2 flex items-center gap-2">
                 <span class="h-1.5 w-1.5 rounded-full bg-primary shadow-[0_0_10px_var(--color-primary)] animate-breathe" />
-                <span class="text-[10px] font-mono uppercase tracking-[0.2em] text-primary/90">
-                  辅导智能体
-                </span>
+                <span class="text-[10px] font-mono uppercase tracking-[0.2em] text-primary/90">辅导智能体</span>
               </div>
 
               <StreamText
@@ -132,14 +136,14 @@
       </div>
     </div>
 
-    <footer class="pt-5">
-      <div class="rounded-[24px] border border-subtle bg-card p-3 shadow-card">
+    <footer class="shrink-0 pt-3">
+      <div class="rounded-[24px] border border-subtle bg-card p-2.5 shadow-card">
         <div class="flex items-end gap-3">
           <label class="sr-only" for="chat-input">辅导输入框</label>
           <textarea
             id="chat-input"
             v-model="draft"
-            class="focus-ring min-h-[108px] flex-1 resize-none border-0 bg-transparent px-2 py-2 text-sm font-light leading-7 text-text-primary placeholder:text-text-muted"
+            class="focus-ring min-h-[72px] flex-1 resize-none border-0 bg-transparent px-2 py-2 text-sm font-light leading-7 text-text-primary placeholder:text-text-muted sm:min-h-[68px]"
             :disabled="bootMode === 'probe' || busy"
             :placeholder="inputPlaceholder"
             @keydown.enter.exact.prevent="submit"
@@ -185,6 +189,7 @@ const emit = defineEmits(["send", "submit-probe"]);
 
 const draft = ref("");
 const scrollRoot = ref(null);
+const isPinnedToBottom = ref(true);
 
 const quickPrompts = computed(() => {
   if (props.suggestions.length) {
@@ -229,8 +234,23 @@ watch(
   () => props.messages.length,
   async () => {
     await nextTick();
-    if (scrollRoot.value) {
-      scrollRoot.value.scrollTop = scrollRoot.value.scrollHeight;
+    if (shouldAutoScroll()) {
+      scrollToBottom();
+    }
+  },
+);
+
+watch(
+  () => [
+    props.messages.at(-1)?.id ?? "",
+    props.messages.at(-1)?.content ?? "",
+    props.messages.at(-1)?.tokenStream ?? "",
+    props.messages.at(-1)?.isStreaming ?? false,
+  ],
+  async () => {
+    await nextTick();
+    if (shouldAutoScroll()) {
+      scrollToBottom();
     }
   },
 );
@@ -241,6 +261,7 @@ function submit() {
     return;
   }
 
+  isPinnedToBottom.value = true;
   emit("send", value);
   draft.value = "";
 }
@@ -250,6 +271,38 @@ function sendPrompt(prompt) {
     return;
   }
 
+  isPinnedToBottom.value = true;
   emit("send", prompt);
+}
+
+function handleScroll() {
+  if (!(scrollRoot.value instanceof HTMLElement)) {
+    return;
+  }
+
+  isPinnedToBottom.value = isNearBottom();
+}
+
+function shouldAutoScroll() {
+  return isPinnedToBottom.value || props.messages.at(-1)?.role === "user";
+}
+
+function isNearBottom() {
+  if (!(scrollRoot.value instanceof HTMLElement)) {
+    return true;
+  }
+
+  const threshold = 48;
+  const distance = scrollRoot.value.scrollHeight - scrollRoot.value.scrollTop - scrollRoot.value.clientHeight;
+  return distance <= threshold;
+}
+
+function scrollToBottom() {
+  if (!(scrollRoot.value instanceof HTMLElement)) {
+    return;
+  }
+
+  scrollRoot.value.scrollTop = scrollRoot.value.scrollHeight;
+  isPinnedToBottom.value = true;
 }
 </script>

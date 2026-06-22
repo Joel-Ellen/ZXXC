@@ -5,11 +5,13 @@
       'is-high-contrast': highContrast,
       'is-reduced-motion': reduceMotion,
     }"
+    :aria-busy="isWorkspaceBusy ? 'true' : 'false'"
     :style="{ fontSize: `${fontSize}px` }"
   >
     <SidebarRail
       :active-panel="sidebarPanel"
       :drawer-open="drawerOpen"
+      panel-id="workspace-sidebar-drawer"
       :path-count="pathNodes.length"
       @select="onSidebarSelect"
     />
@@ -17,27 +19,34 @@
     <div class="relative flex min-w-0 flex-1 flex-col">
       <header class="glass-panel relative z-20 px-4 py-3 sm:px-5 lg:px-6">
         <div class="flex flex-wrap items-center gap-3 lg:flex-nowrap">
-          <div class="flex flex-shrink-0 items-center gap-3">
+          <div class="flex min-w-0 flex-shrink-0 items-center gap-3">
             <div class="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-primary to-secondary text-sm font-black text-primary-text shadow-glow">
               EA
             </div>
-            <div class="hidden sm:block">
+            <div class="min-w-0">
               <span class="block text-sm font-black leading-tight tracking-tight text-text-primary">
                 EduAgent
               </span>
-              <span class="block text-[10px] font-medium tracking-[0.12em] text-text-muted">
+              <span class="block truncate text-[10px] font-medium tracking-[0.12em] text-text-muted">
                 课程学习工作台
               </span>
             </div>
           </div>
 
-          <nav class="hidden flex-shrink-0 items-center gap-1 rounded-full border border-subtle bg-card p-1 xl:flex">
+          <nav
+            class="hidden flex-shrink-0 items-center gap-1 rounded-full border border-subtle bg-card p-1 xl:flex"
+            aria-label="工作台主导航"
+          >
             <button
               v-for="item in workspaceNav"
               :key="item.key"
               type="button"
               class="focus-ring rounded-full px-3 py-1.5 text-[11px] font-semibold tracking-[0.08em] transition-all duration-200"
               :class="navButtonClass(item.key)"
+              :aria-controls="navTargetId(item.key)"
+              :aria-expanded="navExpandedState(item.key)"
+              :aria-haspopup="isDrawerAction(item.key) ? 'dialog' : undefined"
+              :aria-pressed="String(isNavActive(item.key))"
               @click="handleNav(item.key)"
             >
               {{ item.label }}
@@ -48,15 +57,22 @@
             <TopStatusBar :statuses="statuses" />
           </div>
 
-          <div class="ml-auto flex flex-shrink-0 items-center gap-2 sm:gap-3">
+          <div class="ml-auto flex w-full items-center gap-2 sm:w-auto sm:flex-shrink-0 sm:gap-3">
             <div v-if="activeCourse || enrolledCourses.length" class="relative">
               <button
+                ref="courseMenuTriggerRef"
                 type="button"
-                class="focus-ring flex items-center gap-2 rounded-full border border-subtle bg-card px-3.5 py-1.5 text-[11px] font-semibold text-text-secondary transition-all duration-200 hover:border-primary/30 hover:bg-card-hover hover:text-primary"
-                @click="courseMenuOpen = !courseMenuOpen"
+                class="focus-ring flex min-w-0 items-center gap-2 rounded-full border border-subtle bg-card px-3.5 py-1.5 text-[11px] font-semibold text-text-secondary transition-all duration-200 hover:border-primary/30 hover:bg-card-hover hover:text-primary sm:flex-none"
+                :class="activeCourse || enrolledCourses.length ? 'w-full sm:w-auto' : ''"
+                :aria-controls="'workspace-course-menu'"
+                :aria-expanded="String(courseMenuOpen)"
+                aria-haspopup="menu"
+                @click="toggleCourseMenu"
+                @keydown.down.prevent="openCourseMenu('first')"
+                @keydown.up.prevent="openCourseMenu('last')"
               >
-                <span class="text-base leading-none">{{ activeCourse?.icon || "📘" }}</span>
-                <span class="hidden max-w-[96px] truncate sm:inline xl:max-w-[120px]">{{ activeCourse?.title_cn || "课程" }}</span>
+                <span class="text-base leading-none">{{ activeCourse?.icon || "📌" }}</span>
+                <span class="max-w-[128px] truncate sm:max-w-[120px] xl:max-w-[140px]">{{ activeCourse?.title_cn || "课程" }}</span>
                 <svg
                   width="10"
                   height="10"
@@ -74,19 +90,28 @@
               <transition name="fade">
                 <div
                   v-if="courseMenuOpen"
+                  ref="courseMenuRef"
+                  id="workspace-course-menu"
                   class="absolute right-0 top-full z-50 mt-2 w-64 rounded-2xl border border-subtle bg-space-panel p-2 shadow-2xl backdrop-blur-xl"
+                  role="menu"
+                  aria-label="已选课程"
+                  tabindex="-1"
                   @click.stop
+                  @keydown="onCourseMenuKeydown"
                 >
                   <p class="px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-text-muted">已选课程</p>
                   <button
                     v-for="course in enrolledCourses"
                     :key="course.course_id"
                     type="button"
+                    data-course-menu-item="true"
+                    role="menuitemradio"
+                    :aria-checked="String(course.course_id === activeCourse?.course_id)"
                     class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors duration-150 hover:bg-card"
                     :class="course.course_id === activeCourse?.course_id ? 'bg-primary-soft/20 text-primary' : 'text-text-secondary'"
                     @click="onSwitchCourse(course.course_id)"
                   >
-                    <span class="text-lg">{{ course.icon || "📘" }}</span>
+                    <span class="text-lg">{{ course.icon || "📌" }}</span>
                     <div class="min-w-0 flex-1">
                       <span class="block truncate text-sm font-medium">{{ course.title_cn }}</span>
                       <span class="block text-[10px] text-text-muted">{{ course.progress ? Math.round(course.progress * 100) : 0 }}%</span>
@@ -100,20 +125,26 @@
                   <div class="my-1 h-px bg-[var(--border-subtle)]" />
                   <button
                     type="button"
+                    data-course-menu-item="true"
+                    role="menuitem"
                     class="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm text-text-muted transition-colors hover:bg-card hover:text-primary"
-                    @click="$emit('go-home')"
+                    @click="handleBrowseCourses"
                   >
                     <span class="text-base">+</span>
                     浏览更多课程
                   </button>
                 </div>
               </transition>
-              <div v-if="courseMenuOpen" class="fixed inset-0 z-40" @click="courseMenuOpen = false" />
+              <div
+                v-if="courseMenuOpen"
+                class="fixed inset-0 z-40"
+                @click="closeCourseMenu({ restoreFocus: true })"
+              />
             </div>
 
             <button
               type="button"
-              class="focus-ring rounded-full border border-subtle bg-card px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-muted transition-all duration-200 hover:border-primary/30 hover:bg-primary-soft hover:text-primary"
+              class="focus-ring hidden rounded-full border border-subtle bg-card px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-muted transition-all duration-200 hover:border-primary/30 hover:bg-primary-soft hover:text-primary sm:inline-flex"
               @click="$emit('go-home')"
             >
               首页
@@ -125,7 +156,30 @@
 
             <button
               type="button"
-              class="focus-ring rounded-full border border-subtle bg-card px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-muted transition-all duration-200 hover:border-error/30 hover:bg-error-soft hover:text-error"
+              class="focus-ring hidden rounded-full border border-subtle bg-card px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-muted transition-all duration-200 hover:border-error/30 hover:bg-error-soft hover:text-error sm:inline-flex"
+              @click="$emit('logout')"
+            >
+              退出
+            </button>
+          </div>
+        </div>
+
+        <div class="mt-3 flex items-center justify-between gap-3 border-t border-subtle/60 pt-3 sm:hidden">
+          <span class="min-w-0 truncate text-xs font-medium text-text-secondary">
+            {{ user?.display_name || user?.user_id || "未登录" }}
+          </span>
+
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class="focus-ring rounded-full border border-subtle bg-card px-3 py-1.5 text-[11px] font-semibold text-text-muted transition-all duration-200 hover:border-primary/30 hover:bg-primary-soft hover:text-primary"
+              @click="$emit('go-home')"
+            >
+              首页
+            </button>
+            <button
+              type="button"
+              class="focus-ring rounded-full border border-subtle bg-card px-3 py-1.5 text-[11px] font-semibold text-text-muted transition-all duration-200 hover:border-error/30 hover:bg-error-soft hover:text-error"
               @click="$emit('logout')"
             >
               退出
@@ -136,8 +190,8 @@
         <div class="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-[var(--border-strong)] to-transparent" />
       </header>
 
-      <div class="relative flex min-h-0 flex-1 flex-col bg-space-bg/35">
-        <section class="border-b border-subtle px-4 py-4 backdrop-blur-sm sm:px-5 lg:px-6">
+      <div class="relative flex min-h-0 flex-1 flex-col bg-space-bg/35 xl:grid xl:grid-cols-[minmax(0,1fr)_380px] xl:grid-rows-[auto_minmax(0,1fr)]">
+        <section class="border-b border-subtle px-4 py-4 backdrop-blur-sm sm:px-5 lg:px-6 xl:col-start-1 xl:row-start-1 xl:border-r xl:border-subtle/70">
           <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
@@ -148,7 +202,7 @@
               </div>
 
               <div class="mt-3 flex flex-wrap items-end gap-x-4 gap-y-2">
-                <h1 class="truncate text-[30px] font-black tracking-tight text-text-primary lg:text-[34px]">
+                <h1 class="truncate text-[24px] font-black tracking-tight text-text-primary sm:text-[30px] lg:text-[34px]">
                   {{ activeCourse?.title_cn || "课程工作台" }}
                 </h1>
                 <span class="rounded-full border border-subtle bg-card px-3 py-1 text-[11px] font-semibold text-text-secondary">
@@ -156,34 +210,55 @@
                 </span>
               </div>
 
-              <p class="mt-3 max-w-3xl text-sm leading-6 text-text-muted">
+              <p class="mt-3 max-w-3xl text-xs leading-5 text-text-muted sm:text-sm sm:leading-6">
                 当前节点：
                 <span class="font-semibold text-text-secondary">{{ nodeTitle || "等待生成学习路径" }}</span>
                 <span v-if="nextNode" class="ml-1">· 下一建议节点：{{ nextNode.title }}</span>
               </p>
 
-              <div class="mt-4 grid gap-3 lg:grid-cols-2">
+              <div class="mt-4 rounded-[20px] border border-subtle bg-card px-4 py-3 shadow-card sm:hidden">
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">当前建议</p>
+                    <p class="mt-2 text-sm font-semibold leading-6 text-text-primary">{{ focusTitle }}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mt-4 hidden gap-3 sm:grid xl:hidden lg:grid-cols-2">
                 <div class="rounded-[22px] border border-subtle bg-card p-4 shadow-card">
                   <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">当前建议</p>
                   <p class="mt-2 text-base font-semibold text-text-primary">{{ focusTitle }}</p>
                   <p class="mt-2 text-sm leading-6 text-text-muted">{{ focusDetail }}</p>
                 </div>
                 <div class="rounded-[22px] border border-subtle bg-card p-4 shadow-card">
-                  <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">学习秩序</p>
+                  <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">学习顺序</p>
                   <p class="mt-2 text-base font-semibold text-text-primary">{{ learningSequenceTitle }}</p>
                   <p class="mt-2 text-sm leading-6 text-text-muted">{{ learningSequenceDetail }}</p>
                 </div>
               </div>
 
+              <div class="mt-4 hidden xl:block xl:rounded-[22px] xl:border xl:border-subtle xl:bg-card/92 xl:px-5 xl:py-4 xl:shadow-card">
+                <div class="flex flex-wrap items-center gap-2">
+                  <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">当前建议</p>
+                  <span class="rounded-full border border-subtle bg-space-surface/70 px-3 py-1 text-[11px] font-semibold text-text-secondary">
+                    {{ learningSequenceTitle }}
+                  </span>
+                </div>
+                <p class="mt-3 text-sm font-semibold leading-6 text-text-primary">{{ focusTitle }}</p>
+                <p class="mt-2 text-xs leading-5 text-text-muted">{{ focusDetail }}</p>
+                <p class="mt-2 text-[11px] leading-5 text-text-muted">{{ learningSequenceDetail }}</p>
+              </div>
+
               <div
                 v-if="infoMessage"
-                class="mt-4 rounded-[18px] border border-primary/20 bg-primary-soft/80 px-4 py-3 text-sm text-primary shadow-card"
+                class="mt-3 rounded-[16px] border border-primary/20 bg-primary-soft/80 px-3 py-2 text-xs leading-5 text-primary shadow-card sm:mt-4 sm:rounded-[18px] sm:px-4 sm:py-3 sm:text-sm sm:leading-6"
               >
                 {{ infoMessage }}
               </div>
             </div>
 
-            <div class="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:min-w-[520px] xl:grid-cols-4">
+            <div class="hidden gap-2 md:grid md:grid-cols-2 lg:grid-cols-4 xl:min-w-[520px] xl:grid-cols-4">
               <div
                 v-for="metric in metrics"
                 :key="metric.label"
@@ -196,7 +271,7 @@
             </div>
           </div>
 
-          <div class="mt-4 grid gap-2 md:hidden">
+          <div class="hidden">
             <div
               v-for="status in compactStatuses"
               :key="status.key"
@@ -214,26 +289,33 @@
           </div>
         </section>
 
-        <section class="border-b border-subtle px-4 py-3 xl:hidden sm:px-5">
-          <div class="flex gap-2 overflow-x-auto pb-1">
-            <button
-              v-for="item in mobileActions"
-              :key="item.key"
-              type="button"
-              class="focus-ring shrink-0 rounded-full border px-3.5 py-2 text-[11px] font-semibold tracking-[0.08em] transition-all duration-200"
-              :class="mobileActionClass(item.key)"
-              @click="handleNav(item.key)"
+        <section class="hidden border-b border-subtle px-4 py-3 sm:block sm:px-5 xl:hidden">
+          <div class="aurora-scroll flex items-center gap-2 overflow-x-auto pb-1">
+            <div
+              v-for="status in compactStatuses"
+              :key="`mobile-${status.key}`"
+              class="shrink-0 rounded-full border bg-card px-3 py-2 shadow-card"
+              :class="status.panelClass"
             >
-              {{ item.label }}
-            </button>
+              <div class="flex items-center gap-2">
+                <span class="text-[11px] font-semibold text-text-primary">{{ status.label }}</span>
+                <span class="text-[10px] text-text-muted">{{ status.phase }}</span>
+                <span class="text-[10px] font-mono text-text-muted">{{ status.progress }}%</span>
+              </div>
+            </div>
           </div>
         </section>
 
-        <div class="workspace-body min-h-0 flex-1 overflow-y-auto xl:overflow-hidden">
-          <div class="grid min-h-full grid-cols-1 xl:h-full xl:grid-cols-[minmax(0,1fr)_380px]">
+        <div
+          class="workspace-body min-h-0 overflow-y-auto xl:col-start-1 xl:row-start-2 xl:overflow-hidden"
+          :class="effectiveMobilePane === 'learn' ? 'block flex-1' : 'hidden xl:block xl:flex-1'"
+        >
             <main
-              class="min-w-0 xl:min-h-0 xl:border-r xl:border-subtle/70"
-              :class="effectiveMobilePane === 'learn' ? 'block' : 'hidden xl:block'"
+              id="workspace-learn-panel"
+              ref="learnPanelRef"
+              class="min-w-0 xl:h-full xl:min-h-0"
+              tabindex="-1"
+              aria-label="学习资源画布"
             >
               <ResourceCanvas
                 :cards="cards"
@@ -250,10 +332,15 @@
                 @select-node="(id) => onSelectNode(id)"
               />
             </main>
+        </div>
 
-            <aside
-              class="min-w-0 border-t border-subtle bg-space-surface/50 backdrop-blur-sm xl:min-h-0 xl:border-t-0"
-              :class="effectiveMobilePane === 'coach' ? 'block' : 'hidden xl:block'"
+        <aside
+              id="workspace-coach-panel"
+              ref="coachPanelRef"
+              class="min-w-0 border-t border-subtle bg-space-surface/50 backdrop-blur-sm xl:col-start-2 xl:row-span-2 xl:row-start-1 xl:min-h-0 xl:border-t-0 xl:border-l xl:border-subtle/70"
+              :class="effectiveMobilePane === 'coach' ? 'flex flex-1 flex-col' : 'hidden xl:flex xl:flex-col'"
+              tabindex="-1"
+              aria-label="辅导通道"
             >
               <ChatArea
                 :messages="messages"
@@ -268,11 +355,9 @@
                 @send="handleCoachSend"
                 @submit-probe="(values) => $emit('submit-probe', values)"
               />
-            </aside>
-          </div>
-        </div>
+        </aside>
 
-        <div class="mobile-dock border-t border-subtle bg-space-panel/85 px-4 py-3 backdrop-blur-xl xl:hidden">
+        <nav class="mobile-dock sticky bottom-0 z-20 border-t border-subtle bg-space-panel/88 px-4 py-3 backdrop-blur-xl xl:hidden" aria-label="工作台切换">
           <div class="flex items-center gap-2 overflow-x-auto">
             <button
               v-for="item in dockActions"
@@ -280,17 +365,22 @@
               type="button"
               class="focus-ring shrink-0 rounded-full border px-3.5 py-2 text-[11px] font-semibold tracking-[0.08em] transition-all duration-200"
               :class="mobileActionClass(item.key)"
+              :aria-controls="navTargetId(item.key)"
+              :aria-expanded="navExpandedState(item.key)"
+              :aria-haspopup="isDrawerAction(item.key) ? 'dialog' : undefined"
+              :aria-pressed="String(isNavActive(item.key))"
               @click="handleNav(item.key)"
             >
               {{ item.label }}
             </button>
           </div>
-        </div>
+        </nav>
       </div>
 
       <SidebarDrawer
         :open="drawerOpen"
         :active-panel="sidebarPanel"
+        panel-id="workspace-sidebar-drawer"
         :nodes="pathNodes"
         :current-node="currentNode"
         :radar-values="capabilityRadar"
@@ -298,6 +388,7 @@
         :reduce-motion="reduceMotion"
         :font-size="fontSize"
         @select-node="(id) => onSelectNode(id)"
+        @switch-panel="onDrawerPanelSwitch"
         @toggle-contrast="highContrast = !highContrast"
         @toggle-motion="reduceMotion = !reduceMotion"
         @set-font-size="(size) => fontSize = size"
@@ -307,7 +398,10 @@
       <transition name="fade">
         <div
           v-if="isBusy || isLoadingNode"
-          class="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-space-bg/28 backdrop-blur-[2px]"
+          class="pointer-events-auto absolute inset-0 z-30 flex items-center justify-center bg-space-bg/28 backdrop-blur-[2px]"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
         >
           <div class="rounded-[24px] border border-subtle bg-space-panel/95 px-6 py-5 shadow-2xl backdrop-blur-xl">
             <div class="flex items-center gap-4">
@@ -328,7 +422,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import ChatArea from "./ChatArea.vue";
 import IconCheck from "./icons/IconCheck.vue";
 import ResourceCanvas from "./ResourceCanvas.vue";
@@ -337,6 +431,9 @@ import SidebarRail from "./SidebarRail.vue";
 import TopStatusBar from "./TopStatusBar.vue";
 
 const PREFERENCES_KEY = "eduagent-workspace-preferences";
+const LEARN_PANEL_ID = "workspace-learn-panel";
+const COACH_PANEL_ID = "workspace-coach-panel";
+const DRAWER_PANEL_ID = "workspace-sidebar-drawer";
 
 const props = defineProps({
   bootMode: { type: String, default: "loading" },
@@ -377,11 +474,16 @@ const emit = defineEmits([
 const drawerOpen = ref(false);
 const sidebarPanel = ref("tree");
 const courseMenuOpen = ref(false);
+const courseMenuTriggerRef = ref(null);
+const courseMenuRef = ref(null);
+const learnPanelRef = ref(null);
+const coachPanelRef = ref(null);
 
 const highContrast = ref(false);
 const reduceMotion = ref(false);
 const fontSize = ref(16);
 const mobilePane = ref("learn");
+const isWorkspaceBusy = computed(() => props.isBusy || props.isLoadingNode);
 
 const workspaceNav = [
   { key: "learn", label: "学习区" },
@@ -391,18 +493,11 @@ const workspaceNav = [
   { key: "settings", label: "设置" },
 ];
 
-const mobileActions = [
+const dockActions = [
   { key: "learn", label: "学习" },
   { key: "coach", label: "辅导" },
   { key: "path", label: "路径" },
   { key: "assessment", label: "诊断" },
-  { key: "settings", label: "设置" },
-];
-
-const dockActions = [
-  { key: "learn", label: "学习区" },
-  { key: "coach", label: "辅导区" },
-  { key: "path", label: "路径面板" },
   { key: "settings", label: "设置" },
 ];
 
@@ -446,7 +541,7 @@ const focusTitle = computed(() => {
   }
 
   if (props.isLoadingNode) {
-    return "保持当前节点，等待资源矩阵同步完成";
+    return "保持当前节点，等待学习资源装配完成";
   }
 
   if (!props.cards.length) {
@@ -454,10 +549,10 @@ const focusTitle = computed(() => {
   }
 
   if (currentMastery.value < 65) {
-    return "优先把当前节点学透，再向后推进";
+    return "优先学透当前节点，再向后推进";
   }
 
-  return nextNode.value ? `准备推进到下一薄弱节点：${nextNode.value.title}` : "当前主路径已接近完成";
+  return nextNode.value ? `准备推进到下一个薄弱节点：${nextNode.value.title}` : "当前主路径已接近完成";
 });
 
 const focusDetail = computed(() => {
@@ -466,7 +561,7 @@ const focusDetail = computed(() => {
   }
 
   if (props.isLoadingNode) {
-    return "资源生成阶段不建议频繁切换节点，等待概念、代码、练习和诊断全部落位后再继续。";
+    return "资源生成阶段不建议频繁切换节点，等待概念、代码、练习和诊断内容全部到位后再继续。";
   }
 
   if (!props.cards.length) {
@@ -490,8 +585,8 @@ const learningSequenceTitle = computed(() => (
 
 const learningSequenceDetail = computed(() => (
   props.cards.length
-    ? "这一顺序更接近真实学习网站的内容编排逻辑，能先建立认知骨架，再进入操作与验证。"
-    : "当节点资源生成完成后，矩阵会自动排列为适合连续学习的顺序。"
+    ? "这一路径更接近真实学习平台的内容编排逻辑，先建立认知骨架，再进入操作与验证。"
+    : "当前节点资源生成完成后，矩阵会自动排列为适合连续学习的顺序。"
 ));
 
 const assistantMessageCount = computed(() =>
@@ -561,10 +656,26 @@ watch(
   (mode) => {
     if (mode === "probe") {
       mobilePane.value = "coach";
+      closeCourseMenu();
     }
   },
   { immediate: true },
 );
+
+watch(courseMenuOpen, async (isOpen) => {
+  if (!isOpen) {
+    return;
+  }
+
+  await nextTick();
+  focusCourseMenuItem("selected");
+});
+
+watch(drawerOpen, (isOpen) => {
+  if (isOpen) {
+    closeCourseMenu();
+  }
+});
 
 watch(
   [highContrast, reduceMotion, fontSize],
@@ -603,7 +714,123 @@ onMounted(() => {
   }
 });
 
+onBeforeUnmount(() => {
+  courseMenuOpen.value = false;
+});
+
+async function openCourseMenu(target = "selected") {
+  courseMenuOpen.value = true;
+  await nextTick();
+  focusCourseMenuItem(target);
+}
+
+function toggleCourseMenu() {
+  if (courseMenuOpen.value) {
+    closeCourseMenu({ restoreFocus: true });
+    return;
+  }
+
+  openCourseMenu();
+}
+
+function closeCourseMenu({ restoreFocus = false } = {}) {
+  if (!courseMenuOpen.value && !restoreFocus) {
+    return;
+  }
+
+  courseMenuOpen.value = false;
+  if (!restoreFocus) {
+    return;
+  }
+
+  nextTick(() => {
+    if (courseMenuTriggerRef.value instanceof HTMLElement) {
+      courseMenuTriggerRef.value.focus({ preventScroll: true });
+    }
+  });
+}
+
+function getCourseMenuItems() {
+  if (!(courseMenuRef.value instanceof HTMLElement)) {
+    return [];
+  }
+
+  return Array.from(courseMenuRef.value.querySelectorAll('[data-course-menu-item="true"]')).filter((element) => (
+    element instanceof HTMLElement
+  ));
+}
+
+function focusCourseMenuItem(target = "selected") {
+  const items = getCourseMenuItems();
+  if (!items.length) {
+    return;
+  }
+
+  let index = 0;
+  if (target === "last") {
+    index = items.length - 1;
+  } else if (target === "selected") {
+    const selectedIndex = items.findIndex((item) => item.getAttribute("aria-checked") === "true");
+    index = selectedIndex >= 0 ? selectedIndex : 0;
+  }
+
+  items[index]?.focus();
+}
+
+function moveCourseMenuFocus(step) {
+  const items = getCourseMenuItems();
+  if (!items.length) {
+    return;
+  }
+
+  const currentIndex = items.findIndex((item) => item === document.activeElement);
+  const safeIndex = currentIndex >= 0 ? currentIndex : 0;
+  const nextIndex = (safeIndex + step + items.length) % items.length;
+  items[nextIndex]?.focus();
+}
+
+function onCourseMenuKeydown(event) {
+  if (!courseMenuOpen.value) {
+    return;
+  }
+
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    moveCourseMenuFocus(1);
+    return;
+  }
+
+  if (event.key === "ArrowUp") {
+    event.preventDefault();
+    moveCourseMenuFocus(-1);
+    return;
+  }
+
+  if (event.key === "Home") {
+    event.preventDefault();
+    focusCourseMenuItem("first");
+    return;
+  }
+
+  if (event.key === "End") {
+    event.preventDefault();
+    focusCourseMenuItem("last");
+    return;
+  }
+
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeCourseMenu({ restoreFocus: true });
+    return;
+  }
+
+  if (event.key === "Tab") {
+    window.setTimeout(() => closeCourseMenu(), 0);
+  }
+}
+
 function onSidebarSelect(panelKey) {
+  closeCourseMenu();
   if (sidebarPanel.value === panelKey && drawerOpen.value) {
     drawerOpen.value = false;
   } else {
@@ -613,36 +840,51 @@ function onSidebarSelect(panelKey) {
 }
 
 function openPanel(panelKey) {
+  closeCourseMenu();
   sidebarPanel.value = panelKey;
   drawerOpen.value = true;
 }
 
+function onDrawerPanelSwitch(panelKey) {
+  openPanel(panelKey);
+}
+
 function onSelectNode(nodeId) {
+  closeCourseMenu();
   emit("select-node", nodeId);
   drawerOpen.value = false;
   mobilePane.value = "learn";
 }
 
 function onSwitchCourse(courseId) {
-  courseMenuOpen.value = false;
+  closeCourseMenu({ restoreFocus: true });
   emit("switch-course", courseId);
 }
 
+function handleBrowseCourses() {
+  closeCourseMenu({ restoreFocus: true });
+  emit("go-home");
+}
+
 function handleCoachSend(message) {
+  closeCourseMenu();
   mobilePane.value = "coach";
   emit("send-tutor", message);
 }
 
-function handleNav(key) {
+async function handleNav(key) {
+  closeCourseMenu();
   if (key === "learn") {
     mobilePane.value = "learn";
     drawerOpen.value = false;
+    await focusWorkspaceRegion("learn");
     return;
   }
 
   if (key === "coach") {
     mobilePane.value = "coach";
     drawerOpen.value = false;
+    await focusWorkspaceRegion("coach");
     return;
   }
 
@@ -661,20 +903,64 @@ function handleNav(key) {
   }
 }
 
+function isDrawerAction(key) {
+  return key === "path" || key === "assessment" || key === "settings";
+}
+
+function isNavActive(key) {
+  if (key === "learn" || key === "coach") {
+    return effectiveMobilePane.value === key;
+  }
+
+  if (key === "path") {
+    return drawerOpen.value && sidebarPanel.value === "tree";
+  }
+
+  if (key === "assessment") {
+    return drawerOpen.value && sidebarPanel.value === "radar";
+  }
+
+  if (key === "settings") {
+    return drawerOpen.value && sidebarPanel.value === "settings";
+  }
+
+  return false;
+}
+
+function navTargetId(key) {
+  if (key === "learn") {
+    return LEARN_PANEL_ID;
+  }
+
+  if (key === "coach") {
+    return COACH_PANEL_ID;
+  }
+
+  return DRAWER_PANEL_ID;
+}
+
+function navExpandedState(key) {
+  if (!isDrawerAction(key)) {
+    return undefined;
+  }
+
+  return String(isNavActive(key));
+}
+
+async function focusWorkspaceRegion(key) {
+  if (typeof window === "undefined" || !window.matchMedia("(min-width: 1280px)").matches) {
+    return;
+  }
+
+  await nextTick();
+  const target = key === "coach" ? coachPanelRef.value : learnPanelRef.value;
+  if (target instanceof HTMLElement) {
+    target.focus({ preventScroll: true });
+  }
+}
+
 function navButtonClass(key) {
-  if ((key === "learn" || key === "coach") && effectiveMobilePane.value === key) {
-    return "bg-primary-soft text-primary";
-  }
-
-  if (key === "path" && drawerOpen.value && sidebarPanel.value === "tree") {
-    return "bg-primary-soft text-primary";
-  }
-
-  if (key === "assessment" && drawerOpen.value && sidebarPanel.value === "radar") {
-    return "bg-primary-soft text-primary";
-  }
-
-  if (key === "settings" && drawerOpen.value && sidebarPanel.value === "settings") {
+  if (isNavActive(key)) {
     return "bg-primary-soft text-primary";
   }
 
@@ -682,14 +968,7 @@ function navButtonClass(key) {
 }
 
 function mobileActionClass(key) {
-  const active =
-    (key === "learn" || key === "coach")
-      ? effectiveMobilePane.value === key
-      : (key === "path" && drawerOpen.value && sidebarPanel.value === "tree")
-        || (key === "assessment" && drawerOpen.value && sidebarPanel.value === "radar")
-        || (key === "settings" && drawerOpen.value && sidebarPanel.value === "settings");
-
-  return active
+  return isNavActive(key)
     ? "border-primary/25 bg-primary-soft text-primary"
     : "border-subtle bg-card text-text-muted";
 }

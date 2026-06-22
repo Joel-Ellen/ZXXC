@@ -21,7 +21,7 @@
 
 <script setup>
 /**
- * MarkdownViewer — 代码高亮 Markdown 渲染组件
+ * MarkdownViewer — Markdown 渲染组件
  *
  * 接收 content prop：
  *   { content_type: "markdown", markdown: "# ...", title, metadata }
@@ -48,14 +48,6 @@ const htmlContent = computed(() => {
   return renderMarkdown(source)
 })
 </script>
-
-<style>
-/* ============================================================
-   highlight.js Theme: GitHub Dark
-   Inlined here so the component is self-contained.
-   ============================================================ */
-@import 'highlight.js/styles/github-dark.css';
-</style>
 
 <style scoped>
 .markdown-viewer {
@@ -139,7 +131,7 @@ const htmlContent = computed(() => {
   border: 1px solid #ddd;
 }
 
-/* ── Code blocks (highlight.js styled) ── */
+/* ── Code blocks ── */
 .markdown-body :deep(pre) {
   margin: 12px 0;
   border-radius: 8px;

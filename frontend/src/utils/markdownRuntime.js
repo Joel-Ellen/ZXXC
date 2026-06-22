@@ -21,11 +21,11 @@ async function loadMarkdownRenderer() {
   return markdownRendererPromise;
 }
 
-export function prefetchMarkdownRenderer() {
+export function prefetchMarkdownRuntime() {
   void loadMarkdownRenderer();
 }
 
-export async function renderMarkdown(source = "") {
+export async function renderMarkdownRuntime(source = "") {
   if (!source) {
     return "";
   }

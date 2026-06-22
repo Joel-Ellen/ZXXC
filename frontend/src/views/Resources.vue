@@ -92,8 +92,9 @@
 <script setup>
 import { ref, watch, onMounted } from 'vue'
 import { resourcesAPI } from '../api'
-import { renderChatMessage, useContentRenderer } from '../composables/useContentRenderer'
-import mermaid from 'mermaid'
+import { renderChatMessage } from '../composables/useContentRenderer'
+import { useTheme } from '../composables/useTheme.js'
+import { renderMermaidSvg } from '../utils/mermaidRuntime.js'
 import dayjs from 'dayjs'
 
 const courses = ['人工智能', '机器学习', '深度学习', '数据结构', '操作系统', '计算机网络', '大模型应用开发']
@@ -113,7 +114,9 @@ const config = ref({ course_name: '人工智能', topic: '机器学习基础', r
 const generating = ref(false)
 const currentContent = ref(null)
 const renderedMermaid = ref('')
+const currentMermaidSource = ref('')
 const myResources = ref([])
+const { theme } = useTheme()
 
 function renderMarkdown(text) { return renderChatMessage(text) }
 function formatDate(date) { return dayjs(date).format('MM-DD HH:mm') }
@@ -129,9 +132,8 @@ async function generateResource() {
     const res = await resourcesAPI.generate(config.value)
     if (res.success) {
       currentContent.value = res.data.content
-      if (res.data.content?.mermaid_code) {
-        try { const { svg } = await mermaid.render('resource-mermaid', res.data.content.mermaid_code); renderedMermaid.value = svg } catch (e) { /* ignore */ }
-      }
+      currentMermaidSource.value = res.data.content?.mermaid_code || ''
+      await renderCurrentMermaid()
       await loadMyResources()
     }
   } catch (e) { console.error(e) }
@@ -146,6 +148,8 @@ async function generateAll() {
     })
     if (res.success) {
       currentContent.value = { title: '全部资源已生成', content: JSON.stringify(res.data.results, null, 2) }
+      currentMermaidSource.value = ''
+      renderedMermaid.value = ''
       await loadMyResources()
     }
   } catch (e) { console.error(e) }
@@ -159,7 +163,28 @@ async function loadMyResources() {
   } catch (e) { /* ignore */ }
 }
 
-onMounted(() => { mermaid.initialize({ startOnLoad: false, theme: 'default' }); loadMyResources() })
+async function renderCurrentMermaid() {
+  if (!currentMermaidSource.value) {
+    renderedMermaid.value = ''
+    return
+  }
+
+  try {
+    renderedMermaid.value = await renderMermaidSvg({
+      source: currentMermaidSource.value,
+      id: 'resource-mermaid',
+      isLight: theme.value === 'light',
+    })
+  } catch (e) {
+    renderedMermaid.value = ''
+  }
+}
+
+watch(theme, () => {
+  if (currentMermaidSource.value) renderCurrentMermaid()
+})
+
+onMounted(() => { loadMyResources() })
 </script>
 
 <style scoped>

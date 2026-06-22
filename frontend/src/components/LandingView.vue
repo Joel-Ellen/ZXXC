@@ -464,8 +464,21 @@
         <!-- Feature 4 -->
         <div class="feature-section grid items-center gap-12 lg:grid-cols-2">
           <div class="reveal relative">
-            <div class="aspect-square rounded-[40px] border border-subtle bg-space-panel/50 p-6 shadow-glass backdrop-blur-xl">
-              <RadarCanvas class="h-full w-full" :values="[0.85, 0.72, 0.68, 0.9, 0.55]" :high-contrast="true" />
+            <div
+              ref="radarFeatureFrame"
+              class="aspect-square rounded-[40px] border border-subtle bg-space-panel/50 p-6 shadow-glass backdrop-blur-xl"
+            >
+              <LazyRadarCanvas
+                v-if="showRadarFeature"
+                class="h-full w-full"
+                :values="[0.85, 0.72, 0.68, 0.9, 0.55]"
+                :high-contrast="true"
+              />
+              <div
+                v-else
+                aria-hidden="true"
+                class="h-full w-full rounded-[28px] border border-subtle/60 bg-[radial-gradient(circle_at_center,_rgba(140,165,255,0.14),_transparent_55%),linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0))]"
+              />
             </div>
           </div>
           <div class="reveal" style="transition-delay: 120ms;">
@@ -1063,7 +1076,7 @@
 </template>
 
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import IconCheck from "./icons/IconCheck.vue";
 import IconChat from "./icons/IconChat.vue";
 import IconDoc from "./icons/IconDoc.vue";
@@ -1072,7 +1085,8 @@ import IconQuiz from "./icons/IconQuiz.vue";
 import IconRadar from "./icons/IconRadar.vue";
 import IconSettings from "./icons/IconSettings.vue";
 import IconTree from "./icons/IconTree.vue";
-import RadarCanvas from "./RadarCanvas.vue";
+
+const LazyRadarCanvas = defineAsyncComponent(() => import("./RadarCanvas.vue"));
 
 const emit = defineEmits(["enter"]);
 
@@ -1090,6 +1104,8 @@ const heroSubhead = ref(null);
 const heroCtas = ref(null);
 const heroPills = ref(null);
 const heroVisual = ref(null);
+const radarFeatureFrame = ref(null);
+const showRadarFeature = ref(false);
 
 const menuItems = [
   { href: "#curriculum", label: "知识体系" },
@@ -1247,12 +1263,14 @@ function setupObserver() {
 
 let observer = null;
 let scrollListener = null;
+let radarObserver = null;
 
 onMounted(() => {
   nextTick(() => {
     observer = setupObserver();
     scrollListener = () => handleScroll();
     window.addEventListener("scroll", scrollListener, { passive: true });
+    setupRadarObserver();
 
     // Trigger hero reveals immediately with stagger
     setTimeout(() => {
@@ -1265,8 +1283,39 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (observer) observer.disconnect();
+  if (radarObserver) radarObserver.disconnect();
   if (scrollListener) window.removeEventListener("scroll", scrollListener);
 });
+
+function setupRadarObserver() {
+  if (showRadarFeature.value || typeof window === "undefined") {
+    return;
+  }
+
+  if (!(radarFeatureFrame.value instanceof HTMLElement) || typeof IntersectionObserver === "undefined") {
+    showRadarFeature.value = true;
+    return;
+  }
+
+  radarObserver = new IntersectionObserver(
+    (entries) => {
+      const [entry] = entries;
+      if (!entry?.isIntersecting) {
+        return;
+      }
+
+      showRadarFeature.value = true;
+      radarObserver?.disconnect();
+      radarObserver = null;
+    },
+    {
+      rootMargin: "160px 0px",
+      threshold: 0.2,
+    },
+  );
+
+  radarObserver.observe(radarFeatureFrame.value);
+}
 </script>
 
 <style scoped>
