@@ -39,6 +39,7 @@ htmlcov/
 
 # Frontend
 node_modules/
+.mermaid-runtime/
 
 # Neo4j / Milvus data (local dev)
 data/
