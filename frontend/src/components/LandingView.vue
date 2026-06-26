@@ -1076,7 +1076,7 @@
 </template>
 
 <script setup>
-import { defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import IconCheck from "./icons/IconCheck.vue";
 import IconChat from "./icons/IconChat.vue";
 import IconDoc from "./icons/IconDoc.vue";
@@ -1090,11 +1090,30 @@ const LazyRadarCanvas = defineAsyncComponent(() => import("./RadarCanvas.vue"));
 
 const emit = defineEmits(["enter"]);
 
+const props = defineProps({
+  landingStats: {
+    type: Array,
+    default: () => [
+      { value: 6, suffix: "", label: "知识模块", isNumeric: true },
+      { value: 47, suffix: "+", label: "递进式知识节点", isNumeric: true },
+      { value: 5, suffix: "", label: "能力评估维度", isNumeric: true },
+      { value: 3, suffix: "", label: "专业智能体协同", isNumeric: true },
+    ],
+  },
+});
+
+const stats = computed(() => props.landingStats);
+
 const navScrolled = ref(false);
 const mobileMenuOpen = ref(false);
 const scrollProgress = ref(0);
 const openFaq = ref(null);
-const displayedStats = ref([0, 0, 0, 0]);
+const displayedStats = ref([]);
+
+// 根据 stats prop 动态初始化 displayedStats
+watch(() => props.landingStats, (newStats) => {
+  displayedStats.value = (newStats || []).map(() => 0);
+}, { immediate: true });
 const statsAnimated = ref(false);
 
 // Template refs for immediate hero reveal
@@ -1165,13 +1184,6 @@ const demoStepsList = [
   { title: "提出疑问", desc: "在学习托盘中输入你的问题或困惑。" },
   { title: "智能体协作", desc: "多个专业智能体并行生成解释、示例与测验。" },
   { title: "资源装配", desc: "结果自动汇聚到资源画布，形成完整学习单元。" },
-];
-
-const stats = [
-  { value: 6, suffix: "", label: "知识模块", isNumeric: true },
-  { value: 47, suffix: "+", label: "递进式知识节点", isNumeric: true },
-  { value: 5, suffix: "", label: "能力评估维度", isNumeric: true },
-  { value: 3, suffix: "", label: "专业智能体协同", isNumeric: true },
 ];
 
 const testimonials = [

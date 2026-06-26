@@ -331,6 +331,7 @@
                 :build-quiz="parseQuiz"
                 @submit-quiz="(score) => $emit('submit-quiz', score)"
                 @select-node="(id) => onSelectNode(id)"
+                @refresh="$emit('refresh-resources')"
               />
             </main>
         </div>
@@ -471,6 +472,7 @@ const emit = defineEmits([
   "logout",
   "go-home",
   "switch-course",
+  "refresh-resources",
 ]);
 
 const drawerOpen = ref(false);

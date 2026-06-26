@@ -72,10 +72,12 @@ def _get_llm():
     global _llm_client
     if _llm_client is None:
         api_key = os.environ.get("DASHSCOPE_API_KEY", "")
-        if api_key:
+        if api_key and not api_key.startswith("sk-your-") and len(api_key) > 20:
             from src.llm import LLMClientV2
             _llm_client = LLMClientV2(provider="dashscope")
-            print(f"[LLM] LLMClientV2 connected (provider={_llm_client.provider})")
+            print(f"[LLM] LLMClientV2 connected (provider={_llm_client.provider}, model={_llm_client.config.get('model','?')})")
+        elif api_key:
+            print(f"[LLM] API key appears to be a placeholder ({api_key[:12]}...), using fallback mode")
         else:
             print("[LLM] No API key found, using fallback mode")
     return _llm_client
@@ -582,10 +584,25 @@ def _persist_mastery_to_neo4j(user_id: str, course_id: str, agent_state) -> None
         if nc is None:
             return  # Neo4j 不可用，静默跳过
         for node_id, score in mastery.items():
-            nc.set_user_mastery(user_id, node_id, round(score, 4))
+            nc.set_user_mastery(user_id, node_id, round(score, 4), course_id)
     except Exception:
         # Neo4j 写入失败不影响主流程（回退到内存+PostgreSQL）
         pass
+
+
+def _sync_enrollment_progress(user_id: str, course_id: str, agent_state) -> None:
+    """同步选课进度到 PostgreSQL user_courses 表。"""
+    enr_repo = _get_enrollment_repo()
+    if not enr_repo or not agent_state.active_path:
+        return
+    try:
+        mastery = agent_state.dynamic_profile.knowledge_mastery
+        completed = sum(1 for v in mastery.values() if v >= MASTERY_ADVANCE_THRESHOLD)
+        total_nodes = len(agent_state.active_path)
+        progress = completed / total_nodes if total_nodes > 0 else 0.0
+        enr_repo.update_progress(user_id, course_id, progress, completed)
+    except Exception as e:
+        print(f"[DB] Progress sync failed: {e}")
 
 
 def get_or_create_session(user_id: str, course_id: str = "data_structures") -> Dict[str, Any]:
@@ -651,9 +668,13 @@ def get_or_create_session(user_id: str, course_id: str = "data_structures") -> D
             def _hybrid_generate(node_id: str, card_type: str, difficulty: float) -> str:
                 if card_type == "concept_map":
                     try:
-                        return llm.generate_content(node_id, card_type, difficulty)
-                    except Exception:
-                        pass
+                        content = llm.generate_content(node_id, card_type, difficulty)
+                        if content and len(content) > 50:
+                            print(f"[LLM] Generated concept_map for {node_id} ({len(content)} chars)")
+                            return content
+                        print(f"[LLM] Short/empty response for {node_id}, falling back to ES")
+                    except Exception as e:
+                        print(f"[LLM] generate_content failed for {node_id}: {type(e).__name__}: {e}")
                 title = _get_node_title(node_id, node_id)
                 if node_id not in _es_cache:
                     chunks = _search_knowledge_base(title, top_k=2)
@@ -845,6 +866,7 @@ async def api_cold_start_answer(request: Request) -> JSONResponse:
             "event": "fusion_triggered",
             "fused_dimensions": list(fused.keys()),
         })
+        _persist_state(user_id, course_id, agent_state, cold_state)
         return JSONResponse({
             "phase": "complete",
             "fusion_triggered": True,
@@ -857,6 +879,7 @@ async def api_cold_start_answer(request: Request) -> JSONResponse:
         agent_state.c_epoch = cold_state.epoch_counter
         session["cold_state"] = cold_state
         session["agent_state"] = agent_state
+        _persist_state(user_id, course_id, agent_state, cold_state)
         return JSONResponse({
             "phase": "complete",
             "collected": cold_state.collected_dimensions,
@@ -922,6 +945,7 @@ async def api_init_path(request: Request) -> JSONResponse:
         })
 
     _persist_state(user_id, course_id, agent_state, session.get("cold_state"))
+    _sync_enrollment_progress(user_id, course_id, agent_state)
     return JSONResponse({
         "active_path": agent_state.active_path,
         "current_node_id": agent_state.current_node_id,
@@ -1342,6 +1366,8 @@ async def api_run_pipeline_step_v2(request: Request) -> JSONResponse:
     _normalize_state_resources(agent_state)
     session["agent_state"] = agent_state
     session["pipeline_log"].extend(logs)
+
+    _sync_enrollment_progress(user_id, course_id, agent_state)
     _persist_state(user_id, course_id, agent_state, session.get("cold_state"))
 
     return JSONResponse({
@@ -1414,6 +1440,7 @@ async def api_ask_tutor(request: Request) -> JSONResponse:
         agent_state.tutor_response = tr
 
     session["agent_state"] = agent_state
+    _persist_state(user_id, course_id, agent_state, session.get("cold_state"))
     return JSONResponse({
         "tutor_response": agent_state.tutor_response,
         "reference_count": len(ref_chunks),
@@ -1594,6 +1621,8 @@ async def api_stream_pipeline(request: Request) -> EventSourceResponse:
                 agent_state.current_node_id = agent_state.active_path[idx + 1]
 
         session["agent_state"] = agent_state
+        _sync_enrollment_progress(user_id, course_id, agent_state)
+        _persist_state(user_id, course_id, agent_state, session.get("cold_state"))
         yield {"event": "done", "data": json.dumps({
             "iteration": agent_state.iteration,
             "capability_radar": agent_state.dynamic_profile.capability_radar,
@@ -1957,13 +1986,18 @@ app = Starlette(
 )
 
 
+@app.on_event("startup")
+async def _preload_services() -> None:
+    """异步预加载 ES 知识库，避免首次请求时阻塞。"""
+    import asyncio
+    loop = asyncio.get_event_loop()
+    # 在线程池中加载，不阻塞事件循环
+    await loop.run_in_executor(None, _safe_get_es_kb)
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print("  EduAgent 前后端对接服务器")
     print("  访问: http://localhost:8800")
     print("=" * 60)
-    # 启动时预加载 ES 知识库（模型加载 + 连接）
-    print("[Init] Loading knowledge base...")
-    _safe_get_es_kb()
-    print("[Init] Ready.")
     uvicorn.run(app, host="0.0.0.0", port=8800, log_level="info")

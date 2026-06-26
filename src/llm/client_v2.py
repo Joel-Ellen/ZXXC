@@ -282,7 +282,7 @@ class LLMClientV2:
             "max_tokens": max_tokens,
         }
 
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
                 f"https://{host}{path}",
                 headers=headers,
@@ -625,11 +625,11 @@ class LLMClientV2:
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                # 在已运行的事件循环中（如 Jupyter），创建新任务
+                # 在已运行的事件循环中（如 uvicorn），在线程池中运行
                 import concurrent.futures
                 with concurrent.futures.ThreadPoolExecutor() as pool:
                     future = pool.submit(asyncio.run, self.chat(messages, temperature, max_tokens))
-                    result = future.result(timeout=120)
+                    result = future.result(timeout=45.0)
             else:
                 result = loop.run_until_complete(
                     self.chat(messages, temperature, max_tokens)
@@ -660,7 +660,7 @@ class LLMClientV2:
                         asyncio.run,
                         self.chat(messages, temperature, max_tokens, json_mode)
                     )
-                    return future.result(timeout=120)
+                    return future.result(timeout=45.0)
             else:
                 return loop.run_until_complete(
                     self.chat(messages, temperature, max_tokens, json_mode)

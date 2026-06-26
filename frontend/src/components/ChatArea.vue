@@ -136,7 +136,43 @@
       </div>
     </div>
 
-    <footer class="shrink-0 pt-3">
+    <footer class="shrink-0 pt-3 space-y-3">
+      <!-- 上下文类型选择器 -->
+      <div v-if="bootMode !== 'probe'" class="flex flex-wrap gap-2">
+        <button
+          v-for="ctx in contextTypes"
+          :key="ctx.value"
+          type="button"
+          class="focus-ring rounded-full px-3 py-1 text-[11px] font-medium transition-all duration-200"
+          :class="selectedContext === ctx.value
+            ? 'bg-primary text-white shadow-sm'
+            : 'border border-subtle bg-card text-text-muted hover:border-primary/30 hover:text-text-secondary'"
+          @click="selectedContext = selectedContext === ctx.value ? 'concept' : ctx.value"
+        >
+          {{ ctx.label }}
+        </button>
+      </div>
+
+      <!-- 代码调试面板 -->
+      <div
+        v-if="selectedContext === 'code_debug' && bootMode !== 'probe'"
+        class="rounded-2xl border border-subtle bg-card p-3"
+      >
+        <label class="mb-1 block text-xs font-semibold text-text-secondary">代码片段</label>
+        <textarea
+          v-model="codeSnippet"
+          class="focus-ring mb-2 w-full rounded-xl border border-subtle bg-space-surface px-3 py-2 font-mono text-xs text-text-primary placeholder:text-text-muted"
+          rows="4"
+          placeholder="粘贴需要调试的代码..."
+        />
+        <label class="mb-1 block text-xs font-semibold text-text-secondary">错误信息（可选）</label>
+        <input
+          v-model="errorMessage"
+          class="focus-ring w-full rounded-xl border border-subtle bg-space-surface px-3 py-2 text-xs text-text-primary placeholder:text-text-muted"
+          placeholder="粘贴报错信息..."
+        />
+      </div>
+
       <div class="rounded-[24px] border border-subtle bg-card p-2.5 shadow-card">
         <div class="flex items-end gap-3">
           <label class="sr-only" for="chat-input">辅导输入框</label>
@@ -190,6 +226,18 @@ const emit = defineEmits(["send", "submit-probe"]);
 const draft = ref("");
 const scrollRoot = ref(null);
 const isPinnedToBottom = ref(true);
+
+// 上下文类型选择器（来自旧 Tutor.vue）
+const contextTypes = [
+  { value: "concept", label: "概念讲解" },
+  { value: "problem_solving", label: "解题思路" },
+  { value: "code_debug", label: "代码调试" },
+  { value: "study_advice", label: "学习建议" },
+  { value: "exam_prep", label: "考前冲刺" },
+];
+const selectedContext = ref("concept");
+const codeSnippet = ref("");
+const errorMessage = ref("");
 
 const quickPrompts = computed(() => {
   if (props.suggestions.length) {
@@ -262,8 +310,17 @@ function submit() {
   }
 
   isPinnedToBottom.value = true;
-  emit("send", value);
+  emit("send", {
+    text: value,
+    contextType: selectedContext.value,
+    codeSnippet: selectedContext.value === "code_debug" ? codeSnippet.value : "",
+    errorMessage: selectedContext.value === "code_debug" ? errorMessage.value : "",
+  });
   draft.value = "";
+  if (selectedContext.value === "code_debug") {
+    codeSnippet.value = "";
+    errorMessage.value = "";
+  }
 }
 
 function sendPrompt(prompt) {
@@ -272,7 +329,12 @@ function sendPrompt(prompt) {
   }
 
   isPinnedToBottom.value = true;
-  emit("send", prompt);
+  emit("send", {
+    text: prompt,
+    contextType: "concept",
+    codeSnippet: "",
+    errorMessage: "",
+  });
 }
 
 function handleScroll() {

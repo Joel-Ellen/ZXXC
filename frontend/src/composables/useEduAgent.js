@@ -61,6 +61,7 @@ export function useEduAgent() {
   const lastDiagnostic = ref(null);
   const messages = ref([]);
   const infoMessage = ref("");
+  const stepLogs = ref([]);
   const agentStatuses = ref([
     { key: "doc", kind: "doc", label: "文档智能体", phase: "待命", progress: 0, active: false },
     { key: "quiz", kind: "quiz", label: "评估智能体", phase: "等待中", progress: 0, active: false },
@@ -83,12 +84,14 @@ export function useEduAgent() {
   );
   const courseId = computed(() => activeCourse.value?.course_id || "data_structures");
 
-  function setInfo(message) {
+  function setInfo(message, durationMs = 3000) {
     infoMessage.value = message;
     clearTimeout(setInfo._timer);
-    setInfo._timer = setTimeout(() => {
-      infoMessage.value = "";
-    }, 3000);
+    if (durationMs > 0) {
+      setInfo._timer = setTimeout(() => {
+        infoMessage.value = "";
+      }, durationMs);
+    }
   }
 
   function resetLearningState() {
@@ -100,6 +103,7 @@ export function useEduAgent() {
     messages.value = [];
     probe.value = null;
     probeCollected.value = 0;
+    stepLogs.value = [];
   }
 
   function hydrateState(state) {
@@ -113,6 +117,12 @@ export function useEduAgent() {
     diagnosticReport.value = state.dynamic_profile?.diagnostic_report_md ?? "";
     resources.value = state.generated_resources ?? {};
 
+    // 从持久化的 pipeline_log 提取最新 Agent 运行记录
+    const pipelineLog = state.pipeline_log ?? [];
+    if (pipelineLog.length) {
+      stepLogs.value = pipelineLog.filter((l) => l.agent).slice(-10);
+    }
+
     if (!currentNode.value) {
       const firstPending = activePath.value.find((id) => (mastery.value[id] ?? 0) < 0.65);
       currentNode.value = state.current_node_id || firstPending || activePath.value[0] || "";
@@ -120,30 +130,68 @@ export function useEduAgent() {
   }
 
   function refreshStatuses() {
+    const cards = currentCards.value;
+    const hasCards = cards.length > 0;
+    const hasQuiz = cards.some((card) => card.card_type === "diagnostic_quiz");
+    const hasTutorResponse = Boolean(lastDiagnostic.value?.tutor_response ||
+      (typeof lastDiagnostic.value === "object" && lastDiagnostic.value !== null));
+    const pathLength = activePath.value.length;
+    const masteryEntries = Object.entries(mastery.value);
+    const masteredCount = masteryEntries.filter(([, v]) => (v ?? 0) >= 0.65).length;
+    const radarValues = capabilityRadar.value;
+    const hasRadar = Array.isArray(radarValues) && radarValues.some((v) => v !== 0.5);
+    const currentStepLogs = lastDiagnostic.value?.step_logs || stepLogs.value;
+    const evalLog = currentStepLogs.find((l) => l.agent === "Evaluator");
+    const validLog = currentStepLogs.find((l) => l.agent === "Validator");
+
     agentStatuses.value = [
       {
         key: "doc",
         kind: "doc",
         label: "文档智能体",
-        phase: currentCards.value.length ? "资源就绪" : "待命",
-        progress: currentCards.value.length ? 100 : 0,
+        phase: hasCards ? `已生成 ${cards.length} 张卡片` : "待命",
+        progress: hasCards ? 100 : 0,
         active: true,
       },
       {
         key: "quiz",
         kind: "quiz",
         label: "评估智能体",
-        phase: currentCards.value.some((card) => card.card_type === "diagnostic_quiz") ? "测验可用" : "等待中",
-        progress: 50,
+        phase: hasQuiz ? "测验就绪" : hasCards ? "准备中" : "等待中",
+        progress: hasQuiz ? 100 : hasCards ? 50 : 0,
         active: true,
       },
       {
         key: "path",
         kind: "path",
         label: "路径规划",
-        phase: activePath.value.length ? `${activePath.value.length} 个节点` : "生成中",
-        progress: activePath.value.length ? 100 : 10,
+        phase: pathLength ? `${pathLength} 节点 / 已掌握 ${masteredCount}` : "生成中",
+        progress: pathLength ? Math.round((masteredCount / pathLength) * 100) : 10,
         active: true,
+      },
+      {
+        key: "eval",
+        kind: "eval",
+        label: "行为评估",
+        phase: evalLog ? `准确率 ${Math.round((evalLog.effective_correctness ?? evalLog.mastery_delta ?? 0.7) * 100)}%` : "待首次评估",
+        progress: evalLog ? 100 : 0,
+        active: Boolean(evalLog),
+      },
+      {
+        key: "valid",
+        kind: "valid",
+        label: "质量校验",
+        phase: validLog ? `通过率 ${Math.round((validLog.overall_pass_rate ?? 1) * 100)}%` : "待校验",
+        progress: validLog ? Math.round((validLog.overall_pass_rate ?? 1) * 100) : 0,
+        active: Boolean(validLog),
+      },
+      {
+        key: "profile",
+        kind: "profile",
+        label: "画像分析",
+        phase: hasRadar ? "能力雷达已生成" : hasTutorResponse ? "辅导记录可用" : "等待数据",
+        progress: hasRadar ? 100 : hasTutorResponse ? 60 : 0,
+        active: hasRadar || hasTutorResponse,
       },
     ];
   }
@@ -393,9 +441,8 @@ export function useEduAgent() {
 
     currentNode.value = nodeId;
     isLoadingNode.value = true;
-    if (!silent) {
-      setInfo(`正在为「${nodeTitles.value[nodeId] || nodeId}」生成学习资源...`);
-    }
+    const nodeLabel = nodeTitles.value[nodeId] || nodeId;
+    setInfo(`正在为「${nodeLabel}」生成学习资源...`);
 
     try {
       await runPipelineStep({
@@ -410,8 +457,14 @@ export function useEduAgent() {
       const state = await fetchState(userId.value, courseId.value);
       hydrateState(state);
       currentNode.value = state.current_node_id || nodeId;
-    } catch {
-      setInfo("资源生成失败。");
+      const cardCount = (state.generated_resources?.[currentNode.value] || []).length;
+      if (!silent) {
+        setInfo(cardCount ? `${nodeLabel} 已加载 ${cardCount} 份资源。` : `${nodeLabel} 资源生成完成。`);
+      }
+    } catch (e) {
+      const message = e?.response?.data?.detail || e?.message || "未知错误";
+      setInfo(`资源生成失败：${message}`, 10000);
+      console.error("loadNode failed:", e);
     } finally {
       isLoadingNode.value = false;
       refreshStatuses();
@@ -448,7 +501,11 @@ export function useEduAgent() {
         nextNodeId,
         nextNodeTitle: nodeTitles.value[nextNodeId] || nextNodeId,
         masteryThreshold: response.mastery_threshold ?? 0.65,
+        step_logs: response.step_logs || [],
       };
+      if (response.step_logs?.length) {
+        stepLogs.value = response.step_logs.filter((l) => l.agent);
+      }
 
       if (lastDiagnostic.value.advancedToNextNode) {
         setInfo(`诊断通过，已推进到「${lastDiagnostic.value.nextNodeTitle || "下一节点"}」。`);
@@ -463,12 +520,24 @@ export function useEduAgent() {
     }
   }
 
-  async function sendTutorMessage(query) {
-    if (!query.trim()) {
+  async function sendTutorMessage(query, contextType = "concept", codeSnippet = "", errorMessage = "") {
+    if (typeof query !== "string" || !query.trim()) {
       return;
     }
 
-    const userMsg = { id: `u-${Date.now()}`, role: "user", content: query.trim() };
+    // 组装展示标签
+    const ctxLabel = {
+      concept: "概念讲解",
+      problem_solving: "解题思路",
+      code_debug: "代码调试",
+      study_advice: "学习建议",
+      exam_prep: "考前冲刺",
+    }[contextType] || "概念讲解";
+    const displayQuery = contextType === "code_debug" && codeSnippet
+      ? `[${ctxLabel}]\n\`\`\`\n${codeSnippet}\n\`\`\`\n${errorMessage ? `错误：${errorMessage}\n` : ""}${query.trim()}`
+      : query.trim();
+
+    const userMsg = { id: `u-${Date.now()}`, role: "user", content: displayQuery };
     const assistantMsg = {
       id: `a-${Date.now()}`,
       role: "assistant",
@@ -479,7 +548,13 @@ export function useEduAgent() {
     messages.value = [...messages.value, userMsg, assistantMsg];
 
     try {
-      const data = await askTutor({ user_id: userId.value, query: query.trim() });
+      const data = await askTutor({
+        user_id: userId.value,
+        query: query.trim(),
+        context_type: contextType,
+        code_snippet: codeSnippet,
+        error_message: errorMessage,
+      });
       const response = data.tutor_response ?? {};
       assistantMsg.content = response.text_explanation || "当前暂无可用回答，请稍后再试。";
       assistantMsg.mermaidSource = response.mermaid_src || "";

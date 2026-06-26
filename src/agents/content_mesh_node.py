@@ -589,7 +589,7 @@ class ContentMeshNode:
                 key=lambda style: style_means.get(f"{style}_weight", 0.0),
             )
 
-        for node_id in active_path[:3]:  # 只调度前 3 个节点的资源
+        for node_id in active_path[:1]:  # 仅调度当前节点（后续节点由影子预生成覆盖）
             mastery = state.dynamic_profile.knowledge_mastery.get(node_id, 0.5)
             difficulty = max(0.1, 1.0 - mastery)  # 掌握越低 → 难度越高
 

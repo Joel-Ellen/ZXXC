@@ -55,6 +55,14 @@
           >
             {{ focusMode ? "退出聚焦" : "聚焦模式" }}
           </button>
+          <button
+            type="button"
+            class="focus-ring rounded-full border border-primary/20 bg-primary-soft px-3.5 py-2 text-[11px] font-semibold uppercase tracking-[0.10em] text-primary transition-all duration-200 hover:border-primary/40 hover:bg-primary/10 active:scale-95"
+            :disabled="!currentNode || loading"
+            @click="$emit('refresh')"
+          >
+            {{ loading ? "生成中..." : "刷新资源" }}
+          </button>
         </div>
       </div>
 
@@ -379,7 +387,7 @@ const props = defineProps({
   buildQuiz: { type: Function, required: true },
 });
 
-const emit = defineEmits(["submit-quiz", "select-node"]);
+const emit = defineEmits(["submit-quiz", "select-node", "refresh"]);
 
 const orderedIds = ref([]);
 const minimizedIds = ref([]);

@@ -75,6 +75,7 @@
         @logout="handleLogout"
         @go-home="goHome"
         @switch-course="onSwitchCourse"
+        @refresh-resources="() => loadNode(currentNode)"
       />
     </template>
   </div>
@@ -368,13 +369,18 @@ function onCourseSelect(courseId) {
   handleEnrollCourse(courseId);
 }
 
-async function onSendTutorMessage(query) {
+async function onSendTutorMessage(payload) {
   if (workspacePreview.value) {
+    const query = typeof payload === "string" ? payload : payload.text;
     await sendPreviewTutorMessage(query);
     return;
   }
 
-  await sendTutorMessage(query);
+  if (typeof payload === "string") {
+    await sendTutorMessage(payload);
+  } else {
+    await sendTutorMessage(payload.text, payload.contextType, payload.codeSnippet, payload.errorMessage);
+  }
 }
 
 function onSwitchCourse(courseId) {

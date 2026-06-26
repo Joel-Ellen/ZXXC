@@ -106,8 +106,9 @@
         <div class="mt-6 p-4 rounded-xl bg-card border border-subtle">
           <p class="text-xs text-text-muted mb-2">预设测试账号</p>
           <div class="text-xs text-text-secondary space-y-1.5">
-            <p>管理员：<code class="text-primary bg-card px-1.5 py-0.5 rounded">admin</code> / <code class="text-primary bg-card px-1.5 py-0.5 rounded">Admin@2026!</code></p>
-            <p>学生：<code class="text-secondary bg-card px-1.5 py-0.5 rounded">student</code> / <code class="text-secondary bg-card px-1.5 py-0.5 rounded">Learn@2026</code></p>
+            <p>管理员：<code class="text-primary bg-card px-1.5 py-0.5 rounded">admin</code></p>
+            <p>学生：<code class="text-secondary bg-card px-1.5 py-0.5 rounded">student</code></p>
+            <p class="text-xs text-text-muted mt-2">密码请联系管理员获取</p>
           </div>
         </div>
       </div>

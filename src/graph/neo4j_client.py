@@ -622,7 +622,7 @@ class Neo4jClient:
     # ------------------------------------------------------------------
 
     def set_user_mastery(
-        self, user_id: str, node_id: str, mastery: float
+        self, user_id: str, node_id: str, mastery: float, course_id: str = ""
     ) -> bool:
         """记录用户对某知识点的掌握度。
 
@@ -632,12 +632,13 @@ class Neo4jClient:
             user_id: 用户 ID。
             node_id: 知识点 ID。
             mastery: 掌握度 (0.0-1.0)。
+            course_id: 课程 ID（用于隔离不同课程的掌握度数据）。
 
         Returns:
             True。
         """
         cypher = """
-        MATCH (n:KnowledgeNode {node_id: $node_id})
+        MATCH (n:KnowledgeNode {node_id: $node_id, course_id: $course_id})
         MERGE (u:User {user_id: $user_id})
         MERGE (u)-[r:MASTERED]->(n)
         SET r.mastery = $mastery,
@@ -648,23 +649,32 @@ class Neo4jClient:
             "user_id": user_id,
             "node_id": node_id,
             "mastery": mastery,
+            "course_id": course_id,
         })
         return True
 
-    def get_user_mastery_map(self, user_id: str) -> Dict[str, float]:
-        """获取用户对所有已交互知识点的掌握度映射。
+    def get_user_mastery_map(self, user_id: str, course_id: str = "") -> Dict[str, float]:
+        """获取用户对某课程所有已交互知识点的掌握度映射。
 
         Args:
             user_id: 用户 ID。
+            course_id: 课程 ID（为空则返回所有课程的掌握度）。
 
         Returns:
             Dict[node_id → mastery]。
         """
-        cypher = """
-        MATCH (u:User {user_id: $user_id})-[r:MASTERED]->(n:KnowledgeNode)
-        RETURN n.node_id AS node_id, r.mastery AS mastery
-        """
-        result = self.execute_read(cypher, {"user_id": user_id})
+        if course_id:
+            cypher = """
+            MATCH (u:User {user_id: $user_id})-[r:MASTERED]->(n:KnowledgeNode {course_id: $course_id})
+            RETURN n.node_id AS node_id, r.mastery AS mastery
+            """
+            result = self.execute_read(cypher, {"user_id": user_id, "course_id": course_id})
+        else:
+            cypher = """
+            MATCH (u:User {user_id: $user_id})-[r:MASTERED]->(n:KnowledgeNode)
+            RETURN n.node_id AS node_id, r.mastery AS mastery
+            """
+            result = self.execute_read(cypher, {"user_id": user_id})
         mastery_map: Dict[str, float] = {}
         for record in result.records:
             mastery_map[record["node_id"]] = record.get("mastery", 0.0)

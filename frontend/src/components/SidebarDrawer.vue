@@ -108,6 +108,37 @@
                   :values="radarValues"
                   :high-contrast="highContrast"
                 />
+
+                <!-- 能力维度指标卡片 -->
+                <section
+                  class="mt-5 rounded-[22px] border border-subtle bg-card p-5 shadow-card"
+                >
+                  <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">维度详情</p>
+                  <div class="mt-3 space-y-2">
+                    <div
+                      v-for="(dim, idx) in radarDimensions"
+                      :key="dim.key"
+                      class="flex items-center justify-between rounded-xl border border-subtle px-4 py-2.5"
+                    >
+                      <span class="text-xs font-semibold text-text-primary">{{ dim.label }}</span>
+                      <div class="flex items-center gap-2">
+                        <div class="h-2 w-20 overflow-hidden rounded-full bg-space-surface">
+                          <div
+                            class="h-full rounded-full transition-all duration-500"
+                            :class="radarBarClass(radarValues[idx] ?? 0.5)"
+                            :style="{ width: `${Math.round((radarValues[idx] ?? 0.5) * 100)}%` }"
+                          />
+                        </div>
+                        <span
+                          class="min-w-[2.5rem] text-right text-xs font-mono font-semibold"
+                          :class="radarTextClass(radarValues[idx] ?? 0.5)"
+                        >
+                          {{ Math.round((radarValues[idx] ?? 0.5) * 100) }}%
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </section>
               </template>
 
               <div
@@ -301,6 +332,28 @@ const currentNodeMeta = computed(() =>
 const nextPendingNode = computed(() =>
   props.nodes.find((node) => node.id !== props.currentNode && node.mastery < 0.65) ?? null,
 );
+
+const radarDimensions = [
+  { key: "concept", label: "概念理解力" },
+  { key: "engineering", label: "代码工程力" },
+  { key: "logic", label: "逻辑推理力" },
+  { key: "recovery", label: "纠错韧性" },
+  { key: "time", label: "时间管理力" },
+];
+
+function radarBarClass(value) {
+  if (value >= 0.7) return "bg-success";
+  if (value >= 0.5) return "bg-primary";
+  if (value >= 0.35) return "bg-warning";
+  return "bg-error";
+}
+
+function radarTextClass(value) {
+  if (value >= 0.7) return "text-success";
+  if (value >= 0.5) return "text-primary";
+  if (value >= 0.35) return "text-warning";
+  return "text-error";
+}
 
 const pathStats = computed(() => [
   {
