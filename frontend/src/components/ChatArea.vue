@@ -1,8 +1,8 @@
 <template>
-  <section class="flex h-full min-h-0 flex-col px-4 pb-5 pt-5 sm:px-6">
-    <header class="shrink-0 pb-3">
+  <section class="flex h-full min-h-0 flex-col px-4 py-4 sm:px-5" @wheel="forwardWheelToMessages">
+    <header class="shrink-0 pb-4">
       <div class="flex items-start justify-between gap-4">
-        <div>
+        <div class="min-w-0">
           <p class="text-[11px] font-black uppercase tracking-[0.12em] text-text-muted">辅导通道</p>
           <h2 class="mt-2 text-[24px] font-black tracking-tight text-text-primary">学习托盘</h2>
           <p class="mt-2 max-w-[34ch] text-xs font-light leading-6 text-text-muted">
@@ -10,7 +10,7 @@
           </p>
         </div>
 
-        <div class="hidden rounded-[18px] border border-subtle bg-card px-4 py-3 text-right shadow-card 2xl:block">
+        <div class="workspace-shell-card hidden rounded-[18px] px-4 py-3 text-right 2xl:block">
           <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">当前模式</p>
           <p class="mt-2 text-sm font-semibold text-text-primary">{{ modeLabel }}</p>
           <p class="mt-1 text-[11px] text-text-muted">{{ modeHint }}</p>
@@ -25,12 +25,24 @@
           v-for="prompt in quickPrompts"
           :key="prompt"
           type="button"
-          class="focus-ring shrink-0 rounded-full border border-subtle bg-card px-3 py-1.5 text-[11px] font-medium text-text-secondary transition-all duration-200 hover:border-primary/30 hover:bg-card-hover hover:text-primary"
+          class="workspace-shell-btn focus-ring shrink-0 px-3 py-1.5 text-[11px] font-medium"
           :disabled="busy"
           @click="sendPrompt(prompt)"
         >
           {{ prompt }}
         </button>
+      </div>
+
+      <div v-if="bootMode !== 'probe'" class="mt-4 grid gap-3 lg:grid-cols-2">
+        <div class="workspace-shell-card-soft rounded-[18px] px-4 py-3">
+          <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">当前模式</p>
+          <p class="mt-2 text-sm font-semibold text-text-primary">{{ modeLabel }}</p>
+          <p class="mt-1 text-[11px] leading-5 text-text-muted">{{ modeHint }}</p>
+        </div>
+        <div class="workspace-shell-card-soft rounded-[18px] px-4 py-3">
+          <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">提问建议</p>
+          <p class="mt-2 text-[11px] leading-5 text-text-muted">{{ footerHint }}</p>
+        </div>
       </div>
     </header>
 
@@ -52,7 +64,7 @@
 
       <div
         v-else-if="!messages.length"
-        class="rounded-[24px] border border-subtle bg-card p-5 shadow-card"
+        class="workspace-shell-card rounded-[24px] p-5"
       >
         <div class="flex items-start gap-4">
           <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary-soft text-primary">
@@ -73,7 +85,7 @@
             v-for="prompt in quickPrompts"
             :key="`empty-${prompt}`"
             type="button"
-            class="focus-ring rounded-[18px] border border-subtle bg-space-surface/50 px-4 py-3 text-left text-sm text-text-secondary transition-all duration-200 hover:border-primary/25 hover:bg-card-hover hover:text-text-primary"
+            class="workspace-shell-card-soft focus-ring rounded-[18px] px-4 py-3 text-left text-sm text-text-secondary transition-all duration-200 hover:text-text-primary"
             :disabled="busy"
             @click="sendPrompt(prompt)"
           >
@@ -93,7 +105,7 @@
           <div class="max-w-[92%]">
             <div
               v-if="message.role === 'assistant'"
-              class="rounded-r-2xl rounded-bl-2xl rounded-tl-md border-l-[3px] border-primary bg-card px-4 py-3 shadow-card"
+               class="workspace-shell-card rounded-r-2xl rounded-bl-2xl rounded-tl-md border border-primary/20 bg-primary-soft/40 px-4 py-3"
             >
               <div class="mb-2 flex items-center gap-2">
                 <span class="h-1.5 w-1.5 rounded-full bg-primary shadow-[0_0_10px_var(--color-primary)] animate-breathe" />
@@ -121,7 +133,7 @@
 
             <div
               v-else
-              class="rounded-l-2xl rounded-br-2xl rounded-tr-md border-r-[3px] border-secondary bg-gradient-to-br from-secondary-soft to-card px-4 py-3 text-right shadow-card"
+               class="workspace-shell-card rounded-l-[20px] rounded-br-[20px] rounded-tr-md border border-secondary/20 bg-secondary-soft/40 px-4 py-3 text-right"
             >
               <div class="mb-2 flex items-center justify-end gap-2">
                 <span class="text-[10px] font-mono uppercase tracking-[0.2em] text-secondary/90">我</span>
@@ -145,8 +157,8 @@
           type="button"
           class="focus-ring rounded-full px-3 py-1 text-[11px] font-medium transition-all duration-200"
           :class="selectedContext === ctx.value
-            ? 'bg-primary text-white shadow-sm'
-            : 'border border-subtle bg-card text-text-muted hover:border-primary/30 hover:text-text-secondary'"
+            ? 'workspace-shell-btn workspace-shell-btn--accent text-white shadow-sm'
+            : 'workspace-shell-btn text-text-muted hover:text-text-secondary'"
           @click="selectedContext = selectedContext === ctx.value ? 'concept' : ctx.value"
         >
           {{ ctx.label }}
@@ -156,24 +168,24 @@
       <!-- 代码调试面板 -->
       <div
         v-if="selectedContext === 'code_debug' && bootMode !== 'probe'"
-        class="rounded-2xl border border-subtle bg-card p-3"
+        class="workspace-shell-card rounded-2xl p-3"
       >
         <label class="mb-1 block text-xs font-semibold text-text-secondary">代码片段</label>
         <textarea
           v-model="codeSnippet"
-          class="focus-ring mb-2 w-full rounded-xl border border-subtle bg-space-surface px-3 py-2 font-mono text-xs text-text-primary placeholder:text-text-muted"
+          class="workspace-shell-input focus-ring mb-2 w-full rounded-xl px-3 py-2 font-mono text-xs text-text-primary placeholder:text-text-muted"
           rows="4"
           placeholder="粘贴需要调试的代码..."
         />
         <label class="mb-1 block text-xs font-semibold text-text-secondary">错误信息（可选）</label>
         <input
           v-model="errorMessage"
-          class="focus-ring w-full rounded-xl border border-subtle bg-space-surface px-3 py-2 text-xs text-text-primary placeholder:text-text-muted"
+          class="workspace-shell-input focus-ring w-full rounded-xl px-3 py-2 text-xs text-text-primary placeholder:text-text-muted"
           placeholder="粘贴报错信息..."
         />
       </div>
 
-      <div class="rounded-[24px] border border-subtle bg-card p-2.5 shadow-card">
+      <div class="workspace-shell-card rounded-[24px] p-2.5">
         <div class="flex items-end gap-3">
           <label class="sr-only" for="chat-input">辅导输入框</label>
           <textarea
@@ -366,5 +378,26 @@ function scrollToBottom() {
 
   scrollRoot.value.scrollTop = scrollRoot.value.scrollHeight;
   isPinnedToBottom.value = true;
+}
+
+function forwardWheelToMessages(event) {
+  if (!(scrollRoot.value instanceof HTMLElement)) {
+    return;
+  }
+
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  if (scrollRoot.value.contains(target)) {
+    return;
+  }
+
+  if (target.closest("textarea, input, select, [contenteditable='true']")) {
+    return;
+  }
+
+  scrollRoot.value.scrollTop += event.deltaY;
 }
 </script>

@@ -58,6 +58,7 @@ export function useEduAgent() {
   const probeCollected = ref(0);
   const probeTotal = ref(6);
   const resources = ref({});
+  const agentFeedback = ref([]);
   const lastDiagnostic = ref(null);
   const messages = ref([]);
   const infoMessage = ref("");
@@ -99,6 +100,7 @@ export function useEduAgent() {
     activePath.value = [];
     mastery.value = {};
     resources.value = {};
+    agentFeedback.value = [];
     lastDiagnostic.value = null;
     messages.value = [];
     probe.value = null;
@@ -116,6 +118,7 @@ export function useEduAgent() {
     capabilityRadar.value = state.dynamic_profile?.capability_radar ?? capabilityRadar.value;
     diagnosticReport.value = state.dynamic_profile?.diagnostic_report_md ?? "";
     resources.value = state.generated_resources ?? {};
+    agentFeedback.value = state.agent_feedback ?? [];
 
     // 从持久化的 pipeline_log 提取最新 Agent 运行记录
     const pipelineLog = state.pipeline_log ?? [];
@@ -502,7 +505,9 @@ export function useEduAgent() {
         nextNodeTitle: nodeTitles.value[nextNodeId] || nextNodeId,
         masteryThreshold: response.mastery_threshold ?? 0.65,
         step_logs: response.step_logs || [],
+        agent_feedback: response.agent_feedback || state.agent_feedback || [],
       };
+      agentFeedback.value = response.agent_feedback || state.agent_feedback || [];
       if (response.step_logs?.length) {
         stepLogs.value = response.step_logs.filter((l) => l.agent);
       }
@@ -558,6 +563,9 @@ export function useEduAgent() {
       const response = data.tutor_response ?? {};
       assistantMsg.content = response.text_explanation || "当前暂无可用回答，请稍后再试。";
       assistantMsg.mermaidSource = response.mermaid_src || "";
+      if (Array.isArray(data.agent_feedback)) {
+        agentFeedback.value = data.agent_feedback;
+      }
     } catch {
       assistantMsg.content = "辅导服务暂时不可用。";
     } finally {
@@ -631,6 +639,7 @@ export function useEduAgent() {
     messages,
     infoMessage,
     agentStatuses,
+    agentFeedback,
     overallProgress,
     masteredCount,
     activeCourse,

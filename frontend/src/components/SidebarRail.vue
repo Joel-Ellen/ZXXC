@@ -1,60 +1,64 @@
 <template>
-  <aside class="z-50 hidden h-full w-[76px] flex-col items-center justify-start py-4 pl-3 pr-2 lg:flex">
+  <aside class="z-50 hidden h-full w-[104px] shrink-0 px-4 py-5 lg:flex">
     <div
-      class="relative flex h-full w-full flex-col items-center gap-2 overflow-hidden border border-subtle bg-space-panel px-2 py-4 shadow-glass backdrop-blur-xl transition-all duration-300"
-      :class="drawerOpen ? 'rounded-l-[24px] rounded-r-none' : 'rounded-[24px]'"
+      class="rail-shell relative flex h-full w-full flex-col items-center overflow-visible px-2 py-4 transition-all duration-300"
+      :class="drawerOpen ? 'rounded-l-2xl rounded-r-xl' : 'rounded-2xl'"
     >
-      <div
-        class="absolute left-1.5 w-1 rounded-full bg-primary shadow-glow transition-all duration-300 ease-snap"
-        :style="{ top: `${indicatorTop}px`, height: '28px', opacity: activeIndex >= 0 ? 1 : 0 }"
-      />
+      <div class="rail-shell__aura pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit]" />
 
-      <button
-        v-for="(item, index) in items"
-        :key="item.key"
-        :ref="(el) => setButtonRef(el, index)"
-        type="button"
-        class="focus-ring group relative flex h-14 w-14 items-center justify-center rounded-[16px] text-text-muted transition-all duration-300"
-        :class="item.key === activePanel
-          ? 'bg-gradient-to-br from-primary to-primary-dark text-primary-text shadow-glow-primary'
-          : 'hover:bg-card-hover hover:text-text-secondary active:scale-[0.95]'"
-        :aria-label="item.label"
-        :aria-controls="panelId"
-        :aria-expanded="String(drawerOpen && item.key === activePanel)"
-        aria-haspopup="dialog"
-        :aria-pressed="String(drawerOpen && item.key === activePanel)"
-        @click="$emit('select', item.key)"
-      >
-        <component :is="item.icon" :size="22" />
+      <div class="rail-brand relative z-10 flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl">
+        <span class="text-[15px] font-black tracking-[0.12em] text-text-primary">EA</span>
+      </div>
 
-        <span
-          v-if="!drawerOpen || item.key !== activePanel"
-          class="pointer-events-none absolute left-full z-50 ml-2 whitespace-nowrap rounded-lg border border-subtle bg-space-panel px-2.5 py-1 text-[11px] font-medium text-text-secondary opacity-0 shadow-lg backdrop-blur-md transition-all duration-200 group-hover:opacity-100"
+      <div class="rail-divider relative z-10 my-4 h-px w-9" />
+
+      <nav class="relative z-10 flex w-full flex-col items-center gap-3" aria-label="Workspace Sidebar">
+        <button
+          v-for="(item, index) in items"
+          :key="item.key"
+          type="button"
+          class="focus-ring rail-nav-btn group relative flex h-[60px] w-[56px] shrink-0 items-center justify-center rounded-2xl transition-all duration-200"
+          :class="item.key === activePanel ? 'rail-nav-btn--active' : 'rail-nav-btn--idle'"
+          :aria-label="item.label"
+          :aria-controls="panelId"
+          :aria-expanded="String(drawerOpen && item.key === activePanel)"
+          aria-haspopup="dialog"
+          :aria-pressed="String(drawerOpen && item.key === activePanel)"
+          :title="item.label"
+          @click="$emit('select', item.key)"
         >
-          {{ item.label }}
-        </span>
+          <component :is="item.icon" :size="22" />
 
-        <span
-          v-if="item.badge"
-          class="absolute -right-1 -top-1 min-w-5 rounded-full border border-black/20 bg-tertiary px-1.5 py-0.5 text-[10px] font-semibold text-tertiary-text shadow-glow-tertiary"
-        >
-          {{ item.badge }}
-        </span>
-      </button>
+          <span
+            v-if="item.badge"
+            class="rail-nav-btn__badge absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-black leading-none"
+          >
+            {{ item.badge }}
+          </span>
 
-      <div class="mt-2 h-full w-px bg-gradient-to-b from-[var(--border-strong)] via-[var(--border-subtle)] to-transparent" />
+          <span class="rail-tooltip pointer-events-none absolute left-[calc(100%+14px)] top-1/2 z-50 flex -translate-y-1/2 items-center gap-3 whitespace-nowrap rounded-2xl px-3 py-2 text-left opacity-0 shadow-[0_18px_42px_rgba(15,23,42,0.14)] transition-all duration-200 group-hover:translate-x-1 group-hover:opacity-100 group-focus-visible:translate-x-1 group-focus-visible:opacity-100">
+            <span class="flex h-8 w-8 items-center justify-center rounded-xl bg-primary-soft text-primary">
+              <component :is="item.icon" :size="16" />
+            </span>
+            <span>
+              <span class="block text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">{{ item.short }}</span>
+              <span class="mt-0.5 block text-xs font-semibold text-text-primary">{{ item.label }}</span>
+            </span>
+          </span>
+        </button>
+      </nav>
 
-      <div class="mt-auto flex w-full flex-col gap-2 rounded-[18px] border border-subtle bg-space-surface/40 p-2">
-        <p class="text-center text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">路径</p>
-        <p class="text-center text-lg font-black text-text-primary">{{ pathCount }}</p>
-        <p class="text-center text-[10px] leading-4 text-text-muted">当前课程节点数</p>
+      <div class="relative z-10 mt-auto flex w-[58px] shrink-0 flex-col items-center rounded-2xl border border-subtle bg-space-elevated px-2 py-3 text-center">
+        <span class="text-[9px] font-black uppercase tracking-[0.16em] text-text-muted">PATH</span>
+        <span class="mt-2 text-[28px] font-black leading-none text-text-primary">{{ pathCount }}</span>
+        <span class="mt-2 h-2 w-2 rounded-full bg-success shadow-[0_0_12px_var(--color-success)]" aria-label="Ready" />
       </div>
     </div>
   </aside>
 </template>
 
 <script setup>
-import { computed, nextTick, ref, watch } from "vue";
+import { computed } from "vue";
 import IconRadar from "./icons/IconRadar.vue";
 import IconSettings from "./icons/IconSettings.vue";
 import IconTree from "./icons/IconTree.vue";
@@ -68,34 +72,69 @@ const props = defineProps({
 
 defineEmits(["select"]);
 
-const buttonRefs = ref([]);
-const indicatorTop = ref(16);
-
-function setButtonRef(el, index) {
-  if (el) {
-    buttonRefs.value[index] = el;
-  }
-}
-
 const items = computed(() => [
-  { key: "tree", label: "知识路径", icon: IconTree, badge: props.pathCount || "" },
-  { key: "radar", label: "能力雷达", icon: IconRadar, badge: "" },
-  { key: "settings", label: "工作台设置", icon: IconSettings, badge: "" },
+  { key: "tree", short: "PATH", label: "知识路径", icon: IconTree, badge: props.pathCount || "" },
+  { key: "radar", short: "RADAR", label: "能力诊断", icon: IconRadar, badge: "" },
+  { key: "settings", short: "SYSTEM", label: "工作台设置", icon: IconSettings, badge: "" },
 ]);
 
-const activeIndex = computed(() =>
-  items.value.findIndex((item) => item.key === props.activePanel),
-);
-
-watch(
-  () => props.activePanel,
-  async () => {
-    await nextTick();
-    const activeBtn = buttonRefs.value[activeIndex.value];
-    if (activeBtn) {
-      indicatorTop.value = activeBtn.offsetTop + (activeBtn.offsetHeight - 28) / 2;
-    }
-  },
-  { immediate: true },
-);
 </script>
+
+<style scoped>
+.rail-shell {
+  border: 1px solid var(--border-subtle);
+  background: var(--space-panel);
+  box-shadow: var(--workspace-shadow-soft);
+}
+
+.rail-shell__aura {
+  background: linear-gradient(180deg, var(--color-primary-soft), transparent 32%);
+  opacity: 0.55;
+}
+
+.rail-brand {
+  border: 1px solid color-mix(in srgb, var(--color-primary) 24%, var(--border-subtle));
+  background: var(--color-primary-soft);
+  box-shadow: none;
+  color: var(--color-primary-dark);
+}
+
+.rail-divider {
+  background: linear-gradient(90deg, transparent, var(--border-strong), transparent);
+}
+
+.rail-nav-btn {
+  border: 1px solid transparent;
+  color: var(--text-muted);
+}
+
+.rail-nav-btn--active {
+  border-color: color-mix(in srgb, var(--color-primary) 34%, var(--border-subtle));
+  background: var(--color-primary);
+  color: var(--color-primary-text);
+  box-shadow: 0 8px 16px rgba(15, 118, 110, 0.18);
+}
+
+.rail-nav-btn--idle {
+  background: var(--space-elevated);
+  box-shadow: none;
+}
+
+.rail-nav-btn--idle:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 24%, var(--border-subtle));
+  color: var(--text-primary);
+  transform: translateY(-1px);
+}
+
+.rail-nav-btn__badge {
+  border: 1px solid var(--border-subtle);
+  background: var(--space-panel);
+  color: var(--text-primary);
+  box-shadow: var(--workspace-shadow-soft);
+}
+
+.rail-tooltip {
+  border: 1px solid var(--border-subtle);
+  background: var(--space-panel);
+}
+</style>

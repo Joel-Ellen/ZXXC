@@ -249,6 +249,19 @@ class ResourceCard(BaseModel):
 # 全局 AgentState
 # ---------------------------------------------------------------------------
 
+class AgentFeedbackItem(BaseModel):
+    """Structured agent feedback for the workspace feedback rail."""
+
+    agent: str = Field(..., min_length=1, description="Agent name")
+    stage: str = Field(default="", description="Workflow stage")
+    status: str = Field(default="info", description="info|success|warning|error|skipped")
+    headline: str = Field(default="", description="Short summary headline")
+    summary: str = Field(default="", description="One-paragraph summary")
+    details_md: str = Field(default="", description="Markdown detail body")
+    structured_data: Dict[str, Any] = Field(default_factory=dict, description="Structured metrics/data")
+    artifacts: Dict[str, Any] = Field(default_factory=dict, description="Companion render artifacts")
+
+
 class AgentState(BaseModel):
     """LangGraph StateGraph 的全局上下文状态。
 
@@ -282,6 +295,10 @@ class AgentState(BaseModel):
     generated_resources: Dict[str, List[ResourceCard]] = Field(
         default_factory=dict,
         description="Key=node_id, Value=该节点生成的资源卡片列表"
+    )
+    agent_feedback: List[AgentFeedbackItem] = Field(
+        default_factory=list,
+        description="Structured feedback timeline for the current workspace state"
     )
 
     # ---- 控制流与调度变量 ----

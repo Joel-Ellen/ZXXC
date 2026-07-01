@@ -13,7 +13,7 @@
         <aside
           ref="drawerPanel"
           :id="panelId"
-          class="drawer-surface absolute bottom-4 left-4 right-4 top-24 z-10 flex overflow-hidden rounded-[28px] border border-[color:rgba(255,255,255,0.55)] shadow-[0_28px_80px_rgba(15,23,42,0.24)] lg:inset-y-4 lg:left-[68px] lg:right-auto lg:top-4 lg:w-[408px] lg:rounded-l-none lg:border-l-0"
+          class="drawer-surface absolute bottom-4 left-4 right-4 top-24 z-10 flex overflow-hidden rounded-[24px] border border-[color:rgba(255,255,255,0.55)] shadow-[0_28px_80px_rgba(15,23,42,0.24)] lg:inset-y-4 lg:left-[76px] lg:right-auto lg:top-4 lg:w-[408px] lg:rounded-l-none lg:border-l-0"
           role="dialog"
           aria-modal="true"
           :aria-label="panelTitle"
@@ -68,7 +68,7 @@
               <template v-if="activePanel === 'tree'">
                 <section
                   :id="panelRegionId('tree')"
-                  class="mb-5 rounded-[22px] border border-subtle bg-card p-5 shadow-card"
+                  class="mb-5 rounded-[20px] border border-subtle bg-card p-5 shadow-card"
                   role="tabpanel"
                   :aria-labelledby="panelTabId('tree')"
                 >
@@ -76,7 +76,7 @@
                     <div
                       v-for="stat in pathStats"
                       :key="stat.label"
-                      class="rounded-[18px] border border-subtle bg-space-surface px-4 py-3"
+                      class="rounded-[16px] border border-subtle bg-space-surface px-4 py-3"
                     >
                       <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">{{ stat.label }}</p>
                       <p class="mt-2 text-lg font-black text-text-primary">{{ stat.value }}</p>
@@ -95,7 +95,7 @@
               <template v-else-if="activePanel === 'radar'">
                 <section
                   :id="panelRegionId('radar')"
-                  class="mb-5 rounded-[22px] border border-subtle bg-card p-5 shadow-card"
+                  class="mb-5 rounded-[20px] border border-subtle bg-card p-5 shadow-card"
                   role="tabpanel"
                   :aria-labelledby="panelTabId('radar')"
                 >
@@ -111,7 +111,7 @@
 
                 <!-- 能力维度指标卡片 -->
                 <section
-                  class="mt-5 rounded-[22px] border border-subtle bg-card p-5 shadow-card"
+                  class="mt-5 rounded-[20px] border border-subtle bg-card p-5 shadow-card"
                 >
                   <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">维度详情</p>
                   <div class="mt-3 space-y-2">
@@ -148,7 +148,7 @@
                 role="tabpanel"
                 :aria-labelledby="panelTabId('settings')"
               >
-                <section class="rounded-[22px] border border-subtle bg-card p-5 shadow-card">
+                <section class="rounded-[20px] border border-subtle bg-card p-5 shadow-card">
                   <h3 class="text-sm font-bold tracking-wide text-text-secondary">配色主题</h3>
                   <p class="mt-2 text-sm font-light leading-7 text-text-muted">
                     在深色与浅色主题之间切换，保持当前美术语言不变，只调整阅读环境与明度层次。
@@ -179,7 +179,7 @@
                   </div>
                 </section>
 
-                <section class="rounded-[22px] border border-subtle bg-card p-5 shadow-card">
+                <section class="rounded-[20px] border border-subtle bg-card p-5 shadow-card">
                   <div class="flex items-center justify-between gap-3">
                     <div>
                       <h3 class="text-sm font-bold tracking-wide text-text-secondary">高对比度</h3>
@@ -200,7 +200,7 @@
                   </div>
                 </section>
 
-                <section class="rounded-[22px] border border-subtle bg-card p-5 shadow-card">
+                <section class="rounded-[20px] border border-subtle bg-card p-5 shadow-card">
                   <h3 class="text-sm font-bold tracking-wide text-text-secondary">基础字号</h3>
                   <p class="mt-2 text-sm font-light leading-7 text-text-muted">
                     在工作台 14 到 20 像素之间调节文字基准，让阅读密度更贴合使用环境。
@@ -216,7 +216,7 @@
                   <p class="mt-2 text-xs font-mono uppercase tracking-[0.14em] text-text-muted">{{ fontSize }}px</p>
                 </section>
 
-                <section class="rounded-[22px] border border-subtle bg-card p-5 shadow-card">
+                <section class="rounded-[20px] border border-subtle bg-card p-5 shadow-card">
                   <div class="flex items-center justify-between gap-3">
                     <div>
                       <h3 class="text-sm font-bold tracking-wide text-text-secondary">减少动效</h3>

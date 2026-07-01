@@ -1,24 +1,40 @@
 ﻿<template>
-  <section class="dot-grid relative flex h-full min-h-0 flex-col px-4 pb-5 pt-4 sm:px-5 lg:px-8">
+  <section class="resource-canvas relative flex h-full min-h-0 flex-col px-4 py-4 sm:px-5 lg:px-6" @wheel="forwardWheelToContent">
     <header class="pb-4 lg:pb-5">
-      <div class="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_auto] 2xl:items-start">
+      <div class="grid gap-5 2xl:grid-cols-[minmax(0,1fr)_auto] 2xl:items-start">
         <div class="min-w-0">
           <p class="text-[10px] font-black uppercase tracking-[0.12em] text-text-muted sm:text-[11px]">课程学习区</p>
           <div class="mt-2 flex flex-wrap items-center gap-3">
-            <h2 class="gradient-text truncate text-[22px] font-black tracking-tight sm:text-[24px] lg:text-[28px]">
+            <h2 class="truncate text-[22px] font-black tracking-tight text-text-primary sm:text-[24px] lg:text-[28px]">
               {{ nodeTitle || "等待装配" }}
             </h2>
-            <span class="rounded-full border border-primary/20 bg-primary-soft px-3 py-1 text-[11px] font-semibold text-primary">
+            <span class="workspace-shell-chip workspace-shell-chip--accent px-3 py-1 text-[11px] font-semibold">
               {{ learningTone }}
             </span>
+          </div>
+
+          <div class="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+            <div class="workspace-shell-card rounded-[22px] px-4 py-4">
+              <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">当前节奏</p>
+              <p class="mt-2 text-sm leading-7 text-text-secondary">
+                {{ currentNodeMeta ? `当前节点掌握度 ${currentMastery}% ，建议先完成已展开卡片，再进入诊断。` : "等待路径装配完成后，这里会自动切换成当前节点的学习建议。" }}
+              </p>
+            </div>
+
+            <div class="workspace-shell-card-soft rounded-[22px] px-4 py-4">
+              <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">资源矩阵</p>
+              <p class="mt-2 text-sm leading-7 text-text-secondary">
+                {{ props.cards.length ? `已装配 ${props.cards.length} 份学习材料，当前优先聚焦 ${activeCardTitle}。` : "当前还没有可展开的资源卡片，等待智能体完成装配。" }}
+              </p>
+            </div>
           </div>
 
           <div class="mt-4 hidden gap-2 xl:grid xl:grid-cols-4">
             <div
               v-for="stage in learningStages"
               :key="stage.label"
-              class="rounded-[16px] border px-3 py-3"
-              :class="stage.active ? 'border-primary/25 bg-primary-soft text-primary' : 'border-subtle bg-card text-text-muted'"
+              class="workspace-shell-card-soft rounded-[16px] px-3 py-3"
+              :class="stage.active ? 'workspace-shell-chip--accent text-primary' : 'text-text-muted'"
             >
               <p class="text-[10px] font-bold uppercase tracking-[0.12em]">{{ stage.label }}</p>
               <p class="mt-1 text-[12px] leading-5">{{ stage.detail }}</p>
@@ -29,8 +45,8 @@
             <div
               v-for="stage in learningStages"
               :key="`mobile-${stage.label}`"
-              class="shrink-0 rounded-full border px-3 py-2"
-              :class="stage.active ? 'border-primary/25 bg-primary-soft text-primary' : 'border-subtle bg-card text-text-muted'"
+              class="workspace-shell-chip shrink-0 px-3 py-2"
+              :class="stage.active ? 'workspace-shell-chip--accent text-primary' : 'text-text-muted'"
             >
               <div class="flex items-center gap-1.5 whitespace-nowrap">
                 <p class="text-[10px] font-bold uppercase tracking-[0.12em]">{{ stage.label }}</p>
@@ -43,69 +59,26 @@
         <div class="flex flex-wrap items-center gap-2 2xl:justify-end">
           <button
             type="button"
-            class="focus-ring rounded-full border border-subtle bg-card px-3.5 py-2 text-[11px] font-semibold uppercase tracking-[0.10em] text-text-muted transition-all duration-200 hover:border-primary/30 hover:text-primary hover:bg-card-hover active:scale-95"
+            class="workspace-shell-btn focus-ring px-3.5 py-2 text-[11px] font-semibold uppercase tracking-[0.10em]"
             @click="isExpanded = !isExpanded"
           >
             {{ isExpanded ? "紧凑视图" : "展开矩阵" }}
           </button>
           <button
             type="button"
-            class="focus-ring rounded-full border border-subtle bg-card px-3.5 py-2 text-[11px] font-semibold uppercase tracking-[0.10em] text-text-muted transition-all duration-200 hover:border-secondary/30 hover:text-secondary hover:bg-card-hover active:scale-95"
+            class="workspace-shell-btn workspace-shell-btn--secondary focus-ring px-3.5 py-2 text-[11px] font-semibold uppercase tracking-[0.10em]"
             @click="focusMode = !focusMode"
           >
             {{ focusMode ? "退出聚焦" : "聚焦模式" }}
           </button>
           <button
             type="button"
-            class="focus-ring rounded-full border border-primary/20 bg-primary-soft px-3.5 py-2 text-[11px] font-semibold uppercase tracking-[0.10em] text-primary transition-all duration-200 hover:border-primary/40 hover:bg-primary/10 active:scale-95"
+            class="workspace-shell-btn workspace-shell-btn--accent focus-ring px-3.5 py-2 text-[11px] font-semibold uppercase tracking-[0.10em]"
             :disabled="!currentNode || loading"
             @click="$emit('refresh')"
           >
             {{ loading ? "生成中..." : "刷新资源" }}
           </button>
-        </div>
-      </div>
-
-      <div class="mt-4 hidden rounded-[18px] border border-subtle bg-card px-4 py-3 shadow-card sm:block xl:hidden">
-        <div class="flex items-start justify-between gap-3">
-          <div class="min-w-0">
-            <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">推荐下一步</p>
-            <p class="mt-1 text-sm font-semibold text-text-primary">{{ recommendationTitle }}</p>
-            <p class="mt-1 text-[11px] leading-5 text-text-muted">
-              掌握 {{ currentMastery }}% · 材料 {{ cards.length }} 份 · {{ availableTypes.has("diagnostic_quiz") ? "可提交诊断" : "诊断待生成" }}
-            </p>
-          </div>
-          <span class="rounded-full border border-subtle bg-space-surface/70 px-3 py-1 text-[11px] font-semibold text-text-secondary">
-            {{ overallProgress }}%
-          </span>
-        </div>
-      </div>
-
-      <div class="mt-5 hidden gap-3 xl:grid xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
-        <div class="rounded-[22px] border border-subtle bg-card p-4 shadow-card">
-          <div class="flex flex-wrap items-start justify-between gap-4">
-            <div class="min-w-0">
-              <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">推荐下一步</p>
-              <p class="mt-2 text-base font-semibold text-text-primary">{{ recommendationTitle }}</p>
-              <p class="mt-2 text-sm leading-6 text-text-muted">{{ recommendationDetail }}</p>
-            </div>
-            <div class="rounded-[18px] border border-subtle bg-space-surface/70 px-4 py-3 text-right">
-              <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">当前掌握</p>
-              <p class="mt-2 text-2xl font-black text-text-primary">{{ currentMastery }}%</p>
-            </div>
-          </div>
-        </div>
-
-        <div class="hidden gap-3 xl:grid xl:grid-cols-1 2xl:grid-cols-3">
-          <div
-            v-for="brief in learningBriefs"
-            :key="brief.label"
-            class="rounded-[20px] border border-subtle bg-card px-4 py-3 shadow-card"
-          >
-            <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">{{ brief.label }}</p>
-            <p class="mt-2 text-lg font-black text-text-primary">{{ brief.value }}</p>
-            <p class="mt-1 text-[11px] leading-5 text-text-muted">{{ brief.detail }}</p>
-          </div>
         </div>
       </div>
 
@@ -123,7 +96,7 @@
           v-for="node in pathNodes"
           :key="node.id"
           type="button"
-          class="focus-ring shrink-0 rounded-full border px-3.5 py-1.5 text-[11px] font-medium tracking-[0.06em] transition-all duration-200 active:scale-95"
+          class="workspace-shell-chip focus-ring shrink-0 px-3.5 py-1.5 text-[11px] font-medium tracking-[0.06em] transition-all duration-200 active:scale-95"
           :class="nodeChipClass(node)"
           @click="$emit('select-node', node.id)"
         >
@@ -132,8 +105,8 @@
       </div>
     </header>
 
-    <div class="aurora-scroll relative flex-1 overflow-y-auto">
-      <div v-if="!cards.length && !loading" class="flex h-full min-h-[420px] items-center justify-center">
+      <div ref="scrollViewport" class="aurora-scroll relative flex-1 overflow-y-auto">
+        <div v-if="!cards.length && !loading" class="flex h-full min-h-[420px] items-center justify-center">
         <div class="flex max-w-[44ch] flex-col items-center text-center animate-fadeIn">
           <div class="relative mb-6 flex h-24 w-24 items-center justify-center rounded-full">
             <div class="absolute inset-0 rounded-full bg-secondary/15 blur-2xl animate-halo" />
@@ -165,21 +138,21 @@
       </div>
 
       <div
-        class="mx-auto grid max-w-6xl grid-cols-1 gap-5 transition-all duration-500 ease-snap md:grid-cols-12"
-        :class="isExpanded ? 'scale-100' : 'scale-[0.992]'"
+        class="mx-auto grid max-w-6xl grid-cols-1 gap-5 md:grid-cols-12 auto-rows-[minmax(240px,auto)]"
       >
         <div
           v-for="(card, index) in visibleCards"
           :key="card.resource_id"
           draggable="true"
-          class="animate-cardIn transition-all duration-500"
+          class="animate-cardIn h-full transition-all duration-500"
           :style="{ animationDelay: `${index * 60}ms` }"
-          :class="getGridSpanClass(card.card_type)"
+          :class="[getGridSpanClass(card.card_type), card.resource_id === activeCardId ? 'md:-translate-y-1' : '']"
           @dragstart="onDragStart(card.resource_id)"
           @dragover.prevent
           @drop="onDrop(card.resource_id)"
         >
           <ResourceCard
+            class="h-full"
             :agent-name="agentLabel(card.card_type)"
             :title="cardLabel(card.card_type)"
             :progress-text="loading ? '栅格同步' : '资源就绪'"
@@ -195,7 +168,7 @@
           >
             <template #content>
               <div v-if="!isCardHydrated(card.resource_id)" class="space-y-4">
-                <div class="rounded-[18px] border border-subtle bg-space-surface/55 p-4 shadow-card">
+                <div class="workspace-shell-card-soft rounded-[20px] p-4">
                   <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">
                     {{ previewLabel(card.card_type) }}
                   </p>
@@ -212,41 +185,131 @@
 
                 <button
                   type="button"
-                  class="focus-ring rounded-full border border-primary/20 bg-primary-soft px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.10em] text-primary transition-all duration-200 hover:border-primary/35 hover:bg-primary-soft/80"
-                  @click.stop="activateCard(card.resource_id)"
-                >
+                    class="workspace-shell-btn workspace-shell-btn--accent focus-ring px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.10em]"
+                    @click.stop="activateCard(card.resource_id)"
+                  >
                   {{ card.resource_id === activeCardId ? "展开完整内容" : "设为当前并展开" }}
                 </button>
               </div>
 
               <div v-else class="space-y-5">
-                <MarkdownContent
-                  v-if="card.card_type === 'concept_map'"
-                  :content="conceptMarkdown(card)"
-                  :mermaid-source="conceptMermaidSource(card)"
-                />
+                <div v-if="card.card_type === 'concept_map'" class="space-y-4">
+                  <div class="workspace-shell-card rounded-[20px] p-4">
+                    <p class="text-sm leading-7 text-text-secondary">{{ conceptSummary(card) }}</p>
+                  </div>
+
+                  <div v-if="conceptObjectives(card).length" class="workspace-shell-card rounded-[20px] p-4">
+                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">学习目标</p>
+                    <ul class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
+                      <li v-for="(item, index) in conceptObjectives(card)" :key="`${card.resource_id}-objective-${index}`">{{ item }}</li>
+                    </ul>
+                  </div>
+
+                  <div v-if="conceptSections(card).length" class="space-y-3">
+                    <div
+                      v-for="(section, index) in conceptSections(card)"
+                      :key="`${card.resource_id}-section-${index}`"
+                      class="workspace-shell-card rounded-[20px] p-4"
+                    >
+                      <p class="text-[11px] font-black uppercase tracking-[0.12em] text-text-muted">{{ section.heading }}</p>
+                      <p class="mt-3 text-sm leading-7 text-text-secondary">{{ section.body }}</p>
+                    </div>
+                  </div>
+
+                  <div v-if="conceptBullets(card).length" class="workspace-shell-card rounded-[20px] p-4">
+                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">关键要点</p>
+                    <ul class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
+                      <li v-for="(item, index) in conceptBullets(card)" :key="`${card.resource_id}-bullet-${index}`">{{ item }}</li>
+                    </ul>
+                  </div>
+
+                  <div v-if="conceptMisconceptions(card).length" class="workspace-shell-card rounded-[20px] p-4">
+                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">常见误区</p>
+                    <ul class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
+                      <li v-for="(item, index) in conceptMisconceptions(card)" :key="`${card.resource_id}-misconception-${index}`">{{ item }}</li>
+                    </ul>
+                  </div>
+
+                  <div v-if="conceptReviewPrompts(card).length" class="workspace-shell-card rounded-[20px] p-4">
+                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">复习提示</p>
+                    <ul class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
+                      <li v-for="(item, index) in conceptReviewPrompts(card)" :key="`${card.resource_id}-review-${index}`">{{ item }}</li>
+                    </ul>
+                  </div>
+
+                  <MarkdownContent
+                    :content="conceptMarkdown(card)"
+                    :mermaid-source="conceptMermaidSource(card)"
+                  />
+                </div>
 
                 <div v-else-if="card.card_type === 'code_snippet'" class="space-y-4">
-                  <div class="rounded-[18px] border border-subtle bg-space-surface/55 p-4 shadow-card">
+                  <div class="workspace-shell-card rounded-[20px] p-4">
+                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">场景说明</p>
+                    <p class="mt-3 text-sm leading-7 text-text-secondary">{{ codeScenario(card) }}</p>
+                  </div>
+
+                  <div v-if="codePrerequisites(card).length" class="workspace-shell-card rounded-[20px] p-4">
+                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">前置知识</p>
+                    <ul class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
+                      <li v-for="(item, index) in codePrerequisites(card)" :key="`${card.resource_id}-prereq-${index}`">{{ item }}</li>
+                    </ul>
+                  </div>
+
+                  <div class="workspace-shell-card-soft rounded-[20px] p-4">
                     <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">
                       {{ codeLanguage(card).toUpperCase() }}
                     </p>
                     <pre class="mt-3 overflow-x-auto rounded-[16px] border border-subtle/80 bg-[#08111f] px-4 py-3 text-xs leading-6 text-slate-100">{{ fullCode(card) }}</pre>
                   </div>
+
+                  <div v-if="codeWalkthrough(card).length" class="workspace-shell-card rounded-[20px] p-4">
+                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">逐步讲解</p>
+                    <ol class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
+                      <li v-for="(item, index) in codeWalkthrough(card)" :key="`${card.resource_id}-walkthrough-${index}`">
+                        {{ index + 1 }}. {{ item }}
+                      </li>
+                    </ol>
+                  </div>
+
                   <MarkdownContent
                     v-if="codeExplanation(card)"
                     :content="codeExplanation(card)"
                   />
+
+                  <div v-if="codeComplexityNotes(card).length" class="workspace-shell-card rounded-[20px] p-4">
+                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">复杂度提示</p>
+                    <ul class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
+                      <li v-for="(item, index) in codeComplexityNotes(card)" :key="`${card.resource_id}-complexity-${index}`">{{ item }}</li>
+                    </ul>
+                  </div>
+
+                  <div v-if="codePitfalls(card).length" class="workspace-shell-card rounded-[20px] p-4">
+                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">常见坑点</p>
+                    <ul class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
+                      <li v-for="(item, index) in codePitfalls(card)" :key="`${card.resource_id}-pitfall-${index}`">{{ item }}</li>
+                    </ul>
+                  </div>
+
+                  <div v-if="codeExperiments(card).length" class="workspace-shell-card rounded-[20px] p-4">
+                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">延伸实验</p>
+                    <ul class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
+                      <li v-for="(item, index) in codeExperiments(card)" :key="`${card.resource_id}-experiment-${index}`">{{ item }}</li>
+                    </ul>
+                  </div>
                 </div>
 
                 <div v-else-if="card.card_type === 'interactive_exercise'" class="space-y-4">
-                  <div class="rounded-[18px] border border-subtle bg-card p-4 shadow-card">
+                  <div class="workspace-shell-card rounded-[20px] p-4">
+                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">任务目标</p>
+                    <p class="mt-2 text-sm leading-7 text-text-secondary">{{ exerciseGoal(card) }}</p>
+                    <p class="mt-4 text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">任务说明</p>
                     <p class="text-sm font-medium text-text-primary">{{ exercisePrompt(card) }}</p>
                     <div v-if="exerciseSteps(card).length" class="mt-4 space-y-3">
                       <div
                         v-for="(step, stepIndex) in exerciseSteps(card)"
                         :key="`${card.resource_id}-step-${stepIndex}`"
-                        class="rounded-[16px] border border-subtle bg-space-surface/40 px-4 py-3"
+                         class="workspace-shell-card-soft rounded-[16px] px-4 py-3"
                       >
                         <p class="text-[11px] font-black uppercase tracking-[0.12em] text-text-muted">步骤 {{ stepIndex + 1 }}</p>
                         <p class="mt-2 text-sm leading-6 text-text-secondary">{{ step }}</p>
@@ -254,7 +317,7 @@
                     </div>
                   </div>
 
-                  <div v-if="exerciseCheckpoints(card).length" class="rounded-[18px] border border-subtle bg-card p-4 shadow-card">
+                  <div v-if="exerciseCheckpoints(card).length" class="workspace-shell-card rounded-[20px] p-4">
                     <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">检查点</p>
                     <ul class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
                       <li v-for="(checkpoint, checkpointIndex) in exerciseCheckpoints(card)" :key="`${card.resource_id}-checkpoint-${checkpointIndex}`">
@@ -262,10 +325,28 @@
                       </li>
                     </ul>
                   </div>
+
+                  <div v-if="exerciseHints(card).length" class="workspace-shell-card rounded-[20px] p-4">
+                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">提示</p>
+                    <ul class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
+                      <li v-for="(hint, index) in exerciseHints(card)" :key="`${card.resource_id}-hint-${index}`">{{ hint }}</li>
+                    </ul>
+                  </div>
+
+                  <div v-if="exerciseExpectedOutcome(card) || exerciseSolutionOutline(card)" class="grid gap-4 lg:grid-cols-2">
+                    <div v-if="exerciseExpectedOutcome(card)" class="workspace-shell-card rounded-[20px] p-4">
+                      <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">预期结果</p>
+                      <p class="mt-3 text-sm leading-7 text-text-secondary">{{ exerciseExpectedOutcome(card) }}</p>
+                    </div>
+                    <div v-if="exerciseSolutionOutline(card)" class="workspace-shell-card rounded-[20px] p-4">
+                      <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">参考思路</p>
+                      <p class="mt-3 text-sm leading-7 text-text-secondary">{{ exerciseSolutionOutline(card) }}</p>
+                    </div>
+                  </div>
                 </div>
 
                 <div v-else-if="card.card_type === 'video_summary'" class="space-y-4">
-                  <div class="rounded-[18px] border border-subtle bg-card p-4 shadow-card">
+                  <div class="workspace-shell-card rounded-[20px] p-4">
                     <p class="text-sm leading-7 text-text-secondary">{{ videoSummary(card) }}</p>
                     <ul v-if="videoKeyPoints(card).length" class="mt-4 space-y-2 text-sm leading-6 text-text-secondary">
                       <li v-for="(point, pointIndex) in videoKeyPoints(card)" :key="`${card.resource_id}-point-${pointIndex}`">
@@ -274,24 +355,57 @@
                     </ul>
                   </div>
 
+                  <div v-if="videoTimeline(card).length" class="workspace-shell-card rounded-[20px] p-4">
+                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">分段提纲</p>
+                    <div class="mt-3 space-y-3">
+                      <div v-for="(item, index) in videoTimeline(card)" :key="`${card.resource_id}-timeline-${index}`" class="workspace-shell-card-soft rounded-[16px] px-4 py-3">
+                        <p class="text-[11px] font-black uppercase tracking-[0.12em] text-text-muted">{{ item.label }}</p>
+                        <p class="mt-2 text-sm leading-6 text-text-secondary">{{ item.summary }}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div v-if="videoWatchFocus(card).length || videoReviewQuestions(card).length" class="grid gap-4 lg:grid-cols-2">
+                    <div v-if="videoWatchFocus(card).length" class="workspace-shell-card rounded-[20px] p-4">
+                      <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">观看关注点</p>
+                      <ul class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
+                        <li v-for="(item, index) in videoWatchFocus(card)" :key="`${card.resource_id}-watch-${index}`">{{ item }}</li>
+                      </ul>
+                    </div>
+                    <div v-if="videoReviewQuestions(card).length" class="workspace-shell-card rounded-[20px] p-4">
+                      <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">复习问题</p>
+                      <ul class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
+                        <li v-for="(item, index) in videoReviewQuestions(card)" :key="`${card.resource_id}-review-q-${index}`">{{ item }}</li>
+                      </ul>
+                    </div>
+                  </div>
+
                   <a
                     v-if="videoUrl(card)"
                     :href="videoUrl(card)"
                     target="_blank"
                     rel="noreferrer"
-                    class="inline-flex rounded-full border border-secondary/25 bg-secondary-soft px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.10em] text-secondary transition-all duration-200 hover:border-secondary/35 hover:bg-secondary-soft/80"
+                    class="workspace-shell-btn workspace-shell-btn--secondary px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.10em]"
                   >
                     打开视频链接
                   </a>
                 </div>
 
                 <div v-else-if="card.card_type === 'diagnostic_quiz'" class="space-y-4">
+                  <div v-if="quizGuidance(card)" class="workspace-shell-card rounded-[20px] p-4">
+                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">作答建议</p>
+                    <p class="mt-3 text-sm leading-7 text-text-secondary">{{ quizGuidance(card) }}</p>
+                  </div>
+
                   <div
                     v-for="question in quizQuestions"
                     :key="question.id"
-                    class="rounded-[18px] border border-subtle bg-card p-4 shadow-card"
+                    class="workspace-shell-card rounded-[20px] p-4"
                   >
                     <p class="text-sm font-medium text-text-primary">{{ question.prompt }}</p>
+                    <p v-if="question.skillTag || question.difficulty" class="mt-2 text-[11px] leading-5 text-text-muted">
+                      {{ [question.skillTag, question.difficulty].filter(Boolean).join(" · ") }}
+                    </p>
                     <div class="mt-3 space-y-2">
                       <button
                         v-for="(option, optionIndex) in question.options"
@@ -304,9 +418,13 @@
                         {{ option }}
                       </button>
                     </div>
+                    <div v-if="submittedScore !== null && question.explanation" class="mt-3 workspace-shell-card-soft rounded-[16px] px-4 py-3">
+                      <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">题目解释</p>
+                      <p class="mt-2 text-sm leading-6 text-text-secondary">{{ question.explanation }}</p>
+                    </div>
                   </div>
 
-                  <div class="flex flex-wrap items-center justify-between gap-3 rounded-[18px] border border-subtle bg-card p-4 shadow-card">
+                  <div class="workspace-shell-card flex flex-wrap items-center justify-between gap-3 rounded-[20px] p-4">
                     <div class="text-sm font-light text-text-muted">
                       {{ diagnosticStatusText }}
                     </div>
@@ -318,6 +436,11 @@
                     >
                       提交诊断
                     </button>
+                  </div>
+
+                  <div v-if="quizAfterGuidance(card) && submittedScore !== null" class="workspace-shell-card rounded-[20px] p-4">
+                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">提交后建议</p>
+                    <p class="mt-3 text-sm leading-7 text-text-secondary">{{ quizAfterGuidance(card) }}</p>
                   </div>
                 </div>
 
@@ -331,23 +454,6 @@
         </div>
       </div>
 
-      <div class="mt-5 grid gap-3 xl:hidden">
-        <div class="rounded-[20px] border border-subtle bg-card px-4 py-3 shadow-card">
-          <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">推荐说明</p>
-          <p class="mt-2 text-sm leading-6 text-text-muted">{{ recommendationDetail }}</p>
-        </div>
-        <div class="grid gap-3 sm:grid-cols-3">
-          <div
-            v-for="brief in learningBriefs"
-            :key="`mobile-${brief.label}`"
-            class="rounded-[20px] border border-subtle bg-card px-4 py-3 shadow-card"
-          >
-            <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">{{ brief.label }}</p>
-            <p class="mt-2 text-lg font-black text-text-primary">{{ brief.value }}</p>
-            <p class="mt-1 text-[11px] leading-5 text-text-muted">{{ brief.detail }}</p>
-          </div>
-        </div>
-      </div>
     </div>
 
     <footer v-if="minimizedCards.length" class="pt-5">
@@ -357,7 +463,7 @@
           v-for="card in minimizedCards"
           :key="card.resource_id"
           type="button"
-          class="focus-ring rounded-full border border-subtle bg-card px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.10em] text-text-muted transition-all duration-200 hover:border-primary/30 hover:text-primary hover:bg-card-hover active:scale-95"
+          class="workspace-shell-btn focus-ring px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.10em]"
           @click="restoreCard(card.resource_id)"
         >
           {{ cardLabel(card.card_type) }}
@@ -398,6 +504,7 @@ const isExpanded = ref(false);
 const answers = ref({});
 const hydratedCardIds = ref([]);
 const submittedScore = ref(null);
+const scrollViewport = ref(null);
 
 watch(
   () => props.cards,
@@ -465,6 +572,8 @@ const quizQuestions = computed(() => {
       options: question.options || [],
       answerIndex: question.answer_index ?? question.answerIndex ?? 0,
       explanation: question.explanation || "",
+      skillTag: question.skill_tag || "",
+      difficulty: question.difficulty || "",
     }));
   }
 
@@ -474,6 +583,8 @@ const quizQuestions = computed(() => {
     options: question.options,
     answerIndex: question.answer ?? 0,
     explanation: "",
+    skillTag: "",
+    difficulty: "",
   }));
 });
 const allAnswered = computed(
@@ -488,6 +599,11 @@ const currentMastery = computed(() =>
   Math.round((currentNodeMeta.value?.mastery ?? 0) * 100),
 );
 
+const activeCardTitle = computed(() => {
+  const activeCard = sortedCards.value.find((card) => card.resource_id === activeCardId.value) ?? sortedCards.value[0];
+  return activeCard ? cardLabel(activeCard.card_type) : "当前内容";
+});
+
 const availableTypes = computed(() => new Set(props.cards.map((card) => card.card_type)));
 const nextPendingNode = computed(() =>
   props.pathNodes.find((node) => (node.mastery ?? 0) < 0.65 && node.id !== props.currentNode) ?? null,
@@ -499,58 +615,6 @@ const learningTone = computed(() => {
   if (currentMastery.value >= 65) return "节点达标";
   return "继续学习";
 });
-
-const recommendationTitle = computed(() => {
-  if (props.loading) {
-    return "正在同步当前节点的学习材料";
-  }
-
-  if (!props.cards.length) {
-    return "优先装配本节点资源";
-  }
-
-  if (currentMastery.value < 65) {
-    return "先完成本节点的概念理解与练习";
-  }
-
-  return nextPendingNode.value ? `准备进入下一节点：${nextPendingNode.value.title}` : "当前路径已进入收束阶段";
-});
-
-const recommendationDetail = computed(() => {
-  if (props.loading) {
-    return "保持当前节点不切换，系统会优先补齐概念、代码、练习与诊断四类材料。";
-  }
-
-  if (!props.cards.length) {
-    return "从知识目录选择节点后，系统会根据当前学习状态自动生成对应学习矩阵。";
-  }
-
-  if (currentMastery.value < 65) {
-    return "建议按“概念图 -> 代码示例 -> 互动练习 -> 诊断测评”的顺序推进，减少理解跳跃。";
-  }
-
-  return nextPendingNode.value
-    ? "当前节点已接近达标，可以在完成本轮诊断后继续推进到下一个薄弱点。"
-    : "路径中的主要薄弱点已经被覆盖，可以转入总结复盘或拓展练习。";
-});
-
-const learningBriefs = computed(() => [
-  {
-    label: "资源矩阵",
-    value: `${props.cards.length}`,
-    detail: props.cards.length ? "当前节点可用学习材料数" : "等待内容生成",
-  },
-  {
-    label: "未达标节点",
-    value: `${Math.max(props.pathNodes.length - props.masteredCount, 0)}`,
-    detail: nextPendingNode.value ? `下一关注：${nextPendingNode.value.title}` : "当前暂无新的薄弱节点",
-  },
-  {
-    label: "诊断状态",
-    value: availableTypes.value.has("diagnostic_quiz") ? "已就绪" : "待生成",
-    detail: availableTypes.value.has("diagnostic_quiz") ? "可以用测评确认掌握度" : "尚未生成诊断卡片",
-  },
-]);
 
 const learningStages = computed(() => [
   {
@@ -625,14 +689,41 @@ function conceptMarkdown(card) {
     return card.content;
   }
 
+  const sections = Array.isArray(metadata.sections)
+    ? `\n\n${metadata.sections.map((section) => `### ${section.heading}\n${section.body}`).join("\n\n")}`
+    : "";
   const bullets = Array.isArray(metadata.bullets) && metadata.bullets.length
     ? `\n\n${metadata.bullets.map((bullet) => `- ${bullet}`).join("\n")}`
     : "";
-  return `## ${metadata.title || cardLabel(card.card_type)}\n\n${metadata.summary || ""}${bullets}`.trim();
+  return `## ${metadata.title || cardLabel(card.card_type)}\n\n${metadata.summary || ""}${sections}${bullets}`.trim();
 }
 
 function conceptMermaidSource(card) {
   return cardMetadata(card).mermaid_source || "";
+}
+
+function conceptSummary(card) {
+  return cardMetadata(card).summary || textPreview(card.content);
+}
+
+function conceptObjectives(card) {
+  return Array.isArray(cardMetadata(card).learning_objectives) ? cardMetadata(card).learning_objectives : [];
+}
+
+function conceptSections(card) {
+  return Array.isArray(cardMetadata(card).sections) ? cardMetadata(card).sections : [];
+}
+
+function conceptBullets(card) {
+  return Array.isArray(cardMetadata(card).bullets) ? cardMetadata(card).bullets : [];
+}
+
+function conceptMisconceptions(card) {
+  return Array.isArray(cardMetadata(card).common_misconceptions) ? cardMetadata(card).common_misconceptions : [];
+}
+
+function conceptReviewPrompts(card) {
+  return Array.isArray(cardMetadata(card).review_prompts) ? cardMetadata(card).review_prompts : [];
 }
 
 function codeLanguage(card) {
@@ -647,8 +738,36 @@ function codeExplanation(card) {
   return cardMetadata(card).explanation || "";
 }
 
+function codeScenario(card) {
+  return cardMetadata(card).scenario || codeExplanation(card) || textPreview(card.content);
+}
+
+function codePrerequisites(card) {
+  return Array.isArray(cardMetadata(card).prerequisites) ? cardMetadata(card).prerequisites : [];
+}
+
+function codeWalkthrough(card) {
+  return Array.isArray(cardMetadata(card).walkthrough_steps) ? cardMetadata(card).walkthrough_steps : [];
+}
+
+function codeComplexityNotes(card) {
+  return Array.isArray(cardMetadata(card).complexity_notes) ? cardMetadata(card).complexity_notes : [];
+}
+
+function codePitfalls(card) {
+  return Array.isArray(cardMetadata(card).pitfalls) ? cardMetadata(card).pitfalls : [];
+}
+
+function codeExperiments(card) {
+  return Array.isArray(cardMetadata(card).experiments) ? cardMetadata(card).experiments : [];
+}
+
 function exercisePrompt(card) {
   return cardMetadata(card).prompt || textPreview(card.content);
+}
+
+function exerciseGoal(card) {
+  return cardMetadata(card).goal || exercisePrompt(card);
 }
 
 function exerciseSteps(card) {
@@ -657,6 +776,18 @@ function exerciseSteps(card) {
 
 function exerciseCheckpoints(card) {
   return Array.isArray(cardMetadata(card).checkpoints) ? cardMetadata(card).checkpoints : [];
+}
+
+function exerciseHints(card) {
+  return Array.isArray(cardMetadata(card).hints) ? cardMetadata(card).hints : [];
+}
+
+function exerciseExpectedOutcome(card) {
+  return cardMetadata(card).expected_outcome || "";
+}
+
+function exerciseSolutionOutline(card) {
+  return cardMetadata(card).solution_outline || "";
 }
 
 function videoSummary(card) {
@@ -669,6 +800,26 @@ function videoKeyPoints(card) {
 
 function videoUrl(card) {
   return cardMetadata(card).video_url || "";
+}
+
+function videoTimeline(card) {
+  return Array.isArray(cardMetadata(card).timeline) ? cardMetadata(card).timeline : [];
+}
+
+function videoWatchFocus(card) {
+  return Array.isArray(cardMetadata(card).watch_focus) ? cardMetadata(card).watch_focus : [];
+}
+
+function videoReviewQuestions(card) {
+  return Array.isArray(cardMetadata(card).review_questions) ? cardMetadata(card).review_questions : [];
+}
+
+function quizGuidance(card) {
+  return cardMetadata(card).summary || "请先独立判断考查点，再结合当前节点材料选择答案。";
+}
+
+function quizAfterGuidance(card) {
+  return cardMetadata(card).after_quiz_guidance || "";
 }
 
 watch(
@@ -866,11 +1017,32 @@ function submitQuizScore() {
   submittedScore.value = score;
   emit("submit-quiz", score);
 }
+
+function forwardWheelToContent(event) {
+  if (!(scrollViewport.value instanceof HTMLElement)) {
+    return;
+  }
+
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  if (scrollViewport.value.contains(target)) {
+    return;
+  }
+
+  if (target.closest("textarea, input, select, [contenteditable='true']")) {
+    return;
+  }
+
+  scrollViewport.value.scrollTop += event.deltaY;
+}
 </script>
 
 <style scoped>
-.dot-grid {
-  background-image: radial-gradient(circle, color-mix(in srgb, var(--text-muted) 10%, transparent) 1px, transparent 1px);
-  background-size: 28px 28px;
+.resource-canvas {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--space-elevated) 62%, transparent), transparent 22rem);
 }
 </style>

@@ -7,6 +7,7 @@
     }"
     :aria-busy="isWorkspaceBusy ? 'true' : 'false'"
     :style="{ fontSize: `${fontSize}px` }"
+    @wheel="forwardWorkspaceWheel"
   >
     <SidebarRail
       :active-panel="sidebarPanel"
@@ -17,13 +18,13 @@
     />
 
     <div class="relative flex min-w-0 flex-1 flex-col">
-      <header class="glass-panel relative z-20 px-4 py-3 sm:px-5 lg:px-6">
-        <div class="flex flex-wrap items-center gap-3 lg:flex-nowrap">
-          <div class="flex min-w-0 flex-shrink-0 items-center gap-3">
-            <div class="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-primary to-secondary text-sm font-black text-primary-text shadow-glow">
+      <header class="workspace-topbar relative z-20 px-4 py-3 sm:px-5 lg:px-6">
+        <div class="workspace-topbar__row flex flex-wrap items-center gap-3 lg:flex-nowrap">
+          <div class="workspace-topbar__brand flex min-w-0 flex-shrink-0 items-center gap-3 lg:hidden">
+            <div class="workspace-topbar__badge flex h-11 w-11 items-center justify-center rounded-[16px] text-sm font-black text-text-primary">
               EA
             </div>
-            <div class="min-w-0">
+            <div class="workspace-topbar__copy hidden min-w-0 sm:block">
               <span class="block text-sm font-black leading-tight tracking-tight text-text-primary">
                 EduAgent
               </span>
@@ -34,14 +35,14 @@
           </div>
 
           <nav
-            class="hidden flex-shrink-0 items-center gap-1 rounded-full border border-subtle bg-card p-1 xl:flex"
+            class="topbar-pivot hidden flex-shrink-0 items-center gap-1 rounded-full p-1.5 xl:flex"
             aria-label="工作台主导航"
           >
             <button
               v-for="item in workspaceNav"
               :key="item.key"
               type="button"
-              class="focus-ring rounded-full px-3 py-1.5 text-[11px] font-semibold tracking-[0.08em] transition-all duration-200"
+              class="focus-ring rounded-full px-3.5 py-2 text-[11px] font-semibold tracking-[0.08em] transition-all duration-200"
               :class="navButtonClass(item.key)"
               :aria-controls="navTargetId(item.key)"
               :aria-expanded="navExpandedState(item.key)"
@@ -53,17 +54,16 @@
             </button>
           </nav>
 
-          <div class="order-3 hidden min-w-[320px] flex-1 justify-start overflow-hidden md:flex xl:order-none xl:justify-center">
+          <div class="topbar-status-shell hidden min-w-0 flex-1 justify-center overflow-hidden md:flex">
             <TopStatusBar :statuses="statuses" />
           </div>
 
-          <div class="ml-auto flex w-full items-center gap-2 sm:w-auto sm:flex-shrink-0 sm:gap-3">
+          <div class="workspace-topbar__actions ml-auto flex flex-shrink-0 items-center gap-2 sm:gap-3">
             <div v-if="activeCourse || enrolledCourses.length" class="relative">
               <button
                 ref="courseMenuTriggerRef"
                 type="button"
-                class="focus-ring flex min-w-0 items-center gap-2 rounded-full border border-subtle bg-card px-3.5 py-1.5 text-[11px] font-semibold text-text-secondary transition-all duration-200 hover:border-primary/30 hover:bg-card-hover hover:text-primary sm:flex-none"
-                :class="activeCourse || enrolledCourses.length ? 'w-full sm:w-auto' : ''"
+                class="workspace-course-switch focus-ring flex min-w-0 items-center gap-2 rounded-full px-3 py-1.5 text-[11px] font-semibold text-text-secondary transition-all duration-200 w-auto"
                 :aria-controls="'workspace-course-menu'"
                 :aria-expanded="String(courseMenuOpen)"
                 aria-haspopup="menu"
@@ -144,19 +144,19 @@
 
             <button
               type="button"
-              class="focus-ring hidden rounded-full border border-subtle bg-card px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-muted transition-all duration-200 hover:border-primary/30 hover:bg-primary-soft hover:text-primary sm:inline-flex"
+              class="workspace-utility-btn focus-ring hidden rounded-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-muted transition-all duration-200 sm:inline-flex"
               @click="$emit('go-home')"
             >
               首页
             </button>
 
-            <span class="hidden text-xs font-medium text-text-secondary sm:inline">
+            <span class="workspace-user-chip hidden text-xs font-medium text-text-secondary sm:inline">
               {{ user?.display_name || user?.user_id || "未登录" }}
             </span>
 
             <button
               type="button"
-              class="focus-ring hidden rounded-full border border-subtle bg-card px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-muted transition-all duration-200 hover:border-error/30 hover:bg-error-soft hover:text-error sm:inline-flex"
+              class="workspace-utility-btn workspace-utility-btn--danger focus-ring hidden rounded-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-muted transition-all duration-200 sm:inline-flex"
               @click="$emit('logout')"
             >
               退出
@@ -164,22 +164,22 @@
           </div>
         </div>
 
-        <div class="mt-3 flex items-center justify-between gap-3 border-t border-subtle/60 pt-3 sm:hidden">
-          <span class="min-w-0 truncate text-xs font-medium text-text-secondary">
+        <div class="workspace-mobile-meta mt-3 flex items-center justify-between gap-3 pt-3 sm:hidden">
+          <span class="workspace-mobile-meta__user min-w-0 truncate text-xs font-medium text-text-secondary">
             {{ user?.display_name || user?.user_id || "未登录" }}
           </span>
 
           <div class="flex items-center gap-2">
             <button
               type="button"
-              class="focus-ring rounded-full border border-subtle bg-card px-3 py-1.5 text-[11px] font-semibold text-text-muted transition-all duration-200 hover:border-primary/30 hover:bg-primary-soft hover:text-primary"
+              class="workspace-utility-btn focus-ring rounded-full px-3 py-1.5 text-[11px] font-semibold text-text-muted transition-all duration-200"
               @click="$emit('go-home')"
             >
               首页
             </button>
             <button
               type="button"
-              class="focus-ring rounded-full border border-subtle bg-card px-3 py-1.5 text-[11px] font-semibold text-text-muted transition-all duration-200 hover:border-error/30 hover:bg-error-soft hover:text-error"
+              class="workspace-utility-btn workspace-utility-btn--danger focus-ring rounded-full px-3 py-1.5 text-[11px] font-semibold text-text-muted transition-all duration-200"
               @click="$emit('logout')"
             >
               退出
@@ -190,13 +190,13 @@
         <div class="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-[var(--border-strong)] to-transparent" />
       </header>
 
-      <div class="relative flex min-h-0 flex-1 flex-col bg-space-bg/35 xl:grid xl:grid-cols-[minmax(0,1fr)_380px] xl:grid-rows-[auto_minmax(0,1fr)]">
+      <div class="relative flex min-h-0 flex-1 flex-col bg-space-bg/35 xl:grid xl:grid-cols-[minmax(0,1fr)_400px] xl:grid-rows-[auto_minmax(0,1fr)]">
         <section class="border-b border-subtle px-4 py-4 backdrop-blur-sm sm:px-5 lg:px-6 xl:col-start-1 xl:row-start-1 xl:border-r xl:border-subtle/70">
-          <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
+          <div class="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,440px)] xl:items-start">
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
                 <p class="text-[11px] font-black uppercase tracking-[0.14em] text-text-muted">学习驾驶舱</p>
-                <span class="rounded-full border border-primary/20 bg-primary-soft px-3 py-1 text-[11px] font-semibold text-primary">
+                <span class="workspace-shell-chip workspace-shell-chip--accent px-3 py-1 text-[11px] font-semibold">
                   {{ studyStage }}
                 </span>
               </div>
@@ -205,7 +205,7 @@
                 <h1 class="truncate text-[24px] font-black tracking-tight text-text-primary sm:text-[30px] lg:text-[34px]">
                   {{ activeCourse?.title_cn || "课程工作台" }}
                 </h1>
-                <span class="rounded-full border border-subtle bg-card px-3 py-1 text-[11px] font-semibold text-text-secondary">
+                <span class="workspace-shell-chip px-3 py-1 text-[11px] font-semibold text-text-secondary">
                   {{ currentNodeCaption }}
                 </span>
               </div>
@@ -216,85 +216,66 @@
                 <span v-if="nextNode" class="ml-1">· 下一建议节点：{{ nextNode.title }}</span>
               </p>
 
-              <div class="mt-4 rounded-[20px] border border-subtle bg-card px-4 py-3 shadow-card sm:hidden">
-                <div class="flex items-start justify-between gap-3">
-                  <div class="min-w-0">
-                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">当前建议</p>
-                    <p class="mt-2 text-sm font-semibold leading-6 text-text-primary">{{ focusTitle }}</p>
+              <div class="workspace-shell-card mt-4 rounded-2xl px-4 py-4 sm:px-5 sm:py-5">
+                <div class="flex flex-wrap items-center gap-2">
+                  <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">当前建议</p>
+                  <span class="workspace-shell-chip px-3 py-1 text-[11px] font-semibold text-text-secondary">
+                    {{ learningSequenceTitle }}
+                  </span>
+                </div>
+                <div class="mt-3 flex flex-wrap items-start justify-between gap-3">
+                  <p class="max-w-[36rem] text-base font-semibold leading-7 text-text-primary sm:text-[17px]">{{ focusTitle }}</p>
+                  <div class="workspace-shell-card-soft min-w-[172px] rounded-[18px] px-4 py-3">
+                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">当前推进</p>
+                    <p class="mt-2 text-2xl font-black text-text-primary">{{ currentMastery }}%</p>
+                    <p class="mt-1 text-[11px] leading-5 text-text-muted">
+                      {{ nextNode ? `下一节点：${nextNode.title}` : "主线路径已接近完成" }}
+                    </p>
+                  </div>
+                </div>
+                <div class="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+                  <div class="workspace-shell-card-soft rounded-[18px] px-4 py-4">
+                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">学习提要</p>
+                    <p class="mt-2 text-sm leading-7 text-text-secondary">{{ focusDetail }}</p>
+                  </div>
+                  <div class="workspace-shell-card-soft rounded-[18px] px-4 py-4">
+                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">推荐节奏</p>
+                    <p class="mt-2 text-sm leading-7 text-text-secondary">{{ learningSequenceDetail }}</p>
                   </div>
                 </div>
               </div>
 
-              <div class="mt-4 hidden gap-3 sm:grid xl:hidden lg:grid-cols-2">
-                <div class="rounded-[22px] border border-subtle bg-card p-4 shadow-card">
-                  <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">当前建议</p>
-                  <p class="mt-2 text-base font-semibold text-text-primary">{{ focusTitle }}</p>
-                  <p class="mt-2 text-sm leading-6 text-text-muted">{{ focusDetail }}</p>
-                </div>
-                <div class="rounded-[22px] border border-subtle bg-card p-4 shadow-card">
-                  <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">学习顺序</p>
-                  <p class="mt-2 text-base font-semibold text-text-primary">{{ learningSequenceTitle }}</p>
-                  <p class="mt-2 text-sm leading-6 text-text-muted">{{ learningSequenceDetail }}</p>
-                </div>
-              </div>
-
-              <div class="mt-4 hidden xl:block xl:rounded-[22px] xl:border xl:border-subtle xl:bg-card/92 xl:px-5 xl:py-4 xl:shadow-card">
-                <div class="flex flex-wrap items-center gap-2">
-                  <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">当前建议</p>
-                  <span class="rounded-full border border-subtle bg-space-surface/70 px-3 py-1 text-[11px] font-semibold text-text-secondary">
-                    {{ learningSequenceTitle }}
-                  </span>
-                </div>
-                <p class="mt-3 text-sm font-semibold leading-6 text-text-primary">{{ focusTitle }}</p>
-                <p class="mt-2 text-xs leading-5 text-text-muted">{{ focusDetail }}</p>
-                <p class="mt-2 text-[11px] leading-5 text-text-muted">{{ learningSequenceDetail }}</p>
-              </div>
-
               <div
                 v-if="infoMessage"
-                class="mt-3 rounded-[16px] border border-primary/20 bg-primary-soft/80 px-3 py-2 text-xs leading-5 text-primary shadow-card sm:mt-4 sm:rounded-[18px] sm:px-4 sm:py-3 sm:text-sm sm:leading-6"
+                class="workspace-shell-card info-message mt-3 rounded-2xl px-3 py-2 text-xs leading-5 text-primary sm:mt-4 sm:px-4 sm:py-3"
               >
                 {{ infoMessage }}
               </div>
             </div>
 
-            <div class="hidden gap-2 md:grid md:grid-cols-2 lg:grid-cols-4 xl:min-w-[520px] xl:grid-cols-4">
+            <div class="hidden gap-3 md:grid md:grid-cols-2 xl:grid-cols-1 xl:self-start">
               <div
                 v-for="metric in metrics"
                 :key="metric.label"
-                class="rounded-[18px] border border-subtle bg-card px-4 py-3 shadow-card"
+                class="workspace-shell-card metric-tile rounded-2xl px-4 py-3"
               >
-                <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-text-muted">{{ metric.label }}</p>
-                <p class="mt-2 text-xl font-black text-text-primary">{{ metric.value }}</p>
+                <div class="flex items-center justify-between gap-3">
+                  <p class="text-[10px] font-bold uppercase tracking-[0.12em] text-text-muted">{{ metric.label }}</p>
+                  <p class="text-[24px] font-black tracking-tight text-text-primary">{{ metric.value }}</p>
+                </div>
                 <p class="mt-1 text-[11px] leading-5 text-text-muted">{{ metric.detail }}</p>
               </div>
             </div>
           </div>
 
-          <div class="hidden">
-            <div
-              v-for="status in compactStatuses"
-              :key="status.key"
-              class="rounded-[18px] border bg-card px-4 py-3 shadow-card"
-              :class="status.panelClass"
-            >
-              <div class="flex items-center justify-between gap-3">
-                <div class="min-w-0">
-                  <p class="text-[10px] font-black uppercase tracking-[0.12em] text-text-muted">{{ status.label }}</p>
-                  <p class="mt-1 text-sm font-semibold text-text-primary">{{ status.phase }}</p>
-                </div>
-                <span class="text-xs font-mono text-text-muted">{{ status.progress }}%</span>
-              </div>
-            </div>
-          </div>
         </section>
 
-        <section class="hidden border-b border-subtle px-4 py-3 sm:block sm:px-5 xl:hidden">
+        <section class="border-b border-subtle px-4 py-3 sm:px-5 xl:hidden">
           <div class="aurora-scroll flex items-center gap-2 overflow-x-auto pb-1">
             <div
               v-for="status in compactStatuses"
               :key="`mobile-${status.key}`"
-              class="shrink-0 rounded-full border bg-card px-3 py-2 shadow-card"
+              class="workspace-shell-chip shrink-0 px-3 py-2"
               :class="status.panelClass"
             >
               <div class="flex items-center gap-2">
@@ -307,13 +288,13 @@
         </section>
 
         <div
-          class="workspace-body min-h-0 overflow-y-auto xl:col-start-1 xl:row-start-2 xl:overflow-hidden"
+          class="safe-bottom min-h-0 overflow-hidden xl:col-start-1 xl:row-start-2"
           :class="effectiveMobilePane === 'learn' ? 'block flex-1' : 'hidden xl:block xl:flex-1'"
         >
             <main
               id="workspace-learn-panel"
               ref="learnPanelRef"
-              class="min-w-0 xl:h-full xl:min-h-0"
+              class="h-full min-w-0"
               tabindex="-1"
               aria-label="学习资源画布"
             >
@@ -339,11 +320,19 @@
         <aside
               id="workspace-coach-panel"
               ref="coachPanelRef"
-              class="min-w-0 border-t border-subtle bg-space-surface/50 backdrop-blur-sm xl:col-start-2 xl:row-span-2 xl:row-start-1 xl:min-h-0 xl:border-t-0 xl:border-l xl:border-subtle/70"
+              class="safe-bottom min-w-0 border-t border-subtle bg-space-surface/50 backdrop-blur-sm xl:col-start-2 xl:row-span-2 xl:row-start-1 xl:min-h-0 xl:border-t-0 xl:border-l xl:border-subtle/70"
               :class="effectiveMobilePane === 'coach' ? 'flex flex-1 flex-col' : 'hidden xl:flex xl:flex-col'"
               tabindex="-1"
               aria-label="辅导通道"
             >
+              <div class="min-h-0 overflow-y-auto border-b border-subtle/70 px-4 py-4 sm:px-5">
+                <AgentFeedbackPanel
+                  :feedback-items="agentFeedback"
+                  :last-diagnostic="lastDiagnostic"
+                  :current-node-title="nodeTitle"
+                />
+              </div>
+              <div class="min-h-0 flex-1">
               <ChatArea
                 :messages="messages"
                 :boot-mode="bootMode"
@@ -357,6 +346,7 @@
                 @send="handleCoachSend"
                 @submit-probe="(values) => $emit('submit-probe', values)"
               />
+              </div>
         </aside>
 
         <nav class="mobile-dock sticky bottom-0 z-20 border-t border-subtle bg-space-panel/88 px-4 py-3 backdrop-blur-xl xl:hidden" aria-label="工作台切换">
@@ -425,6 +415,7 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import AgentFeedbackPanel from "./AgentFeedbackPanel.vue";
 import ChatArea from "./ChatArea.vue";
 import IconCheck from "./icons/IconCheck.vue";
 import ResourceCanvas from "./ResourceCanvas.vue";
@@ -445,6 +436,7 @@ const props = defineProps({
   pathNodes: { type: Array, default: () => [] },
   nodeTitle: { type: String, default: "" },
   messages: { type: Array, default: () => [] },
+  agentFeedback: { type: Array, default: () => [] },
   capabilityRadar: { type: Array, default: () => [0.5, 0.5, 0.5, 0.5, 0.5] },
   overallProgress: { type: Number, default: 0 },
   masteredCount: { type: Number, default: 0 },
@@ -976,6 +968,33 @@ function mobileActionClass(key) {
     ? "border-primary/25 bg-primary-soft text-primary"
     : "border-subtle bg-card text-text-muted";
 }
+
+function forwardWorkspaceWheel(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  if (target.closest("textarea, input, select, [contenteditable='true']")) {
+    return;
+  }
+
+  const activePanel = effectiveMobilePane.value === "coach" ? coachPanelRef.value : learnPanelRef.value;
+  if (!(activePanel instanceof HTMLElement)) {
+    return;
+  }
+
+  const scrollCandidate = activePanel.querySelector("[data-chat-scroll='true'], .aurora-scroll");
+  if (!(scrollCandidate instanceof HTMLElement)) {
+    return;
+  }
+
+  if (scrollCandidate.contains(target)) {
+    return;
+  }
+
+  scrollCandidate.scrollTop += event.deltaY;
+}
 </script>
 
 <style scoped>
@@ -991,17 +1010,152 @@ function mobileActionClass(key) {
   transition-duration: 0.01ms !important;
 }
 
-.workspace-body {
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 84px);
+.workspace-topbar {
+  position: relative;
 }
 
-.mobile-dock {
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.75rem);
+.workspace-topbar::before {
+  content: "";
+  position: absolute;
+  inset: 0.5rem 1rem 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 1.15rem;
+  background: var(--space-panel);
+  box-shadow: var(--workspace-shadow-soft);
+  pointer-events: none;
+}
+
+.workspace-topbar__row {
+  position: relative;
+  z-index: 1;
+  min-height: 4.5rem;
+  padding-inline: 0.65rem;
+}
+
+.workspace-topbar__brand {
+  padding-right: 0.45rem;
+}
+
+.workspace-topbar__badge {
+  border: 1px solid color-mix(in srgb, var(--color-primary) 24%, var(--border-subtle));
+  background: var(--color-primary-soft);
+  box-shadow: none;
+  color: var(--color-primary-dark);
+}
+
+.workspace-topbar__copy {
+  max-width: 10rem;
+}
+
+.topbar-pivot {
+  border: 1px solid var(--border-subtle);
+  background: var(--space-elevated);
+  box-shadow: none;
+}
+
+.topbar-status-shell {
+  position: relative;
+  min-height: 3rem;
+  border-inline: 1px solid color-mix(in srgb, var(--border-subtle) 92%, transparent);
+  padding-inline: 1rem;
+}
+
+.workspace-topbar__actions {
+  position: relative;
+  z-index: 1;
+}
+
+.workspace-course-switch {
+  border: 1px solid var(--border-subtle);
+  background: var(--space-panel);
+  box-shadow: none;
+}
+
+.workspace-course-switch:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 26%, var(--border-strong));
+  color: var(--color-primary-dark);
+  transform: translateY(-1px);
+}
+
+.workspace-utility-btn {
+  border: 1px solid var(--border-subtle);
+  background: var(--space-panel);
+  box-shadow: none;
+}
+
+.workspace-utility-btn:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 24%, var(--border-strong));
+  background: var(--space-elevated);
+  color: var(--color-primary-dark);
+}
+
+.workspace-utility-btn--danger:hover {
+  border-color: color-mix(in srgb, var(--color-error) 32%, var(--border-strong));
+  color: var(--color-error);
+}
+
+.workspace-user-chip {
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--space-elevated);
+  padding: 0.55rem 0.9rem;
+  box-shadow: none;
+}
+
+.workspace-mobile-meta {
+  position: relative;
+  z-index: 1;
+  border-top: 1px solid color-mix(in srgb, var(--border-subtle) 92%, transparent);
+}
+
+.workspace-mobile-meta__user {
+  border-radius: 999px;
+  background: var(--space-elevated);
+  padding: 0.45rem 0.8rem;
+}
+
+@media (max-width: 639px) {
+  .workspace-topbar::before {
+    inset-inline: 0.6rem;
+    border-radius: 1rem;
+  }
+
+  .workspace-topbar__row {
+    padding-inline: 0.25rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .workspace-topbar__row {
+    gap: 1rem;
+  }
 }
 
 @media (min-width: 1280px) {
-  .workspace-body {
-    padding-bottom: 0;
+  .workspace-topbar__row {
+    justify-content: space-between;
+  }
+}
+
+.mobile-dock {
+  z-index: 40;
+  background: var(--space-panel);
+  box-shadow: 0 -10px 24px rgba(15, 23, 42, 0.08);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.75rem);
+}
+
+.info-message {
+  position: relative;
+  z-index: 1;
+}
+
+.metric-tile {
+  min-height: 5.75rem;
+}
+
+@media (min-width: 1280px) {
+  .mobile-dock {
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.75rem);
   }
 }
 

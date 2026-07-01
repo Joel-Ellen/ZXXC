@@ -51,6 +51,7 @@
         :path-nodes="workspacePathNodes"
         :node-title="workspaceNodeTitle"
         :messages="workspaceMessages"
+        :agent-feedback="workspaceAgentFeedback"
         :capability-radar="workspaceCapabilityRadar"
         :overall-progress="workspaceOverallProgress"
         :mastered-count="workspaceMasteredCount"
@@ -298,6 +299,7 @@ const {
   currentNodeTitle,
   currentPathNodes,
   messages,
+  agentFeedback,
   infoMessage,
   agentStatuses,
   probe,
@@ -332,6 +334,7 @@ const workspaceCards = computed(() => (workspacePreview.value ? previewCards : c
 const workspacePathNodes = computed(() => (workspacePreview.value ? previewPathNodes : currentPathNodes.value));
 const workspaceNodeTitle = computed(() => (workspacePreview.value ? "栈与队列" : currentNodeTitle.value));
 const workspaceMessages = computed(() => (workspacePreview.value ? previewMessages.value : messages.value));
+const workspaceAgentFeedback = computed(() => (workspacePreview.value ? [] : agentFeedback.value));
 const workspaceCapabilityRadar = computed(() => (workspacePreview.value ? [0.78, 0.64, 0.71, 0.52, 0.68] : capabilityRadar.value));
 const workspaceOverallProgress = computed(() => (workspacePreview.value ? 40 : overallProgress.value));
 const workspaceMasteredCount = computed(() => (workspacePreview.value ? 2 : masteredCount.value));

@@ -41,6 +41,21 @@ htmlcov/
 node_modules/
 .mermaid-runtime/
 
+# Backup files
+*.bak
+*.snapshot.txt
+
+# Test outputs
+test-results/
+frontend/test-results/
+
+# Playwright / screenshot outputs
+output/playwright/
+output/*.json
+
+# Lock files
+skills-lock.json
+
 # Neo4j / Milvus data (local dev)
 data/
 src/auth/_users.json

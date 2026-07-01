@@ -1,11 +1,11 @@
 <template>
   <article
-    class="relative w-full overflow-hidden rounded-[24px] p-6 backdrop-blur-sm transition-all duration-300"
+    class="relative w-full overflow-hidden rounded-[20px] p-6 backdrop-blur-sm transition-all duration-300"
     :class="[
       !isReady
         ? 'border border-subtle bg-card opacity-80'
         : `${colorClasses.border} ${colorClasses.hoverBorder} bg-card hover:-translate-y-0.5 hover:shadow-card`,
-      isActive ? 'shadow-[0_12px_36px_rgba(0,0,0,0.32)] ring-1 ring-white/5' : '',
+      isActive ? 'shadow-[var(--workspace-shadow-focus)] ring-1 ring-white/10' : '',
       activatable ? 'cursor-pointer' : '',
     ]"
     :aria-label="activationLabel"
@@ -20,6 +20,11 @@
     @keydown.space.prevent="handleActivate"
   >
     <div class="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/12 to-transparent" />
+    <div
+      v-if="isActive"
+      class="pointer-events-none absolute inset-x-6 top-0 h-20 rounded-b-[28px] opacity-80 blur-2xl"
+      :style="{ background: `linear-gradient(180deg, ${colorClasses.glow}, transparent)` }"
+    />
 
     <div class="mb-5 flex items-start justify-between gap-3">
       <div class="flex min-w-0 items-center gap-3">
@@ -180,6 +185,7 @@ const colorClasses = computed(() => {
     hoverBorder: config.hoverBorder,
     dot: config.dot,
     dotStyle: { boxShadow: `0 0 12px ${config.cssVar}` },
+    glow: `color-mix(in srgb, ${config.cssVar} 18%, transparent)`,
   };
 });
 

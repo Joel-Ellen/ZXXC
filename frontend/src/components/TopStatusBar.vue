@@ -1,10 +1,10 @@
 <template>
-  <div class="aurora-scroll flex items-center gap-2 overflow-x-auto" aria-live="polite">
+  <div class="top-status-bar aurora-scroll flex items-center overflow-x-auto" aria-live="polite">
     <transition-group name="status-pill" tag="div" class="flex items-center gap-2" role="list" aria-label="工作台状态摘要">
       <span
         v-for="status in statuses"
         :key="status.key"
-        class="inline-flex items-center gap-2 rounded-full border-[0.5px] bg-card px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.10em] backdrop-blur-sm transition-all duration-200"
+        class="status-pill inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.10em] transition-all duration-200"
         :class="statusClass(status)"
         :aria-label="statusA11yLabel(status)"
         role="listitem"
@@ -46,13 +46,13 @@ const GLOW_COLORS = {
 };
 
 const BORDER_CLASSES = {
-  primary: "border-primary/30 text-primary",
-  secondary: "border-secondary/30 text-secondary",
-  tertiary: "border-tertiary/30 text-tertiary",
-  success: "border-success/30 text-success",
-  warning: "border-warning/30 text-warning",
-  error: "border-error/30 text-error",
-  info: "border-info/30 text-info",
+  primary: "status-pill--primary",
+  secondary: "status-pill--secondary",
+  tertiary: "status-pill--tertiary",
+  success: "status-pill--success",
+  warning: "status-pill--warning",
+  error: "status-pill--error",
+  info: "status-pill--info",
 };
 
 const DOT_CLASSES = {
@@ -105,7 +105,7 @@ function statusClass(status) {
   if (phaseColor) {
     return BORDER_CLASSES[phaseColor];
   }
-  return "border-subtle text-text-muted";
+  return "status-pill--idle";
 }
 
 function statusA11yLabel(status) {
@@ -118,6 +118,60 @@ function statusA11yLabel(status) {
 </script>
 
 <style scoped>
+.top-status-bar {
+  min-height: 3rem;
+}
+
+.status-pill {
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 88%, transparent);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.68), rgba(255, 255, 255, 0.42)),
+    rgba(255, 255, 255, 0.26);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.62),
+    0 10px 24px rgba(15, 23, 42, 0.04);
+  backdrop-filter: blur(14px);
+}
+
+.status-pill--idle {
+  color: var(--text-muted);
+}
+
+.status-pill--primary {
+  border-color: color-mix(in srgb, var(--color-primary) 30%, rgba(255, 255, 255, 0.4));
+  color: var(--color-primary-dark);
+}
+
+.status-pill--secondary {
+  border-color: color-mix(in srgb, var(--color-secondary) 28%, rgba(255, 255, 255, 0.4));
+  color: var(--color-secondary-dark);
+}
+
+.status-pill--tertiary {
+  border-color: color-mix(in srgb, var(--color-tertiary) 28%, rgba(255, 255, 255, 0.4));
+  color: var(--color-tertiary-dark);
+}
+
+.status-pill--success {
+  border-color: color-mix(in srgb, var(--color-success) 28%, rgba(255, 255, 255, 0.4));
+  color: var(--color-success);
+}
+
+.status-pill--warning {
+  border-color: color-mix(in srgb, var(--color-warning) 28%, rgba(255, 255, 255, 0.4));
+  color: var(--color-warning);
+}
+
+.status-pill--error {
+  border-color: color-mix(in srgb, var(--color-error) 32%, rgba(255, 255, 255, 0.4));
+  color: var(--color-error);
+}
+
+.status-pill--info {
+  border-color: color-mix(in srgb, var(--color-info) 28%, rgba(255, 255, 255, 0.4));
+  color: var(--color-info);
+}
+
 .status-pill-enter-active,
 .status-pill-leave-active {
   transition: all 260ms cubic-bezier(0.16, 1, 0.3, 1);
