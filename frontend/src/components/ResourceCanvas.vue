@@ -144,9 +144,9 @@
           v-for="(card, index) in visibleCards"
           :key="card.resource_id"
           draggable="true"
-          class="animate-cardIn h-full transition-all duration-500"
-          :style="{ animationDelay: `${index * 60}ms` }"
-          :class="[getGridSpanClass(card.card_type), card.resource_id === activeCardId ? 'md:-translate-y-1' : '']"
+          class="animate-cardIn h-full card-depth transition-all duration-300"
+          :style="{ animationDelay: `${index * 55}ms` }"
+          :class="[getGridSpanClass(card.card_type), card.resource_id === activeCardId ? 'md:-translate-y-1.5' : '']"
           @dragstart="onDragStart(card.resource_id)"
           @dragover.prevent
           @drop="onDrop(card.resource_id)"

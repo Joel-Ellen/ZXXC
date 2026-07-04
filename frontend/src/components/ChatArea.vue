@@ -98,9 +98,11 @@
         <article
           v-for="(message, index) in messages"
           :key="message.id"
-          class="flex animate-slideUp"
-          :style="{ animationDelay: `${index * 40}ms` }"
-          :class="message.role === 'user' ? 'justify-end' : 'justify-start'"
+          class="flex"
+          :class="[
+            message.role === 'user' ? 'justify-end msg-user-enter' : 'justify-start msg-assistant-enter',
+          ]"
+          :style="{ animationDelay: `${Math.min(index, 3) * 50}ms` }"
         >
           <div class="max-w-[92%]">
             <div
@@ -117,11 +119,21 @@
                 :token-stream="message.tokenStream"
               />
 
+              <!-- Streaming typing indicator: three animated dots -->
               <div
                 v-else-if="message.isStreaming && !message.content"
-                class="rounded-2xl border border-subtle bg-space-surface/40 px-4 py-3 text-sm text-text-muted"
+                class="flex items-center gap-1.5 py-1"
+                aria-label="正在生成..."
               >
-                正在整理当前节点的讲解脉络...
+                <span class="generating-dot" />
+                <span class="generating-dot" />
+                <span class="generating-dot" />
+              </div>
+
+              <!-- Streaming partial text: show content + cursor -->
+              <div v-else-if="message.isStreaming && message.content">
+                <MarkdownContent :content="message.content" />
+                <span class="streaming-cursor" aria-hidden="true" />
               </div>
 
               <MarkdownContent
@@ -198,11 +210,16 @@
           />
           <button
             type="button"
-            class="focus-ring btn-capsule shrink-0"
+            class="btn-ripple focus-ring btn-capsule shrink-0"
             :disabled="bootMode === 'probe' || busy || !draft.trim()"
             @click="submit"
           >
-            {{ busy ? "调度中" : "发送" }}
+            <span v-if="busy" class="flex items-center gap-1.5">
+              <span class="generating-dot" style="width:5px;height:5px" />
+              <span class="generating-dot" style="width:5px;height:5px;animation-delay:.15s" />
+              <span class="generating-dot" style="width:5px;height:5px;animation-delay:.3s" />
+            </span>
+            <span v-else>发送</span>
           </button>
         </div>
 
