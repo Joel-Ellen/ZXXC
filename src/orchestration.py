@@ -61,9 +61,10 @@ LangGraph 全局网络编排 — 多智能体协同系统主控图
   AI 辅助编码工具：科大讯飞 iFlyCode / 星火大模型辅助生成。
 """
 
-from typing import Dict, Any, Optional, Literal, Tuple
+from dataclasses import dataclass, field
+from typing import Dict, Any, List, Optional, Literal, Tuple
 
-from .state.agent_state import AgentState
+from .state.agent_state import AgentState, LatestBehavior
 from .agents.evaluator_node import (
     EvaluatorNode, EvaluatorInput, BehaviorVector,
 )
@@ -486,6 +487,267 @@ class ColdStartOrchestrator:
             output = self._planner(inp)
             agent_state = output.agent_state
         return agent_state
+
+# ============================================================================
+# Unified learning-step facade
+# ============================================================================
+
+# Threshold copied from _common to avoid importing the application layer here.
+_MASTERY_ADVANCE_THRESHOLD = 0.65
+
+
+@dataclass
+class LearningStepResult:
+    """Structured result returned by run_official_learning_step.
+
+    Callers (session_service, HTTP routes) use this instead of unpacking
+    scattered locals from their own pipeline wiring.
+    """
+    state: AgentState
+    logs: List[Dict[str, Any]] = field(default_factory=list)
+    # Advancement
+    current_node: str = ""
+    evaluated_node: str = ""
+    evaluated_mastery: float = 0.0
+    previous_mastery: float = 0.0
+    advanced_to_next_node: bool = False
+    next_node_id: Optional[str] = None
+    # Pass-through
+    interaction_type: str = "practice"
+    correctness: float = 0.75
+
+
+def run_official_learning_step(
+    session: Any,
+    behavior: Optional[Dict[str, Any]] = None,
+    user_input: Optional[str] = None,
+    runtime: Any = None,
+) -> LearningStepResult:
+    """High-level façade that owns the full agent pipeline for one learning step.
+
+    This is the **single entry point** for running evaluator → profiler →
+    planner → (tutor?) → content-mesh → resource-generation → validator →
+    assessment.  Application-layer services (session_service, HTTP handlers)
+    should call this function and not re-wire individual nodes themselves.
+
+    Args:
+        session:     A ``RuntimeSession`` object that carries ``agent_state``,
+                     ``path_planner``, ``pipeline_log``, etc.
+        behavior:    Dict of interaction parameters (interaction_type,
+                     correctness, current_node_id, …).  Defaults to an empty
+                     dict (``practice`` interaction with neutral scores).
+        user_input:  Optional free-text that maps to a tutor query when the
+                     interaction type is not ``load_node``.
+        runtime:     Optional pre-resolved ``OrchestrationRuntime`` instance.
+                     Pass an explicit value (e.g. from a monkeypatched
+                     ``get_runtime()``) to allow tests to inject fakes without
+                     touching the module-level import inside this function.
+
+    Returns:
+        :class:`LearningStepResult` with the updated state and all metadata
+        needed to build the HTTP response.
+    """
+    # Lazy import to avoid a circular dependency: orchestration ← application.
+    from src.orchestration_runtime import get_runtime as _get_runtime
+    from src.agents.assessment_node import AssessmentInput
+    from src.agents.content_mesh_node import MeshInput
+    from src.agents.evaluator_node import BehaviorVector, EvaluatorInput
+    from src.agents.profiler_node import ProfilerInput
+    from src.agents.tutor_node import TutorInput
+    from src.agents.validator_node import ValidatorInput
+    from src.application.resource_service import generate_current_node_resources
+    from src.application._common import normalize_state_resources, get_node_title
+
+    _runtime = runtime if runtime is not None else _get_runtime()
+    state: AgentState = session.agent_state
+    payload = behavior or {}
+    interaction_type = payload.get("interaction_type", "practice")
+
+    # ── Resolve current node ──────────────────────────────────────────────
+    target_node = payload.get("current_node_id")
+    if target_node:
+        state.current_node_id = target_node
+    current_node = state.current_node_id or (state.active_path[0] if state.active_path else "N01")
+    previous_mastery = state.dynamic_profile.knowledge_mastery.get(current_node, 0.0)
+
+    correctness = float(payload.get("correctness", 0.75))
+    time_spent_ratio = float(payload.get("time_spent_ratio", 1.0))
+    code_pass_rate = float(payload.get("code_pass_rate", 0.70))
+    help_count = int(payload.get("help_count", 0))
+    tutor_query = payload.get("tutor_query") or user_input
+
+    logs: List[Dict[str, Any]] = []
+
+    # ── Step 1 + 2: Evaluator → Profiler (skipped on load_node) ─────────
+    if interaction_type == "load_node":
+        logs.append({"agent": "Evaluator", "status": "skipped", "reason": "interaction_type=load_node"})
+        logs.append({"agent": "Profiler",  "status": "skipped", "reason": "interaction_type=load_node"})
+        eval_output = None
+    else:
+        state.latest_behavior = LatestBehavior(
+            node_id=current_node,
+            correctness=correctness,
+            time_spent_ratio=time_spent_ratio,
+            error_types=[],
+            resource_feedback={},
+            help_request_count=help_count,
+            tutor_query=tutor_query,
+            accuracy_rate=correctness,
+            code_pass_rate=code_pass_rate,
+            duration_ratio=time_spent_ratio,
+        )
+        eval_output = _runtime.evaluator(EvaluatorInput(
+            agent_state=state,
+            raw_behavior=BehaviorVector(
+                answer_correctness=correctness,
+                code_pass_rate=code_pass_rate,
+                time_spent_ratio=time_spent_ratio,
+                help_request_count=help_count,
+                node_id=current_node,
+            ),
+        ))
+        state = eval_output.agent_state
+        logs.append({
+            "agent": "Evaluator",
+            "effective_correctness": eval_output.cleaned_behavior.effective_correctness,
+            "anomaly_type": eval_output.cleaned_behavior.anomaly.anomaly_type.value,
+            "anomaly_detected": eval_output.anomaly_detected,
+            "mastery_delta": round(eval_output.mastery_delta, 4),
+            "pid_error": round(eval_output.pid_error, 4),
+            "replan_decision": eval_output.replan_decision.value,
+            "updated_mastery": round(eval_output.updated_mastery, 4),
+        })
+
+        prof_output = _runtime.profiler(ProfilerInput(
+            agent_state=state,
+            evaluator_mastery_delta=eval_output.mastery_delta,
+            evaluator_pid_error=eval_output.pid_error,
+            resource_style_delivered=state.recommended_resource_style or "visual",
+            node_id=current_node,
+        ))
+        state = prof_output.agent_state
+        logs.append({
+            "agent": "Profiler",
+            "selected_style": prof_output.style_result.selected_style,
+            "sample_values": prof_output.style_result.sample_values,
+            "intervention_triggered": prof_output.intervention_active,
+            "forgetting_decay": round(prof_output.forgetting_result.decay_factor, 4) if prof_output.forgetting_result else None,
+        })
+
+    # ── Step 3: Planner (replan if triggered or path empty) ──────────────
+    if not state.active_path or state.re_plan_triggered:
+        state.active_path = session.path_planner.compute_topological_order()
+        state.re_plan_triggered = False
+        logs.append({"agent": "Planner", "replan": True, "new_path": state.active_path})
+    else:
+        logs.append({"agent": "Planner", "replan": False, "active_path": state.active_path})
+
+    if not state.active_path and current_node:
+        state.active_path = [current_node]
+    if current_node and current_node in state.active_path:
+        state.active_path = [current_node, *[n for n in state.active_path if n != current_node]]
+
+    # ── Step 4: Tutor (optional, skipped on load_node) ───────────────────
+    if tutor_query and interaction_type != "load_node":
+        tutor_output = _runtime.tutor(TutorInput(agent_state=state))
+        state = tutor_output.agent_state
+        logs.append({
+            "agent": "Tutor",
+            "query": tutor_query,
+            "has_mermaid": bool(state.tutor_response.get("mermaid_src", "") if state.tutor_response else False),
+        })
+
+    # ── Step 5: Content Mesh ─────────────────────────────────────────────
+    mesh_output = _runtime.mesh(MeshInput(agent_state=state))
+    state = mesh_output.agent_state
+    logs.append({
+        "agent": "ContentMesh",
+        "generated_cards": len(mesh_output.generated_cards),
+        "card_types": [c.card_type for c in mesh_output.generated_cards],
+    })
+
+    # ── Step 6: Resource generation (idempotent unless force) ────────────
+    session.agent_state = state
+    generate_current_node_resources(
+        session.agent_state.user_id if hasattr(session.agent_state, "user_id") else "",
+        session.agent_state.course_id if hasattr(session.agent_state, "course_id") else "data_structures",
+        current_node,
+        force=False,
+    )
+    state = session.agent_state
+
+    # ── Step 7: Validator ────────────────────────────────────────────────
+    cards_to_validate = list(state.generated_resources.get(current_node, []))
+    if cards_to_validate:
+        val_output = _runtime.validator(ValidatorInput(
+            agent_state=state,
+            cards_to_validate=cards_to_validate[-5:],
+            ground_truth_context="Data structures organize and store data for efficient access and update.",
+            enable_pole2=False,
+        ))
+        state = val_output.agent_state
+        logs.append({
+            "agent": "Validator",
+            "valid_cards": len(val_output.valid_cards),
+            "rejected_cards": len(val_output.rejected_cards),
+            "refined_cards": len(val_output.refined_cards),
+            "overall_pass_rate": round(val_output.overall_pass_rate, 2),
+        })
+    else:
+        logs.append({"agent": "Validator", "status": "no_cards_to_validate"})
+
+    # ── Step 8: Assessment (skipped on load_node) ─────────────────────────
+    if interaction_type == "load_node":
+        logs.append({"agent": "Assessment", "status": "skipped", "reason": "interaction_type=load_node"})
+    else:
+        assess_output = _runtime.assessment(AssessmentInput(agent_state=state))
+        state = assess_output.agent_state
+        logs.append({
+            "agent": "Assessment",
+            "capability_radar": state.dynamic_profile.capability_radar,
+            "pedagogical_strategy": state.pedagogical_strategy,
+            "a_mix": round(sum(state.dynamic_profile.capability_radar) / 5, 4),
+        })
+
+    # ── Node advancement ─────────────────────────────────────────────────
+    evaluated_mastery = state.dynamic_profile.knowledge_mastery.get(current_node, previous_mastery)
+    advanced_to_next_node = False
+    next_node_id: Optional[str] = None
+
+    def _find_next(path: list, mastery_map: Dict[str, float], cur: str) -> Optional[str]:
+        start = path.index(cur) + 1 if cur in path else 0
+        for nid in path[start:]:
+            if mastery_map.get(nid, 0.0) < _MASTERY_ADVANCE_THRESHOLD:
+                return nid
+        return None
+
+    if interaction_type == "diagnostic" and evaluated_mastery >= _MASTERY_ADVANCE_THRESHOLD:
+        next_node_id = _find_next(state.active_path, state.dynamic_profile.knowledge_mastery, current_node)
+        if next_node_id:
+            state.current_node_id = next_node_id
+            advanced_to_next_node = True
+        else:
+            state.current_node_id = current_node
+    else:
+        state.current_node_id = current_node
+
+    normalize_state_resources(state)
+    session.agent_state = state
+    session.pipeline_log.extend(logs)
+
+    return LearningStepResult(
+        state=state,
+        logs=logs,
+        current_node=state.current_node_id,
+        evaluated_node=current_node,
+        evaluated_mastery=evaluated_mastery,
+        previous_mastery=previous_mastery,
+        advanced_to_next_node=advanced_to_next_node,
+        next_node_id=next_node_id,
+        interaction_type=interaction_type,
+        correctness=correctness,
+    )
+
 
 # ============================================================================
 # Official reusable orchestration API
