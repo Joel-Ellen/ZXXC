@@ -68,6 +68,18 @@ export async function askTutor(payload) {
 }
 
 /**
+ * 显式生成或重新生成某节点的学习资源。
+ * 仅在用户主动点击"生成"/"重新生成"时调用，不在页面加载时自动触发。
+ *
+ * @param {{ user_id: string, course_id: string, node_id: string, force?: boolean }} payload
+ * @returns {Promise<{ status: string, node_id: string, cards: Array }>}
+ */
+export async function generateNodeResources(payload) {
+  const { data } = await apiClient.post("/resources/generate-node", payload);
+  return data;
+}
+
+/**
  * 流式辅导问答 — SSE over fetch（后端为 POST，EventSource 不支持 POST，故用 ReadableStream 手动解析）。
  *
  * @param {Object} payload           - { user_id, course_id, question }

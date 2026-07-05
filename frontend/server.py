@@ -1778,7 +1778,22 @@ def _assemble_node_resource_set(node_id: str, difficulty: float) -> Tuple[List[R
     return cards, budget_info
 
 
-def _ensure_node_resource_set(agent_state: AgentState, node_id: str) -> None:
+def _ensure_node_resource_set(agent_state: AgentState, node_id: str, force: bool = False) -> None:
+    """填充节点资源集合。
+
+    Args:
+        agent_state: 当前 Agent 状态。
+        node_id: 目标知识节点 ID。
+        force: True 时强制重新生成（用于用户主动点击"生成"/"重新生成"），
+               False 时若该节点已有完整资源则直接跳过，避免重复调用 LLM。
+    """
+    if not force:
+        # 若已有全部5种卡片类型，无需重新生成
+        existing = agent_state.generated_resources.get(node_id, [])
+        existing_types = {c.card_type for c in existing}
+        if existing_types.issuperset(set(RESOURCE_CARD_ORDER)):
+            return
+
     difficulty = max(0.1, 1.0 - agent_state.dynamic_profile.knowledge_mastery.get(node_id, 0.5))
     cards, budget_info = _assemble_node_resource_set(node_id, difficulty)
     for card in cards:
@@ -2031,6 +2046,9 @@ def _get_user_enrollments(user_id: str) -> Dict[str, Any]:
 _es_kb_client = None
 _es_embedder = None
 
+# 保存后台 asyncio.Task 引用，防止被 GC 提前回收
+_background_tasks: set = set()
+
 def _get_es_kb():
     """延迟初始化 ES 知识库客户端"""
     global _es_kb_client, _es_embedder
@@ -2093,17 +2111,57 @@ def _safe_get_es_kb():
         return None
 
 
-def _search_knowledge_base(query: str, top_k: int = 5) -> List[str]:
-    """从 ES 知识库检索相关内容"""
+def _search_knowledge_base(query: str, top_k: int = 5, course_id: str = "") -> List[str]:
+    """从 ES 知识库检索相关内容。
+
+    当 course_id 非空时，优先检索对应课程下带标签的内容（如课堂 Q&A），
+    结果不足再用全局检索补全，最终去重后返回 top_k 条。
+    这样既能命中课程专属 Q&A，也不丢失预置知识库的共享内容。
+    """
     client = _safe_get_es_kb()
     if client is None:
         return []
+
+    results: List[str] = []
+    seen: set = set()
+
+    def _extract(search_result) -> None:
+        for h in search_result.get("hits", {}).get("hits", []):
+            content = h["_source"].get("content", "")
+            if content and content not in seen:
+                results.append(content)
+                seen.add(content)
+
     try:
-        result = client.hybrid_search(query, top_k=top_k)
-        hits = result.get("hits", {}).get("hits", [])
-        return [h["_source"]["content"] for h in hits]
+        if course_id:
+            # 1) 先检索对应课程的带标签内容（Q&A 等 section=course_id 的 chunk）
+            try:
+                course_result = client.hybrid_search(
+                    query, top_k=top_k,
+                    filters={"section": course_id},
+                )
+                _extract(course_result)
+            except Exception:
+                pass
+
+        if len(results) < top_k:
+            # 2) 不足时补全局检索（预置教材内容）
+            try:
+                global_result = client.hybrid_search(query, top_k=top_k)
+                _extract(global_result)
+            except Exception:
+                pass
+
+        return results[:top_k]
     except Exception:
         return []
+
+
+def _schedule_qa_index(question: str, answer: str, course_id: str) -> None:
+    """创建后台 Task 将 Q&A 索引入 ES，保留引用防止被 GC 提前回收。"""
+    task = asyncio.create_task(_index_qa_to_knowledge_base(question, answer, course_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 
 async def _index_qa_to_knowledge_base(question: str, answer: str, course_id: str) -> None:
@@ -3017,8 +3075,8 @@ async def api_ask_tutor(request: Request) -> JSONResponse:
     agent_state: AgentState = session["agent_state"]
     tutor: TutorAgentNode = session["tutor"]
 
-    # 从 ES 知识库检索参考上下文
-    ref_chunks = _search_knowledge_base(query, top_k=5)
+    # 从 ES 知识库检索参考上下文（优先对应课程内容）
+    ref_chunks = _search_knowledge_base(query, top_k=5, course_id=course_id)
 
     agent_state.latest_behavior = LatestBehavior(
         node_id=agent_state.current_node_id,
@@ -3085,7 +3143,7 @@ async def api_ask_tutor_stream(request: Request) -> EventSourceResponse:
     question  = body.get("question", body.get("query", ""))
 
     # 知识库检索（同步，先于流式推送）
-    ref_chunks = _search_knowledge_base(question, top_k=5)
+    ref_chunks = _search_knowledge_base(question, top_k=5, course_id=course_id)
     context    = "\n\n---\n\n".join(ref_chunks[:5]) if ref_chunks else "无参考上下文"
 
     system_prompt = (
@@ -3127,6 +3185,10 @@ async def api_ask_tutor_stream(request: Request) -> EventSourceResponse:
                         full_text.append(token)
                         yield {"event": "token", "data": json.dumps({"token": token}, ensure_ascii=False)}
             except Exception as exc:
+                # stream 出错：仍尝试将已收集的部分答案入库，再通知前端
+                full_answer = "".join(full_text)
+                if full_answer:
+                    _schedule_qa_index(question, full_answer, course_id)
                 yield {"event": "error", "data": json.dumps({"error": str(exc)}, ensure_ascii=False)}
                 return
 
@@ -3137,15 +3199,59 @@ async def api_ask_tutor_stream(request: Request) -> EventSourceResponse:
         agent_state.tutor_response = {"text_explanation": full_answer, "mermaid_src": ""}
         _persist_state(user_id, course_id, agent_state, session.get("cold_state"))
 
-        # 将 Q&A 对索引到知识库（异步任务，不阻塞响应）
-        try:
-            asyncio.ensure_future(_index_qa_to_knowledge_base(question, full_answer, course_id))
-        except Exception:
-            pass
+        # 将 Q&A 对异步索引到对应课程的知识库（保留 Task 引用防 GC）
+        _schedule_qa_index(question, full_answer, course_id)
 
         yield {"event": "done", "data": json.dumps({"reference_count": len(ref_chunks)}, ensure_ascii=False)}
 
     return EventSourceResponse(event_generator())
+
+
+async def api_generate_node_resources(request: Request) -> JSONResponse:
+    """显式生成或重新生成某节点的学习资源。
+
+    仅在用户主动点击"生成"或"重新生成"时调用，不在页面加载时自动触发。
+
+    Body:
+        user_id   (str)           — 用户 ID
+        course_id (str)           — 课程 ID
+        node_id   (str)           — 目标知识节点 ID
+        force     (bool, default False) — True 时强制重新生成；False 时若已有完整资源则返回现有内容
+    """
+    body = await request.json()
+    user_id   = body.get("user_id", "demo_user")
+    course_id = body.get("course_id", "data_structures")
+    node_id   = body.get("node_id", "")
+    force     = bool(body.get("force", False))
+
+    if not node_id:
+        return JSONResponse({"error": "node_id is required"}, status_code=400)
+
+    session = get_or_create_session(user_id, course_id)
+    agent_state: AgentState = session["agent_state"]
+
+    # 若未强制且已有完整资源，直接返回（不调用 LLM，满足"重开不重生成"）
+    if not force:
+        existing = agent_state.generated_resources.get(node_id, [])
+        existing_types = {c.card_type for c in existing}
+        if existing_types.issuperset(set(RESOURCE_CARD_ORDER)):
+            return JSONResponse({
+                "status": "already_exists",
+                "node_id": node_id,
+                "cards": [c.model_dump() for c in existing],
+            })
+
+    # 强制生成或首次生成
+    _ensure_node_resource_set(agent_state, node_id, force=True)
+    _normalize_state_resources(agent_state)
+    _persist_state(user_id, course_id, agent_state, session.get("cold_state"))
+
+    cards = agent_state.generated_resources.get(node_id, [])
+    return JSONResponse({
+        "status": "generated",
+        "node_id": node_id,
+        "cards": [c.model_dump() for c in cards],
+    })
 
 
 async def api_knowledge_graph(request: Request) -> JSONResponse:
@@ -3672,6 +3778,7 @@ app = Starlette(
         Route("/api/pipeline/stream", api_stream_pipeline, methods=["GET"]),
         Route("/api/tutor/ask", api_ask_tutor, methods=["POST"]),
         Route("/api/tutor/ask-stream", api_ask_tutor_stream, methods=["POST"]),
+        Route("/api/resources/generate-node", api_generate_node_resources, methods=["POST"]),
         Route("/api/knowledge-graph", api_knowledge_graph, methods=["GET"]),
         # ── 认证 API ──
         Route("/api/auth/captcha", api_auth_captcha, methods=["GET"]),

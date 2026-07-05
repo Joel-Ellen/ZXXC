@@ -314,6 +314,7 @@
                 @submit-quiz="(score) => $emit('submit-quiz', score)"
                 @select-node="(id) => onSelectNode(id)"
                 @refresh="$emit('refresh-resources')"
+                @generate-card="(payload) => $emit('generate-card', payload)"
               />
             </main>
         </div>
@@ -483,6 +484,7 @@ const emit = defineEmits([
   "go-home",
   "switch-course",
   "refresh-resources",
+  "generate-card",
 ]);
 
 const drawerOpen = ref(false);

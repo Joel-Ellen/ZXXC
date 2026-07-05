@@ -1,6 +1,7 @@
 import { computed, ref } from "vue";
 import {
   askTutor,
+  generateNodeResources as apiGenerateNodeResources,
   streamTutorAsk,
   enrollCourse,
   fetchCourses,
@@ -526,6 +527,41 @@ export function useEduAgent() {
     }
   }
 
+  async function generateNodeResources(nodeId, force = false) {
+    if (!nodeId) return;
+
+    const nodeLabel = nodeTitles.value[nodeId] || nodeId;
+    isLoadingNode.value = true;
+    setInfo(force ? `正在重新生成「${nodeLabel}」的学习资源...` : `正在生成「${nodeLabel}」的学习资源...`);
+
+    try {
+      const result = await apiGenerateNodeResources({
+        user_id: userId.value,
+        course_id: courseId.value,
+        node_id: nodeId,
+        force,
+      });
+      // 将后端返回的卡片合并进本地 resources
+      if (result.cards?.length) {
+        const updated = { ...resources.value };
+        updated[nodeId] = result.cards;
+        resources.value = updated;
+      }
+      const cardCount = result.cards?.length ?? 0;
+      setInfo(
+        result.status === "already_exists"
+          ? `「${nodeLabel}」资源已就绪（${cardCount} 份），无需重新生成。`
+          : `「${nodeLabel}」已生成 ${cardCount} 份新资源。`
+      );
+    } catch (e) {
+      const message = e?.response?.data?.detail || e?.message || "未知错误";
+      setInfo(`资源生成失败：${message}`, 10000);
+    } finally {
+      isLoadingNode.value = false;
+      refreshStatuses();
+    }
+  }
+
   async function sendTutorMessage(query, contextType = "concept", codeSnippet = "", errorMessage = "") {
     if (typeof query !== "string" || !query.trim()) {
       return;
@@ -666,6 +702,7 @@ export function useEduAgent() {
     bootstrap,
     submitProbe,
     loadNode,
+    generateNodeResources,
     submitQuiz,
     sendTutorMessage,
     getCardLabel,

@@ -76,7 +76,8 @@
         @logout="handleLogout"
         @go-home="goHome"
         @switch-course="onSwitchCourse"
-        @refresh-resources="() => loadNode(currentNode)"
+        @refresh-resources="() => generateNodeResources(currentNode, true)"
+        @generate-card="onGenerateCard"
       />
     </template>
   </div>
@@ -317,6 +318,7 @@ const {
   bootstrap,
   submitProbe,
   loadNode,
+  generateNodeResources,
   submitQuiz,
   sendTutorMessage,
   getCardLabel,
@@ -388,6 +390,17 @@ async function onSendTutorMessage(payload) {
 
 function onSwitchCourse(courseId) {
   handleSwitchCourse(courseId);
+}
+
+/**
+ * 用户点击资源卡片区域的"生成"或"重新生成"时触发。
+ * force=true 表示强制重新生成（即使已有资源）。
+ */
+async function onGenerateCard({ nodeId, cardType, force = false } = {}) {
+  if (workspacePreview.value) return; // 预览模式不触发真实生成
+  const targetNode = nodeId || currentNode.value;
+  if (!targetNode) return;
+  await generateNodeResources(targetNode, force);
 }
 
 onMounted(() => {
