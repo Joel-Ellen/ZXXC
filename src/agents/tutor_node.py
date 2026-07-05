@@ -134,7 +134,16 @@ class TutorAgentNode:
             video_hydration=video_card,
             query=query,
         )
-        state.tutor_response = response_card.model_dump()
+        response_payload = response_card.model_dump()
+        try:
+            from src.validation.pipeline import get_validation_pipeline
+
+            response_payload, validation = get_validation_pipeline().validate_tutor_response(response_payload)
+            if not validation.passed and hasattr(state, "record_error"):
+                state.record_error("tutor_node_validation_rejected:" + ";".join(issue.message for issue in validation.issues))
+        except Exception as exc:
+            response_payload["validation"] = {"status": "failed", "passed": False, "issues": [{"message": str(exc)}]}
+        state.tutor_response = response_payload
         return TutorOutput(agent_state=state)
 
     @staticmethod

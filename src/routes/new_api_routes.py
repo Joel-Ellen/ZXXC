@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-Additional API routes with unified agent creation.
+Legacy/internal API routes with unified agent creation.
+
+These routes are retained for testing and debugging. Official learning flows now
+enter through frontend/server.py -> src.application services -> orchestration runtime.
 """
 
 from __future__ import annotations
@@ -30,7 +33,7 @@ from src.agents.agent_factory import build_agent, get_default_llm
 
 
 def build_health_response() -> dict:
-    return {"status": "ok", "version": "2.1.0", "docs": "/docs"}
+    return {"status": "ok", "version": "2.1.0", "docs": "/docs", "route_tier": "legacy_internal"}
 
 
 async def api_health(request: Request) -> JSONResponse:
@@ -293,3 +296,4 @@ new_routes = [
     Route("/api/knowledge/search", api_knowledge_search, methods=["POST"]),
     Route("/api/knowledge/stats", api_knowledge_stats, methods=["GET"]),
 ]
+

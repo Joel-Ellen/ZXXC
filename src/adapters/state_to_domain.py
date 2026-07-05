@@ -1,0 +1,137 @@
+﻿# -*- coding: utf-8 -*-
+"""Adapters from AgentState runtime objects to domain models."""
+
+from __future__ import annotations
+
+from typing import Dict, List, Optional
+
+from src.contracts.resource_contract import ResourceContract, ResourceSafety, ResourceValidation
+from src.domain.assessment import AssessmentResult, StrategyDecision
+from src.domain.path import LearningPath, PathNode
+from src.domain.profile import DynamicLearningProfile, StudentProfile
+from src.domain.resource import LearningResource, ResourceBundle
+from src.domain.session import LearningSession, SessionStatus
+from src.state.agent_state import AgentState, ResourceCard
+
+
+def _node_title(node_id: Optional[str]) -> str:
+    if not node_id:
+        return ""
+    try:
+        from src.orchestration_runtime import get_runtime
+
+        return get_runtime().kg.get_node_title(node_id) or node_id
+    except Exception:
+        return node_id
+
+
+def profile_from_state(state: AgentState) -> StudentProfile:
+    means = state.static_profile.cognitive_style_distribution.compute_means()
+    return StudentProfile(
+        user_id=state.user_id,
+        course_id=state.course_id,
+        motivation=state.static_profile.motivation,
+        time_budget_hours_per_week=state.static_profile.time_budget_hours_per_week,
+        knowledge_base=state.static_profile.knowledge_base,
+        cognitive_style_weights=means,
+    )
+
+
+def dynamic_profile_from_state(state: AgentState) -> DynamicLearningProfile:
+    return DynamicLearningProfile(
+        knowledge_mastery=state.dynamic_profile.knowledge_mastery,
+        continuous_fail_counter=state.dynamic_profile.continuous_fail_counter,
+        capability_radar=state.dynamic_profile.capability_radar,
+        diagnostic_report_md=state.dynamic_profile.diagnostic_report_md,
+        error_type_distribution=state.dynamic_profile.error_type_distribution.model_dump(),
+    )
+
+
+def session_from_state(state: AgentState) -> LearningSession:
+    status = SessionStatus.COLD_START if state.is_cold_start() else SessionStatus.ACTIVE
+    return LearningSession(
+        user_id=state.user_id,
+        course_id=state.course_id,
+        status=status,
+        current_node_id=state.current_node_id,
+        target_node_id=state.target_node_id,
+        iteration=state.iteration,
+        c_epoch=state.c_epoch,
+        re_plan_triggered=state.re_plan_triggered,
+        pedagogical_strategy=state.pedagogical_strategy,
+        recommended_resource_style=state.recommended_resource_style,
+        errors=state.errors[-10:],
+    )
+
+
+def path_from_state(state: AgentState) -> LearningPath:
+    nodes: List[PathNode] = []
+    for node_id in state.active_path:
+        mastery = state.dynamic_profile.knowledge_mastery.get(node_id, 0.0)
+        if node_id == state.current_node_id:
+            status = "current"
+        elif mastery >= 0.65:
+            status = "mastered"
+        else:
+            status = "pending"
+        nodes.append(PathNode(id=node_id, title=_node_title(node_id), mastery=mastery, status=status))
+    return LearningPath(nodes=nodes, current_node_id=state.current_node_id, target_node_id=state.target_node_id)
+
+
+def resource_contract_from_card(card: ResourceCard) -> ResourceContract:
+    metadata = dict(card.metadata or {})
+    title = metadata.get("title") or _node_title(card.node_id) or card.node_id
+    validation_payload = metadata.get("validation") if isinstance(metadata.get("validation"), dict) else {}
+    safety_payload = metadata.get("safety") if isinstance(metadata.get("safety"), dict) else {}
+    artifacts = metadata.get("artifacts") if isinstance(metadata.get("artifacts"), dict) else {}
+    source_refs = metadata.get("source_refs") if isinstance(metadata.get("source_refs"), list) else []
+    created_at = metadata.get("created_at") or metadata.get("generated_at")
+    structured_payload = {
+        key: value
+        for key, value in metadata.items()
+        if key not in {"validation", "safety", "artifacts", "source_refs"}
+    }
+    return ResourceContract(
+        resource_id=card.resource_id,
+        node_id=card.node_id,
+        resource_type=card.card_type,
+        title=str(title),
+        body_markdown=card.content,
+        structured_payload=structured_payload,
+        artifacts=artifacts,
+        difficulty=card.difficulty,
+        personalization_basis={"cognitive_style": card.cognitive_style},
+        validation=ResourceValidation(**validation_payload),
+        safety=ResourceSafety(**safety_payload),
+        source_refs=source_refs,
+        created_at=created_at or ResourceContract(resource_id=card.resource_id, node_id=card.node_id, resource_type=card.card_type).created_at,
+    )
+
+
+def learning_resource_from_card(card: ResourceCard) -> LearningResource:
+    return LearningResource.model_validate(resource_contract_from_card(card).model_dump())
+
+
+def resource_bundle_from_state(state: AgentState, node_id: str) -> ResourceBundle:
+    return ResourceBundle(
+        node_id=node_id,
+        resources=[learning_resource_from_card(card) for card in state.generated_resources.get(node_id, [])],
+    )
+
+
+def resources_from_state(state: AgentState) -> Dict[str, List[ResourceContract]]:
+    return {
+        node_id: [resource_contract_from_card(card) for card in cards]
+        for node_id, cards in state.generated_resources.items()
+    }
+
+
+def assessment_from_state(state: AgentState) -> AssessmentResult:
+    node_id = state.current_node_id
+    return AssessmentResult(
+        node_id=node_id,
+        mastery=state.dynamic_profile.knowledge_mastery.get(node_id, 0.0) if node_id else None,
+        capability_radar=state.dynamic_profile.capability_radar,
+        diagnostic_report_md=state.dynamic_profile.diagnostic_report_md,
+        strategy_decision=StrategyDecision(strategy=state.pedagogical_strategy),
+    )

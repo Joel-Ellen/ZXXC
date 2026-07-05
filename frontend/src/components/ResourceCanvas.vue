@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <section class="resource-canvas relative flex h-full min-h-0 flex-col px-4 py-4 sm:px-5 lg:px-6" @wheel="forwardWheelToContent">
     <header class="pb-4 lg:pb-5">
       <div class="grid gap-5 2xl:grid-cols-[minmax(0,1fr)_auto] 2xl:items-start">
@@ -156,15 +156,15 @@
             <template v-for="card of [slot.card]" :key="slot.type">
             <ResourceCard
               class="h-full"
-              :agent-name="agentLabel(card.card_type)"
-              :title="cardLabel(card.card_type)"
+              :agent-name="agentLabel(resourceType(card))"
+              :title="cardLabel(resourceType(card))"
               :progress-text="loading ? '栅格同步' : '资源就绪'"
-              :progress="loading ? progressHint(card.card_type) : 100"
+              :progress="loading ? progressHint(resourceType(card)) : 100"
               :is-ready="!loading"
               :is-active="card.resource_id === activeCardId"
               :is-expanded="isCardHydrated(card.resource_id)"
               :activatable="!loading"
-              :color="cardColor(card.card_type)"
+              :color="cardColor(resourceType(card))"
               @activate="activateCard(card.resource_id)"
               @pin="pinCard(card.resource_id)"
               @minimize="minimizeCard(card.resource_id)"
@@ -173,11 +173,11 @@
               <div v-if="!isCardHydrated(card.resource_id)" class="space-y-4">
                 <div class="workspace-shell-card-soft rounded-[20px] p-4">
                   <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">
-                    {{ previewLabel(card.card_type) }}
+                    {{ previewLabel(resourceType(card)) }}
                   </p>
 
                   <pre
-                    v-if="card.card_type === 'code_snippet'"
+                    v-if="resourceType(card) === 'code_snippet'"
                     class="mt-3 overflow-x-auto rounded-[16px] border border-subtle/80 bg-[#08111f] px-4 py-3 text-xs leading-6 text-slate-100"
                   >{{ previewCode(card) }}</pre>
 
@@ -196,7 +196,7 @@
               </div>
 
               <div v-else class="space-y-5">
-                <div v-if="card.card_type === 'concept_map'" class="space-y-4">
+                <div v-if="resourceType(card) === 'concept_map'" class="space-y-4">
                   <div class="workspace-shell-card rounded-[20px] p-4">
                     <p class="text-sm leading-7 text-text-secondary">{{ conceptSummary(card) }}</p>
                   </div>
@@ -246,7 +246,7 @@
                   />
                 </div>
 
-                <div v-else-if="card.card_type === 'code_snippet'" class="space-y-4">
+                <div v-else-if="resourceType(card) === 'code_snippet'" class="space-y-4">
                   <div class="workspace-shell-card rounded-[20px] p-4">
                     <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">场景说明</p>
                     <p class="mt-3 text-sm leading-7 text-text-secondary">{{ codeScenario(card) }}</p>
@@ -302,7 +302,7 @@
                   </div>
                 </div>
 
-                <div v-else-if="card.card_type === 'interactive_exercise'" class="space-y-4">
+                <div v-else-if="resourceType(card) === 'interactive_exercise'" class="space-y-4">
                   <div class="workspace-shell-card rounded-[20px] p-4">
                     <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">任务目标</p>
                     <p class="mt-2 text-sm leading-7 text-text-secondary">{{ exerciseGoal(card) }}</p>
@@ -348,7 +348,7 @@
                   </div>
                 </div>
 
-                <div v-else-if="card.card_type === 'video_summary'" class="space-y-4">
+                <div v-else-if="resourceType(card) === 'video_summary'" class="space-y-4">
                   <div class="workspace-shell-card rounded-[20px] p-4">
                     <p class="text-sm leading-7 text-text-secondary">{{ videoSummary(card) }}</p>
                     <ul v-if="videoKeyPoints(card).length" class="mt-4 space-y-2 text-sm leading-6 text-text-secondary">
@@ -394,7 +394,7 @@
                   </a>
                 </div>
 
-                <div v-else-if="card.card_type === 'diagnostic_quiz'" class="space-y-4">
+                <div v-else-if="resourceType(card) === 'diagnostic_quiz'" class="space-y-4">
                   <div v-if="quizGuidance(card)" class="workspace-shell-card rounded-[20px] p-4">
                     <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">作答建议</p>
                     <p class="mt-3 text-sm leading-7 text-text-secondary">{{ quizGuidance(card) }}</p>
@@ -449,7 +449,7 @@
 
                 <MarkdownContent
                   v-else
-                  :content="card.content"
+                  :content="bodyMarkdown(card)"
                 />
               </div>
             </template>
@@ -501,7 +501,7 @@
           class="workspace-shell-btn focus-ring px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.10em]"
           @click="restoreCard(card.resource_id)"
         >
-          {{ cardLabel(card.card_type) }}
+          {{ cardLabel(resourceType(card)) }}
         </button>
       </div>
     </footer>
@@ -555,7 +555,7 @@ const CARD_TYPES = [
 const cardsByType = computed(() => {
   const map = {};
   for (const card of props.cards) {
-    const t = card.card_type ?? card.type ?? "";
+    const t = resourceType(card);
     if (t) map[t] = card;
   }
   return map;
@@ -602,8 +602,8 @@ const sortedCards = computed(() => {
         (orderIndex.get(right.resource_id) ?? Number.MAX_SAFE_INTEGER),
     )
     .forEach((card) => {
-      if (["concept_map", "code_snippet", "interactive_exercise", "video_summary", "diagnostic_quiz"].includes(card.card_type)) {
-        latestByType.set(card.card_type, card);
+      if (["concept_map", "code_snippet", "interactive_exercise", "video_summary", "diagnostic_quiz"].includes(resourceType(card))) {
+        latestByType.set(resourceType(card), card);
       } else {
         extras.push(card);
       }
@@ -629,11 +629,11 @@ const visibleCards = computed(() => {
 });
 
 const quizCard = computed(() =>
-  sortedCards.value.find((card) => card.card_type === "diagnostic_quiz"),
+  sortedCards.value.find((card) => resourceType(card) === "diagnostic_quiz"),
 );
 
 const quizQuestions = computed(() => {
-  const structuredQuestions = quizCard.value?.metadata?.questions;
+  const structuredQuestions = structuredPayload(quizCard.value)?.questions;
   if (Array.isArray(structuredQuestions) && structuredQuestions.length) {
     return structuredQuestions.map((question) => ({
       id: question.id,
@@ -646,7 +646,7 @@ const quizQuestions = computed(() => {
     }));
   }
 
-  return props.buildQuiz(quizCard.value?.content ?? "").map((question) => ({
+  return props.buildQuiz(bodyMarkdown(quizCard.value)).map((question) => ({
     id: question.id,
     prompt: question.prompt,
     options: question.options,
@@ -670,10 +670,10 @@ const currentMastery = computed(() =>
 
 const activeCardTitle = computed(() => {
   const activeCard = sortedCards.value.find((card) => card.resource_id === activeCardId.value) ?? sortedCards.value[0];
-  return activeCard ? cardLabel(activeCard.card_type) : "当前内容";
+  return activeCard ? cardLabel(resourceType(activeCard)) : "当前内容";
 });
 
-const availableTypes = computed(() => new Set(props.cards.map((card) => card.card_type)));
+const availableTypes = computed(() => new Set(props.cards.map((card) => resourceType(card))));
 const nextPendingNode = computed(() =>
   props.pathNodes.find((node) => (node.mastery ?? 0) < 0.65 && node.id !== props.currentNode) ?? null,
 );
@@ -726,36 +726,47 @@ const diagnosticStatusText = computed(() => {
   return "请先回答所有题目，再提交诊断得分。";
 });
 
+function resourceType(card) {
+  return card?.resource_type || card?.card_type || card?.type || "";
+}
+
+function bodyMarkdown(card) {
+  return card?.body_markdown || card?.content || "";
+}
+
+function structuredPayload(card) {
+  return card?.structured_payload || card?.metadata || {};
+}
 function cardMetadata(card) {
-  return card?.metadata || {};
+  return structuredPayload(card);
 }
 
 function previewText(card) {
   const metadata = cardMetadata(card);
-  if (card.card_type === "concept_map") {
-    return metadata.summary || textPreview(card.content);
+  if (resourceType(card) === "concept_map") {
+    return metadata.summary || textPreview(bodyMarkdown(card));
   }
-  if (card.card_type === "interactive_exercise") {
-    return metadata.prompt || textPreview(card.content);
+  if (resourceType(card) === "interactive_exercise") {
+    return metadata.prompt || textPreview(bodyMarkdown(card));
   }
-  if (card.card_type === "video_summary") {
-    return metadata.summary || textPreview(card.content);
+  if (resourceType(card) === "video_summary") {
+    return metadata.summary || textPreview(bodyMarkdown(card));
   }
-  if (card.card_type === "diagnostic_quiz") {
-    return quizQuestions.value[0]?.prompt || textPreview(card.content);
+  if (resourceType(card) === "diagnostic_quiz") {
+    return quizQuestions.value[0]?.prompt || textPreview(bodyMarkdown(card));
   }
-  return textPreview(card.content);
+  return textPreview(bodyMarkdown(card));
 }
 
 function previewCode(card) {
   const metadata = cardMetadata(card);
-  return metadata.code ? extractCodePreview(`\`\`\`\n${metadata.code}\n\`\`\``, 8) : codePreview(card.content);
+  return metadata.code ? extractCodePreview(`\`\`\`\n${metadata.code}\n\`\`\``, 8) : codePreview(bodyMarkdown(card));
 }
 
 function conceptMarkdown(card) {
   const metadata = cardMetadata(card);
   if (!metadata.title && !metadata.summary && !Array.isArray(metadata.bullets)) {
-    return card.content;
+    return bodyMarkdown(card);
   }
 
   const sections = Array.isArray(metadata.sections)
@@ -764,7 +775,7 @@ function conceptMarkdown(card) {
   const bullets = Array.isArray(metadata.bullets) && metadata.bullets.length
     ? `\n\n${metadata.bullets.map((bullet) => `- ${bullet}`).join("\n")}`
     : "";
-  return `## ${metadata.title || cardLabel(card.card_type)}\n\n${metadata.summary || ""}${sections}${bullets}`.trim();
+  return `## ${metadata.title || cardLabel(resourceType(card))}\n\n${metadata.summary || ""}${sections}${bullets}`.trim();
 }
 
 function conceptMermaidSource(card) {
@@ -772,7 +783,7 @@ function conceptMermaidSource(card) {
 }
 
 function conceptSummary(card) {
-  return cardMetadata(card).summary || textPreview(card.content);
+  return cardMetadata(card).summary || textPreview(bodyMarkdown(card));
 }
 
 function conceptObjectives(card) {
@@ -800,7 +811,7 @@ function codeLanguage(card) {
 }
 
 function fullCode(card) {
-  return cardMetadata(card).code || extractCodePreview(card.content, 40);
+  return cardMetadata(card).code || extractCodePreview(bodyMarkdown(card), 40);
 }
 
 function codeExplanation(card) {
@@ -808,7 +819,7 @@ function codeExplanation(card) {
 }
 
 function codeScenario(card) {
-  return cardMetadata(card).scenario || codeExplanation(card) || textPreview(card.content);
+  return cardMetadata(card).scenario || codeExplanation(card) || textPreview(bodyMarkdown(card));
 }
 
 function codePrerequisites(card) {
@@ -832,7 +843,7 @@ function codeExperiments(card) {
 }
 
 function exercisePrompt(card) {
-  return cardMetadata(card).prompt || textPreview(card.content);
+  return cardMetadata(card).prompt || textPreview(bodyMarkdown(card));
 }
 
 function exerciseGoal(card) {
@@ -860,7 +871,7 @@ function exerciseSolutionOutline(card) {
 }
 
 function videoSummary(card) {
-  return cardMetadata(card).summary || textPreview(card.content);
+  return cardMetadata(card).summary || textPreview(bodyMarkdown(card));
 }
 
 function videoKeyPoints(card) {

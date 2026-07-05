@@ -9,6 +9,8 @@ from .connection import db
 from .user_repo import UserRepo
 from .enrollment_repo import EnrollmentRepo
 from .state_repo import StateRepo
+from .session_repo import SessionRepo
+from .session_snapshot_repo import SessionSnapshotRepo
 from .redis_client import (
     get_redis, blacklist_token, is_blacklisted,
     mark_rotated, is_rotated, store_refresh_token, revoke_all_user_sessions,
@@ -22,7 +24,7 @@ from .evaluation_repo import EvaluationRepo
 
 __all__ = [
     # sync layer
-    "db", "UserRepo", "EnrollmentRepo", "StateRepo",
+    "db", "UserRepo", "EnrollmentRepo", "StateRepo", "SessionRepo", "SessionSnapshotRepo",
     "get_redis", "blacklist_token", "is_blacklisted",
     "mark_rotated", "is_rotated", "store_refresh_token", "revoke_all_user_sessions",
     # async layer

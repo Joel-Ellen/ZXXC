@@ -1,6 +1,10 @@
 import { computed, ref } from "vue";
 import {
+  advanceSession,
+  askSessionTutor,
   askTutor,
+  buildSessionId,
+  createSession,
   generateNodeResources as apiGenerateNodeResources,
   streamTutorAsk,
   enrollCourse,
@@ -8,7 +12,9 @@ import {
   fetchKnowledgeGraph,
   fetchMyProfile,
   fetchProbe,
+  fetchSessionResources,
   fetchState,
+  getSession,
   fetchUserCourses,
   getCaptcha,
   initLearningPath,
@@ -86,6 +92,31 @@ export function useEduAgent() {
     })),
   );
   const courseId = computed(() => activeCourse.value?.course_id || "data_structures");
+  const sessionId = computed(() => buildSessionId(userId.value, courseId.value));
+
+  async function fetchCurrentSession() {
+    try {
+      return await getSession(sessionId.value);
+    } catch {
+      return fetchState(userId.value, courseId.value);
+    }
+  }
+
+  async function advanceCurrentSession(payload) {
+    try {
+      return await advanceSession(sessionId.value, payload);
+    } catch {
+      return runPipelineStep(payload);
+    }
+  }
+
+  async function fetchCurrentNodeResources(nodeId, force = false) {
+    try {
+      return await fetchSessionResources(sessionId.value, nodeId, { force });
+    } catch {
+      return apiGenerateNodeResources({ user_id: userId.value, course_id: courseId.value, node_id: nodeId, force });
+    }
+  }
 
   function setInfo(message, durationMs = 3000) {
     infoMessage.value = message;
@@ -301,7 +332,8 @@ export function useEduAgent() {
 
   async function initPathAndEnter() {
     await initLearningPath(userId.value, courseId.value);
-    const state = await fetchState(userId.value, courseId.value);
+    await createSession({ user_id: userId.value, course_id: courseId.value });
+      const state = await fetchCurrentSession();
     hydrateState(state);
     currentNode.value = activePath.value.find((id) => (mastery.value[id] ?? 0) < 0.65) || activePath.value[0] || "";
     bootMode.value = "ready";
@@ -354,7 +386,7 @@ export function useEduAgent() {
         return;
       }
 
-      const state = await fetchState(userId.value, courseId.value);
+      const state = await fetchCurrentSession();
       hydrateState(state);
 
       if (activePath.value.length) {
@@ -414,7 +446,7 @@ export function useEduAgent() {
       await loadUserCourses();
       resetLearningState();
 
-      const state = await fetchState(userId.value, courseId.value);
+      const state = await fetchCurrentSession();
       hydrateState(state);
       if (activePath.value.length) {
         bootMode.value = "ready";
@@ -450,7 +482,7 @@ export function useEduAgent() {
     setInfo(`正在为「${nodeLabel}」生成学习资源...`);
 
     try {
-      await runPipelineStep({
+      await advanceCurrentSession({
         interaction_type: "load_node",
         user_id: userId.value,
         course_id: courseId.value,
@@ -459,7 +491,7 @@ export function useEduAgent() {
         time_spent_ratio: 1.0,
         code_pass_rate: 0.7,
       });
-      const state = await fetchState(userId.value, courseId.value);
+      const state = await fetchCurrentSession();
       hydrateState(state);
       currentNode.value = state.current_node_id || nodeId;
       const cardCount = (state.generated_resources?.[currentNode.value] || []).length;
@@ -482,7 +514,7 @@ export function useEduAgent() {
     const previousMastery = mastery.value[evaluatedNodeId] ?? 0;
 
     try {
-      const response = await runPipelineStep({
+      const response = await advanceCurrentSession({
         interaction_type: "diagnostic",
         user_id: userId.value,
         course_id: courseId.value,
@@ -491,7 +523,7 @@ export function useEduAgent() {
         time_spent_ratio: 1.0,
         code_pass_rate: score,
       });
-      const state = await fetchState(userId.value, courseId.value);
+      const state = await fetchCurrentSession();
       hydrateState(state);
       currentNode.value = response.current_node_id || state.current_node_id || evaluatedNodeId;
 
@@ -535,12 +567,7 @@ export function useEduAgent() {
     setInfo(force ? `正在重新生成「${nodeLabel}」的学习资源...` : `正在生成「${nodeLabel}」的学习资源...`);
 
     try {
-      const result = await apiGenerateNodeResources({
-        user_id: userId.value,
-        course_id: courseId.value,
-        node_id: nodeId,
-        force,
-      });
+      const result = await fetchCurrentNodeResources(nodeId, force);
       // 将后端返回的卡片合并进本地 resources
       if (result.cards?.length) {
         const updated = { ...resources.value };

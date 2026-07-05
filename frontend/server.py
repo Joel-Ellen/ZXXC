@@ -35,6 +35,7 @@ from starlette.requests import Request
 
 # --- Course System ---
 from src.courses import CourseStore
+from src.application import profile_service, resource_service, session_service, tutor_service
 from sse_starlette.sse import EventSourceResponse
 
 
@@ -3761,10 +3762,159 @@ async def api_auth_me(request: Request) -> JSONResponse:
     return JSONResponse({k: user[k] for k in ("user_id", "email", "role", "display_name", "created_at", "last_login_at") if k in user})
 
 
+# Official route handlers: route -> application service -> response.
+# Older implementations above are retained as legacy migration references only.
+async def api_reset(request: Request) -> JSONResponse:
+    body = await request.json()
+    return JSONResponse(session_service.reset_learning_session(
+        body.get("user_id", "demo_user"),
+        body.get("course_id", "data_structures"),
+    ))
+
+
+async def api_get_state(request: Request) -> JSONResponse:
+    return JSONResponse(session_service.get_learning_state(
+        request.query_params.get("user_id", "demo_user"),
+        request.query_params.get("course_id", "data_structures"),
+    ))
+
+
+async def api_cold_start_probe(request: Request) -> JSONResponse:
+    return JSONResponse(profile_service.get_probe(
+        request.query_params.get("user_id", "demo_user"),
+        request.query_params.get("course_id", "data_structures"),
+    ))
+
+
+async def api_cold_start_answer(request: Request) -> JSONResponse:
+    body = await request.json()
+    return JSONResponse(profile_service.submit_probe_answer(
+        body.get("user_id", "demo_user"),
+        body.get("course_id", "data_structures"),
+        body.get("answer"),
+    ))
+
+
+async def api_init_path(request: Request) -> JSONResponse:
+    body = await request.json()
+    return JSONResponse(session_service.init_path(
+        body.get("user_id", "demo_user"),
+        body.get("course_id", "data_structures"),
+    ))
+
+
+async def api_run_pipeline_step(request: Request) -> JSONResponse:
+    body = await request.json()
+    return JSONResponse(session_service.advance_session(
+        body.get("user_id", "demo_user"),
+        body.get("course_id", "data_structures"),
+        user_input=body.get("tutor_query"),
+        behavior=body,
+    ))
+
+
+async def api_ask_tutor(request: Request) -> JSONResponse:
+    body = await request.json()
+    return JSONResponse(tutor_service.run_tutor(
+        body.get("user_id", "demo_user"),
+        body.get("course_id", "data_structures"),
+        body.get("query", body.get("question", "")),
+    ))
+
+
+async def api_ask_tutor_stream(request: Request) -> EventSourceResponse:
+    body = await request.json()
+    return EventSourceResponse(tutor_service.stream_tutor(
+        body.get("user_id", "demo_user"),
+        body.get("course_id", "data_structures"),
+        body.get("question", body.get("query", "")),
+    ))
+
+
+async def api_generate_node_resources(request: Request) -> JSONResponse:
+    body = await request.json()
+    result = resource_service.generate_current_node_resources(
+        body.get("user_id", "demo_user"),
+        body.get("course_id", "data_structures"),
+        body.get("node_id", ""),
+        bool(body.get("force", False)),
+    )
+    status_code = int(result.pop("status_code", 200))
+    return JSONResponse(result, status_code=status_code)
+
+def _session_ids(session_id: str) -> tuple[str, str]:
+    if ":" in session_id:
+        user_id, course_id = session_id.split(":", 1)
+        return user_id or "demo_user", course_id or "data_structures"
+    return session_id or "demo_user", "data_structures"
+
+
+async def api_create_session(request: Request) -> JSONResponse:
+    body = await request.json()
+    user_id = body.get("user_id", "demo_user")
+    course_id = body.get("course_id", "data_structures")
+    data = session_service.restore_or_create_session(user_id, course_id)
+    data["session_id"] = f"{user_id}:{course_id}"
+    return JSONResponse(data)
+
+
+async def api_get_session(request: Request) -> JSONResponse:
+    user_id, course_id = _session_ids(request.path_params.get("session_id", ""))
+    data = session_service.restore_or_create_session(user_id, course_id)
+    data["session_id"] = f"{user_id}:{course_id}"
+    return JSONResponse(data)
+
+
+async def api_session_profile_input(request: Request) -> JSONResponse:
+    user_id, course_id = _session_ids(request.path_params.get("session_id", ""))
+    body = await request.json()
+    return JSONResponse(profile_service.submit_probe_answer(user_id, course_id, body.get("answer")))
+
+
+async def api_session_advance(request: Request) -> JSONResponse:
+    user_id, course_id = _session_ids(request.path_params.get("session_id", ""))
+    body = await request.json()
+    return JSONResponse(session_service.advance_session(user_id, course_id, user_input=body.get("tutor_query"), behavior=body))
+
+
+async def api_session_behavior(request: Request) -> JSONResponse:
+    user_id, course_id = _session_ids(request.path_params.get("session_id", ""))
+    body = await request.json()
+    body.setdefault("interaction_type", "diagnostic")
+    return JSONResponse(session_service.advance_session(user_id, course_id, behavior=body))
+
+
+async def api_session_tutor(request: Request) -> JSONResponse:
+    user_id, course_id = _session_ids(request.path_params.get("session_id", ""))
+    body = await request.json()
+    return JSONResponse(tutor_service.run_tutor(user_id, course_id, body.get("query", body.get("question", ""))))
+
+
+async def api_session_replan(request: Request) -> JSONResponse:
+    user_id, course_id = _session_ids(request.path_params.get("session_id", ""))
+    session = session_service.get_session(user_id, course_id)
+    session.agent_state.trigger_replan()
+    return JSONResponse(session_service.advance_session(user_id, course_id, behavior={"interaction_type": "load_node"}))
+
+
+async def api_session_resources(request: Request) -> JSONResponse:
+    user_id, course_id = _session_ids(request.path_params.get("session_id", ""))
+    node_id = request.path_params.get("node_id", "")
+    force = request.query_params.get("force", "false").lower() in {"1", "true", "yes"}
+    result = resource_service.generate_current_node_resources(user_id, course_id, node_id, force)
+    status_code = int(result.pop("status_code", 200))
+    return JSONResponse(result, status_code=status_code)
 app = Starlette(
     debug=True,
     routes=[
-        Route("/api/courses", api_list_courses, methods=["GET"]),
+        Route("/api/sessions", api_create_session, methods=["POST"]),
+        Route("/api/sessions/{session_id}", api_get_session, methods=["GET"]),
+        Route("/api/sessions/{session_id}/profile-input", api_session_profile_input, methods=["POST"]),
+        Route("/api/sessions/{session_id}/advance", api_session_advance, methods=["POST"]),
+        Route("/api/sessions/{session_id}/behavior", api_session_behavior, methods=["POST"]),
+        Route("/api/sessions/{session_id}/tutor", api_session_tutor, methods=["POST"]),
+        Route("/api/sessions/{session_id}/replan", api_session_replan, methods=["POST"]),
+        Route("/api/sessions/{session_id}/resources/{node_id}", api_session_resources, methods=["GET"]),        Route("/api/courses", api_list_courses, methods=["GET"]),
         Route("/api/courses/{course_id}", api_get_course, methods=["GET"]),
         Route("/api/user/courses", api_get_user_courses, methods=["GET"]),
         Route("/api/user/courses/enroll", api_enroll_course, methods=["POST"]),

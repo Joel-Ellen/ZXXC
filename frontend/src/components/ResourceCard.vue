@@ -38,7 +38,7 @@
             {{ agentName }}
           </h5>
           <p class="mt-0.5 truncate text-[13px] font-semibold tracking-[0.02em] text-text-primary">
-            {{ title }}
+            {{ displayTitle }}
           </p>
         </div>
       </div>
@@ -122,6 +122,7 @@ import IconPin from "./icons/IconPin.vue";
 const props = defineProps({
   agentName: { type: String, default: "" },
   title: { type: String, default: "" },
+  resource: { type: Object, default: null },
   progressText: { type: String, default: "栅格同步" },
   progress: { type: Number, default: 0 },
   isReady: { type: Boolean, default: false },
@@ -131,6 +132,12 @@ const props = defineProps({
   color: { type: String, default: "primary" },
 });
 
+const displayTitle = computed(() => (
+  props.resource?.title
+  || props.resource?.structured_payload?.title
+  || props.resource?.metadata?.title
+  || props.title
+));
 const emit = defineEmits(["activate", "pin", "minimize"]);
 
 const COLOR_MAP = {

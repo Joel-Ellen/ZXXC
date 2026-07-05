@@ -150,3 +150,23 @@ def build_evaluation_response(raw: Dict[str, Any]) -> Dict[str, Any]:
         "radar_data": report.get("radar_data", {}),
         "report_markdown": raw.get("report_markdown", ""),
     }
+
+
+def build_resource_contract_response(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize an agent resource payload into the canonical resource contract."""
+    from src.contracts.resource_contract import ResourceContract
+
+    resource_type = raw.get("resource_type") or raw.get("card_type") or raw.get("type") or "unknown"
+    contract = ResourceContract(
+        resource_id=raw.get("resource_id", ""),
+        node_id=raw.get("node_id", ""),
+        resource_type=resource_type,
+        title=raw.get("title") or raw.get("metadata", {}).get("title", ""),
+        body_markdown=raw.get("body_markdown") or raw.get("content") or raw.get("markdown") or "",
+        structured_payload=raw.get("structured_payload") or raw.get("metadata") or {},
+        artifacts=raw.get("artifacts") or {},
+        difficulty=raw.get("difficulty", 0.5),
+        personalization_basis=raw.get("personalization_basis") or {},
+        source_refs=raw.get("source_refs") or [],
+    )
+    return contract.with_legacy_aliases()

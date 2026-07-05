@@ -133,6 +133,45 @@ class StudentProfile(Base):
 # ============================================================
 # Learning Models
 # ============================================================
+
+class LearningSessionModel(Base):
+    """Persistent learning session metadata."""
+    __tablename__ = "learning_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(96), unique=True, nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    course_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="active")
+    current_node_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    target_node_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    snapshot_version: Mapped[int] = mapped_column(Integer, default=0)
+    profile_version: Mapped[int] = mapped_column(Integer, default=0)
+    path_version: Mapped[int] = mapped_column(Integer, default=0)
+    resource_bundle_version: Mapped[int] = mapped_column(Integer, default=0)
+    assessment_version: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class SessionSnapshotModel(Base):
+    """Versioned learning session snapshot."""
+    __tablename__ = "session_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(96), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    course_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    state_json: Mapped[JSON] = mapped_column(JSON, nullable=False)
+    cold_state_json: Mapped[Optional[JSON]] = mapped_column(JSON, nullable=True)
+    path_json: Mapped[Optional[JSON]] = mapped_column(JSON, nullable=True)
+    profile_json: Mapped[Optional[JSON]] = mapped_column(JSON, nullable=True)
+    resource_bundle_json: Mapped[Optional[JSON]] = mapped_column(JSON, nullable=True)
+    assessment_json: Mapped[Optional[JSON]] = mapped_column(JSON, nullable=True)
+    pipeline_log_json: Mapped[Optional[JSON]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
 class LearningPath(Base):
     __tablename__ = "learning_paths"
 

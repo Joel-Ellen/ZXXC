@@ -32,6 +32,53 @@ export async function fetchMyProfile() {
 }
 
 // ── 学习流水线 ──
+
+// Session-style API (new stable boundary)
+export function buildSessionId(userId, courseId = "data_structures") {
+  return `${userId || "demo_user"}:${courseId || "data_structures"}`;
+}
+
+export async function createSession({ user_id, course_id = "data_structures" } = {}) {
+  const { data } = await apiClient.post("/sessions", { user_id, course_id });
+  return data;
+}
+
+export async function getSession(sessionId) {
+  const { data } = await apiClient.get(`/sessions/${encodeURIComponent(sessionId)}`);
+  return data;
+}
+
+export async function submitSessionProfileInput(sessionId, answer) {
+  const { data } = await apiClient.post(`/sessions/${encodeURIComponent(sessionId)}/profile-input`, { answer });
+  return data;
+}
+
+export async function advanceSession(sessionId, payload = {}) {
+  const { data } = await apiClient.post(`/sessions/${encodeURIComponent(sessionId)}/advance`, payload);
+  return data;
+}
+
+export async function submitSessionBehavior(sessionId, payload = {}) {
+  const { data } = await apiClient.post(`/sessions/${encodeURIComponent(sessionId)}/behavior`, payload);
+  return data;
+}
+
+export async function askSessionTutor(sessionId, payload = {}) {
+  const { data } = await apiClient.post(`/sessions/${encodeURIComponent(sessionId)}/tutor`, payload);
+  return data;
+}
+
+export async function replanSession(sessionId, payload = {}) {
+  const { data } = await apiClient.post(`/sessions/${encodeURIComponent(sessionId)}/replan`, payload);
+  return data;
+}
+
+export async function fetchSessionResources(sessionId, nodeId, { force = false } = {}) {
+  const { data } = await apiClient.get(`/sessions/${encodeURIComponent(sessionId)}/resources/${encodeURIComponent(nodeId)}`, {
+    params: { force },
+  });
+  return data;
+}
 export async function resetSession(userId) {
   const { data } = await apiClient.post("/reset", { user_id: userId });
   return data;
