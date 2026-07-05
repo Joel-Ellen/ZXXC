@@ -1,57 +1,87 @@
 <template>
-  <aside class="z-50 hidden h-full w-[104px] shrink-0 px-4 py-5 lg:flex">
+  <aside class="z-50 hidden h-full w-[96px] shrink-0 px-3 py-4 lg:flex" aria-label="内容分类导航">
     <div
-      class="rail-shell relative flex h-full w-full flex-col items-center overflow-visible px-2 py-4 transition-all duration-300"
-      :class="drawerOpen ? 'rounded-l-2xl rounded-r-xl' : 'rounded-2xl'"
+      class="rail-shell relative flex h-full w-full flex-col items-center overflow-visible px-2 py-4 transition-all duration-300 rounded-2xl"
     >
       <div class="rail-shell__aura pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit]" />
 
-      <div class="rail-brand relative z-10 flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl">
-        <span class="text-[15px] font-black tracking-[0.12em] text-text-primary">EA</span>
+      <!-- Brand mark -->
+      <div class="rail-brand relative z-10 flex h-12 w-12 shrink-0 items-center justify-center rounded-xl mb-1">
+        <span class="text-[13px] font-black tracking-[0.10em] text-primary-dark">EA</span>
       </div>
 
-      <div class="rail-divider relative z-10 my-4 h-px w-9" />
+      <div class="rail-divider relative z-10 my-3 h-px w-8" />
 
-      <nav class="relative z-10 flex w-full flex-col items-center gap-3" aria-label="Workspace Sidebar">
+      <!-- Content category navigation -->
+      <nav class="relative z-10 flex w-full flex-col items-center gap-2" aria-label="内容分类">
         <button
-          v-for="(item, index) in items"
+          v-for="item in contentItems"
           :key="item.key"
           type="button"
-          class="focus-ring rail-nav-btn group relative flex h-[60px] w-[56px] shrink-0 items-center justify-center rounded-2xl transition-all duration-200"
+          class="focus-ring rail-nav-btn group relative flex h-[52px] w-[52px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl transition-all duration-200"
           :class="item.key === activePanel ? 'rail-nav-btn--active' : 'rail-nav-btn--idle'"
+          :style="item.key === activePanel ? `--rail-accent: ${item.color}` : ''"
           :aria-label="item.label"
-          :aria-controls="panelId"
-          :aria-expanded="String(drawerOpen && item.key === activePanel)"
-          aria-haspopup="dialog"
-          :aria-pressed="String(drawerOpen && item.key === activePanel)"
+          :aria-pressed="String(item.key === activePanel)"
           :title="item.label"
           @click="$emit('select', item.key)"
         >
-          <component :is="item.icon" :size="22" />
-
-          <span
-            v-if="item.badge"
-            class="rail-nav-btn__badge absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-black leading-none"
-          >
-            {{ item.badge }}
+          <span class="text-[18px] leading-none">{{ item.icon }}</span>
+          <span class="text-[8px] font-bold tracking-[0.08em] uppercase leading-none opacity-70 mt-0.5">
+            {{ item.short }}
           </span>
 
-          <span class="rail-tooltip pointer-events-none absolute left-[calc(100%+14px)] top-1/2 z-50 flex -translate-y-1/2 items-center gap-3 whitespace-nowrap rounded-2xl px-3 py-2 text-left opacity-0 shadow-[0_18px_42px_rgba(15,23,42,0.14)] transition-all duration-200 group-hover:translate-x-1 group-hover:opacity-100 group-focus-visible:translate-x-1 group-focus-visible:opacity-100">
-            <span class="flex h-8 w-8 items-center justify-center rounded-xl bg-primary-soft text-primary">
-              <component :is="item.icon" :size="16" />
+          <!-- Tooltip -->
+          <span class="rail-tooltip pointer-events-none absolute left-[calc(100%+12px)] top-1/2 z-50 flex -translate-y-1/2 items-center gap-2.5 whitespace-nowrap rounded-xl px-3 py-2 text-left opacity-0 shadow-[0_12px_32px_rgba(0,107,173,0.12)] transition-all duration-200 group-hover:translate-x-0.5 group-hover:opacity-100">
+            <span class="flex h-7 w-7 items-center justify-center rounded-lg text-sm"
+                  :style="{ background: item.softColor, color: item.color }">
+              {{ item.icon }}
             </span>
             <span>
-              <span class="block text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">{{ item.short }}</span>
+              <span class="block text-[9px] font-black uppercase tracking-[0.14em] text-text-muted">{{ item.short }}</span>
               <span class="mt-0.5 block text-xs font-semibold text-text-primary">{{ item.label }}</span>
             </span>
           </span>
         </button>
       </nav>
 
-      <div class="relative z-10 mt-auto flex w-[58px] shrink-0 flex-col items-center rounded-2xl border border-subtle bg-space-elevated px-2 py-3 text-center">
-        <span class="text-[9px] font-black uppercase tracking-[0.16em] text-text-muted">PATH</span>
-        <span class="mt-2 text-[28px] font-black leading-none text-text-primary">{{ pathCount }}</span>
-        <span class="mt-2 h-2 w-2 rounded-full bg-success shadow-[0_0_12px_var(--color-success)]" aria-label="Ready" />
+      <div class="rail-divider relative z-10 my-3 h-px w-8" />
+
+      <!-- Path nav -->
+      <button
+        type="button"
+        class="focus-ring rail-nav-btn group relative flex h-[52px] w-[52px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl transition-all duration-200"
+        :class="activePanel === 'tree' ? 'rail-nav-btn--active' : 'rail-nav-btn--idle'"
+        aria-label="知识路径"
+        :aria-pressed="String(activePanel === 'tree')"
+        title="知识路径"
+        @click="$emit('select', 'tree')"
+      >
+        <IconTree :size="18" />
+        <span class="text-[8px] font-bold tracking-[0.08em] uppercase leading-none opacity-70 mt-0.5">PATH</span>
+        <span
+          v-if="pathCount"
+          class="rail-nav-btn__badge absolute -right-1 -top-1 flex h-4.5 min-w-[18px] items-center justify-center rounded-full px-1 text-[9px] font-black leading-none"
+        >
+          {{ pathCount }}
+        </span>
+        <!-- Tooltip -->
+        <span class="rail-tooltip pointer-events-none absolute left-[calc(100%+12px)] top-1/2 z-50 flex -translate-y-1/2 items-center gap-2.5 whitespace-nowrap rounded-xl px-3 py-2 text-left opacity-0 shadow-[0_12px_32px_rgba(0,107,173,0.12)] transition-all duration-200 group-hover:translate-x-0.5 group-hover:opacity-100">
+          <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-primary-soft text-primary-dark">
+            <IconTree :size="14" />
+          </span>
+          <span>
+            <span class="block text-[9px] font-black uppercase tracking-[0.14em] text-text-muted">KNOWLEDGE</span>
+            <span class="mt-0.5 block text-xs font-semibold text-text-primary">知识路径</span>
+          </span>
+        </span>
+      </button>
+
+      <!-- Bottom stats -->
+      <div class="relative z-10 mt-auto flex w-[52px] shrink-0 flex-col items-center rounded-xl border border-subtle bg-space-elevated px-1 py-2.5 text-center">
+        <span class="text-[8px] font-black uppercase tracking-[0.14em] text-text-muted">节点</span>
+        <span class="mt-1.5 text-[22px] font-black leading-none text-text-primary">{{ pathCount }}</span>
+        <span class="mt-1.5 h-1.5 w-1.5 rounded-full bg-success shadow-[0_0_8px_var(--color-success)]" aria-label="就绪" />
       </div>
     </div>
   </aside>
@@ -59,25 +89,59 @@
 
 <script setup>
 import { computed } from "vue";
-import IconRadar from "./icons/IconRadar.vue";
-import IconSettings from "./icons/IconSettings.vue";
 import IconTree from "./icons/IconTree.vue";
 
 const props = defineProps({
-  activePanel: { type: String, default: "tree" },
-  drawerOpen: { type: Boolean, default: false },
-  panelId: { type: String, default: "workspace-sidebar-drawer" },
-  pathCount: { type: Number, default: 0 },
+  activePanel:  { type: String, default: "concept" },
+  drawerOpen:   { type: Boolean, default: false },
+  panelId:      { type: String, default: "workspace-sidebar-drawer" },
+  pathCount:    { type: Number, default: 0 },
 });
 
 defineEmits(["select"]);
 
-const items = computed(() => [
-  { key: "tree", short: "PATH", label: "知识路径", icon: IconTree, badge: props.pathCount || "" },
-  { key: "radar", short: "RADAR", label: "能力诊断", icon: IconRadar, badge: "" },
-  { key: "settings", short: "SYSTEM", label: "工作台设置", icon: IconSettings, badge: "" },
+const contentItems = computed(() => [
+  {
+    key: "concept",
+    short: "概念",
+    label: "概念导图",
+    icon: "🗺",
+    color: "var(--learning-concept-dark)",
+    softColor: "var(--learning-concept-soft)",
+  },
+  {
+    key: "code",
+    short: "代码",
+    label: "代码示例",
+    icon: "💻",
+    color: "var(--learning-code-dark)",
+    softColor: "var(--learning-code-soft)",
+  },
+  {
+    key: "practice",
+    short: "练习",
+    label: "互动练习",
+    icon: "✏️",
+    color: "var(--learning-practice-dark)",
+    softColor: "var(--learning-practice-soft)",
+  },
+  {
+    key: "video",
+    short: "视频",
+    label: "视频摘要",
+    icon: "🎬",
+    color: "var(--learning-video-dark)",
+    softColor: "var(--learning-video-soft)",
+  },
+  {
+    key: "quiz",
+    short: "测验",
+    label: "诊断测验",
+    icon: "📋",
+    color: "var(--learning-quiz-dark)",
+    softColor: "var(--learning-quiz-soft)",
+  },
 ]);
-
 </script>
 
 <style scoped>
@@ -88,14 +152,15 @@ const items = computed(() => [
 }
 
 .rail-shell__aura {
-  background: linear-gradient(180deg, var(--color-primary-soft), transparent 32%);
-  opacity: 0.55;
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--color-primary-soft) 70%, transparent) 0%,
+    transparent 40%
+  );
 }
 
 .rail-brand {
-  border: 1px solid color-mix(in srgb, var(--color-primary) 24%, var(--border-subtle));
-  background: var(--color-primary-soft);
-  box-shadow: none;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 22%, var(--border-subtle));
+  background: color-mix(in srgb, var(--color-primary-soft) 80%, white);
   color: var(--color-primary-dark);
 }
 
@@ -103,38 +168,42 @@ const items = computed(() => [
   background: linear-gradient(90deg, transparent, var(--border-strong), transparent);
 }
 
+/* nav buttons */
 .rail-nav-btn {
   border: 1px solid transparent;
   color: var(--text-muted);
 }
 
-.rail-nav-btn--active {
-  border-color: color-mix(in srgb, var(--color-primary) 34%, var(--border-subtle));
-  background: var(--color-primary);
-  color: var(--color-primary-text);
-  box-shadow: 0 8px 16px rgba(15, 118, 110, 0.18);
-}
-
 .rail-nav-btn--idle {
-  background: var(--space-elevated);
-  box-shadow: none;
+  background: transparent;
 }
 
 .rail-nav-btn--idle:hover {
-  border-color: color-mix(in srgb, var(--color-primary) 24%, var(--border-subtle));
+  border-color: var(--border-hover);
+  background: var(--card-bg-hover);
   color: var(--text-primary);
   transform: translateY(-1px);
 }
 
+.rail-nav-btn--active {
+  border-color: color-mix(in srgb, var(--rail-accent, var(--color-primary)) 28%, var(--border-subtle));
+  background: color-mix(in srgb, var(--rail-accent, var(--color-primary)) 12%, var(--card-bg));
+  color: var(--rail-accent, var(--color-primary));
+  box-shadow:
+    0 4px 14px color-mix(in srgb, var(--rail-accent, var(--color-primary)) 18%, transparent),
+    inset 0 1px 0 rgba(255,255,255,0.60);
+}
+
 .rail-nav-btn__badge {
+  height: 1.125rem;
   border: 1px solid var(--border-subtle);
-  background: var(--space-panel);
-  color: var(--text-primary);
-  box-shadow: var(--workspace-shadow-soft);
+  background: var(--color-primary);
+  color: white;
 }
 
 .rail-tooltip {
   border: 1px solid var(--border-subtle);
   background: var(--space-panel);
+  min-width: 7rem;
 }
 </style>

@@ -190,8 +190,8 @@
         <div class="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-[var(--border-strong)] to-transparent" />
       </header>
 
-      <div class="relative flex min-h-0 flex-1 flex-col bg-space-bg/35 xl:grid xl:grid-cols-[minmax(0,1fr)_400px] xl:grid-rows-[auto_minmax(0,1fr)]">
-        <section class="border-b border-subtle px-4 py-4 backdrop-blur-sm sm:px-5 lg:px-6 xl:col-start-1 xl:row-start-1 xl:border-r xl:border-subtle/70">
+      <div class="relative flex min-h-0 flex-1 flex-col">
+        <section class="border-b border-subtle px-4 py-4 backdrop-blur-sm sm:px-5 lg:px-6">
           <div class="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,440px)] xl:items-start">
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
@@ -307,6 +307,7 @@
                 :overall-progress="overallProgress"
                 :mastered-count="masteredCount"
                 :last-diagnostic="lastDiagnostic"
+                :filter-type="activeResourceCategory"
                 :get-card-label="getCardLabel"
                 :get-agent-label="getAgentLabel"
                 :build-quiz="parseQuiz"
@@ -320,10 +321,10 @@
         <aside
               id="workspace-coach-panel"
               ref="coachPanelRef"
-              class="safe-bottom min-w-0 border-t border-subtle bg-space-surface/50 backdrop-blur-sm xl:col-start-2 xl:row-span-2 xl:row-start-1 xl:min-h-0 xl:border-t-0 xl:border-l xl:border-subtle/70"
-              :class="effectiveMobilePane === 'coach' ? 'flex flex-1 flex-col' : 'hidden xl:flex xl:flex-col'"
+              class="safe-bottom min-w-0 border-t border-subtle bg-space-surface/50 backdrop-blur-sm xl:hidden"
+              :class="effectiveMobilePane === 'coach' ? 'flex flex-1 flex-col' : 'hidden'"
               tabindex="-1"
-              aria-label="辅导通道"
+              aria-label="辅导通道（移动端）"
             >
               <div class="min-h-0 overflow-y-auto border-b border-subtle/70 px-4 py-4 sm:px-5">
                 <AgentFeedbackPanel
@@ -368,6 +369,22 @@
           </div>
         </nav>
       </div>
+
+      <!-- 悬浮学习托盘 (桌面端) -->
+      <FloatingChatTray
+        :messages="messages"
+        :boot-mode="bootMode"
+        :probe="probe"
+        :probe-collected="probeCollected"
+        :probe-total="probeTotal"
+        :is-submitting-probe="isSubmittingProbe"
+        :busy="isBusy"
+        :node-title="nodeTitle"
+        :suggestions="coachPrompts"
+        class="hidden xl:block"
+        @send="handleCoachSend"
+        @submit-probe="(values) => $emit('submit-probe', values)"
+      />
 
       <SidebarDrawer
         :open="drawerOpen"
@@ -417,6 +434,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import AgentFeedbackPanel from "./AgentFeedbackPanel.vue";
 import ChatArea from "./ChatArea.vue";
+import FloatingChatTray from "./FloatingChatTray.vue";
 import IconCheck from "./icons/IconCheck.vue";
 import ResourceCanvas from "./ResourceCanvas.vue";
 import SidebarDrawer from "./SidebarDrawer.vue";
@@ -468,7 +486,9 @@ const emit = defineEmits([
 ]);
 
 const drawerOpen = ref(false);
-const sidebarPanel = ref("tree");
+const sidebarPanel = ref("concept");
+const activeResourceCategory = ref("concept"); // which content type is active
+const activeWorkspaceView = ref("learn");       // "learn" | "home"
 const courseMenuOpen = ref(false);
 const courseMenuTriggerRef = ref(null);
 const courseMenuRef = ref(null);
@@ -827,6 +847,19 @@ function onCourseMenuKeydown(event) {
 
 function onSidebarSelect(panelKey) {
   closeCourseMenu();
+  // Content category keys → update filter, close drawer
+  const CONTENT_KEYS = new Set(["concept", "code", "practice", "video", "quiz", "all"]);
+  if (CONTENT_KEYS.has(panelKey)) {
+    activeResourceCategory.value = panelKey;
+    sidebarPanel.value = panelKey;
+    drawerOpen.value = false;
+    // Switch to learn view when selecting a content category
+    if (activeWorkspaceView.value !== "learn") {
+      activeWorkspaceView.value = "learn";
+    }
+    return;
+  }
+  // Drawer keys (tree, radar, settings)
   if (sidebarPanel.value === panelKey && drawerOpen.value) {
     drawerOpen.value = false;
   } else {

@@ -681,17 +681,18 @@ def create_llm_client_v2(provider: str = None) -> LLMClientV2:
 def create_llm_client_v2_from_env() -> LLMClientV2:
     """从环境变量自动检测并创建 LLMClientV2。
 
-    优先级:
-      1. DASHSCOPE_API_KEY → dashscope
-      2. SPARK_API_KEY + SPARK_APP_ID + SPARK_API_SECRET → spark
+    优先级（赛题要求：优先使用科大讯飞相关工具）:
+      1. SPARK_API_KEY + SPARK_APP_ID + SPARK_API_SECRET → spark（讯飞星火，首选）
+      2. DASHSCOPE_API_KEY → dashscope（阿里云 Qwen，备用）
       3. DEEPSEEK_API_KEY → deepseek
       4. OPENAI_API_KEY → openai
       5. 都不存在 → 抛出异常
     """
-    if os.getenv("DASHSCOPE_API_KEY"):
-        return LLMClientV2(provider="dashscope")
-    elif os.getenv("SPARK_API_KEY") and os.getenv("SPARK_APP_ID") and os.getenv("SPARK_API_SECRET"):
+    # 讯飞星火优先（第十五届中国软件杯赛题规定：使用科大讯飞相关工具）
+    if os.getenv("SPARK_API_KEY") and os.getenv("SPARK_APP_ID") and os.getenv("SPARK_API_SECRET"):
         return LLMClientV2(provider="spark")
+    elif os.getenv("DASHSCOPE_API_KEY"):
+        return LLMClientV2(provider="dashscope")
     elif os.getenv("DEEPSEEK_API_KEY"):
         return LLMClientV2(provider="deepseek")
     elif os.getenv("OPENAI_API_KEY"):
@@ -699,5 +700,7 @@ def create_llm_client_v2_from_env() -> LLMClientV2:
     else:
         raise RuntimeError(
             "未检测到可用的大模型 API Key。请设置以下环境变量之一:\n"
-            "  DASHSCOPE_API_KEY / SPARK_API_KEY / DEEPSEEK_API_KEY / OPENAI_API_KEY"
+            "  优先（讯飞）: SPARK_API_KEY + SPARK_APP_ID + SPARK_API_SECRET\n"
+            "  备用（阿里云）: DASHSCOPE_API_KEY\n"
+            "  其他: DEEPSEEK_API_KEY / OPENAI_API_KEY"
         )

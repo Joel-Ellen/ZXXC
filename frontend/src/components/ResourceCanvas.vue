@@ -140,33 +140,36 @@
       <div
         class="mx-auto grid max-w-6xl grid-cols-1 gap-5 md:grid-cols-12 auto-rows-[minmax(240px,auto)]"
       >
-        <div
-          v-for="(card, index) in visibleCards"
-          :key="card.resource_id"
-          draggable="true"
-          class="animate-cardIn h-full card-depth transition-all duration-300"
-          :style="{ animationDelay: `${index * 55}ms` }"
-          :class="[getGridSpanClass(card.card_type), card.resource_id === activeCardId ? 'md:-translate-y-1.5' : '']"
-          @dragstart="onDragStart(card.resource_id)"
-          @dragover.prevent
-          @drop="onDrop(card.resource_id)"
-        >
-          <ResourceCard
-            class="h-full"
-            :agent-name="agentLabel(card.card_type)"
-            :title="cardLabel(card.card_type)"
-            :progress-text="loading ? '栅格同步' : '资源就绪'"
-            :progress="loading ? progressHint(card.card_type) : 100"
-            :is-ready="!loading"
-            :is-active="card.resource_id === activeCardId"
-            :is-expanded="isCardHydrated(card.resource_id)"
-            :activatable="!loading"
-            :color="cardColor(card.card_type)"
-            @activate="activateCard(card.resource_id)"
-            @pin="pinCard(card.resource_id)"
-            @minimize="minimizeCard(card.resource_id)"
+        <template v-for="(slot, index) in cardTypeSlots" :key="slot.type">
+
+          <!-- Case 1: card exists and not minimized -->
+          <div
+            v-if="slot.card && !minimizedIds.includes(slot.card.resource_id)"
+            draggable="true"
+            class="animate-cardIn h-full card-depth transition-all duration-300"
+            :style="{ animationDelay: `${index * 55}ms` }"
+            :class="[getGridSpanClass(slot.type), slot.card.resource_id === activeCardId ? 'md:-translate-y-1.5' : '']"
+            @dragstart="onDragStart(slot.card.resource_id)"
+            @dragover.prevent
+            @drop="onDrop(slot.card.resource_id)"
           >
-            <template #content>
+            <template v-for="card of [slot.card]" :key="slot.type">
+            <ResourceCard
+              class="h-full"
+              :agent-name="agentLabel(card.card_type)"
+              :title="cardLabel(card.card_type)"
+              :progress-text="loading ? '栅格同步' : '资源就绪'"
+              :progress="loading ? progressHint(card.card_type) : 100"
+              :is-ready="!loading"
+              :is-active="card.resource_id === activeCardId"
+              :is-expanded="isCardHydrated(card.resource_id)"
+              :activatable="!loading"
+              :color="cardColor(card.card_type)"
+              @activate="activateCard(card.resource_id)"
+              @pin="pinCard(card.resource_id)"
+              @minimize="minimizeCard(card.resource_id)"
+            >
+              <template #content>
               <div v-if="!isCardHydrated(card.resource_id)" class="space-y-4">
                 <div class="workspace-shell-card-soft rounded-[20px] p-4">
                   <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">
@@ -451,7 +454,39 @@
               </div>
             </template>
           </ResourceCard>
-        </div>
+          </template><!-- end alias -->
+          </div><!-- end existing-card slot -->
+
+          <!-- Case 2: empty slot — show placeholder with generate button -->
+          <div
+            v-else
+            class="animate-cardIn h-full min-h-[240px] transition-all duration-300"
+            :style="{ animationDelay: `${index * 40}ms` }"
+            :class="getGridSpanClass(slot.type)"
+          >
+            <div
+              class="slot-empty group h-full rounded-[22px] border border-dashed border-subtle/50 bg-space-elevated/40 flex flex-col items-center justify-center gap-4 p-6"
+              :style="{ '--rail-accent': slot.color }"
+            >
+              <span class="slot-empty-icon text-[2.25rem] opacity-40 group-hover:opacity-75 transition-opacity duration-300"
+                    :style="{ animationDelay: `${index * 0.4}s` }"
+                    aria-hidden="true">{{ slot.icon }}</span>
+              <div class="text-center space-y-0.5">
+                <p class="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted">{{ slot.label }}</p>
+                <p class="text-[11px] text-text-muted opacity-50">尚未生成</p>
+              </div>
+              <button
+                v-if="currentNode"
+                type="button"
+                class="btn-ripple workspace-shell-btn workspace-shell-btn--accent focus-ring px-4 py-2 text-[11px] font-semibold tracking-[0.06em] opacity-0 group-hover:opacity-100 translate-y-1 group-hover:translate-y-0 transition-all duration-200"
+                @click="$emit('generate-card', { nodeId: currentNode, cardType: slot.type })"
+              >
+                生成
+              </button>
+            </div>
+          </div>
+
+        </template><!-- end cardTypeSlots v-for -->
       </div>
 
     </div>
@@ -488,12 +523,13 @@ const props = defineProps({
   overallProgress: { type: Number, default: 0 },
   masteredCount: { type: Number, default: 0 },
   lastDiagnostic: { type: Object, default: null },
+  filterType: { type: String, default: "all" },
   getCardLabel: { type: Function, required: true },
   getAgentLabel: { type: Function, required: true },
   buildQuiz: { type: Function, required: true },
 });
 
-const emit = defineEmits(["submit-quiz", "select-node", "refresh"]);
+const emit = defineEmits(["submit-quiz", "select-node", "refresh", "generate-card"]);
 
 const orderedIds = ref([]);
 const minimizedIds = ref([]);
@@ -505,6 +541,39 @@ const answers = ref({});
 const hydratedCardIds = ref([]);
 const submittedScore = ref(null);
 const scrollViewport = ref(null);
+
+// ── 5-type slot system ─────────────────────────────────────────────────
+const CARD_TYPES = [
+  { type: "concept_map",          label: "概念导图", icon: "🗺", sidebarKey: "concept",  color: "var(--learning-concept)" },
+  { type: "code_snippet",         label: "代码示例", icon: "💻", sidebarKey: "code",     color: "var(--learning-code)" },
+  { type: "interactive_exercise", label: "互动练习", icon: "✏️", sidebarKey: "practice", color: "var(--learning-practice)" },
+  { type: "video_summary",        label: "视频摘要", icon: "🎬", sidebarKey: "video",    color: "var(--learning-video)" },
+  { type: "diagnostic_quiz",      label: "诊断测验", icon: "📋", sidebarKey: "quiz",     color: "var(--learning-quiz)" },
+];
+
+/** Map card_type → latest card */
+const cardsByType = computed(() => {
+  const map = {};
+  for (const card of props.cards) {
+    const t = card.card_type ?? card.type ?? "";
+    if (t) map[t] = card;
+  }
+  return map;
+});
+
+/**
+ * Visible slots after applying filterType.
+ * "all" → all 5 types; otherwise only the matching type.
+ */
+const cardTypeSlots = computed(() => {
+  const filtered = props.filterType && props.filterType !== "all"
+    ? CARD_TYPES.filter((m) => m.sidebarKey === props.filterType)
+    : CARD_TYPES;
+  return filtered.map((meta) => ({
+    ...meta,
+    card: cardsByType.value[meta.type] ?? null,
+  }));
+});
 
 watch(
   () => props.cards,

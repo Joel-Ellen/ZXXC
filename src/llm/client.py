@@ -526,45 +526,42 @@ def create_llm_client(
 def create_llm_client_from_env() -> LLMClient:
     """从环境变量自动配置 LLM 客户端。
 
-    优先级:
-      1. 若设置 DASHSCOPE_API_KEY → 使用 DashScope (qwen-plus)
-      2. 若设置 SPARK_API_KEY + SPARK_APP_ID + SPARK_API_SECRET → 使用 iFlyTek
+    优先级（赛题规定：优先使用科大讯飞工具）:
+      1. 若同时设置 SPARK_APP_ID + SPARK_API_KEY + SPARK_API_SECRET → 讯飞星火（首选）
+      2. 若设置 DASHSCOPE_API_KEY → DashScope (Qwen)（备用）
       3. 都不存在 → 抛出异常
 
     环境变量:
-      - DASHSCOPE_API_KEY: 阿里云灵积 API Key
+      - SPARK_APP_ID:      讯飞星火 APP ID（优先）
+      - SPARK_API_KEY:     讯飞星火 API Key（优先）
+      - SPARK_API_SECRET:  讯飞星火 API Secret（优先）
+      - DASHSCOPE_API_KEY: 阿里云灵积 API Key（备用）
       - DASHSCOPE_MODEL:   模型名（默认 qwen-plus）
-      - SPARK_APP_ID:      讯飞星火 APP ID
-      - SPARK_API_KEY:     讯飞星火 API Key
-      - SPARK_API_SECRET:  讯飞星火 API Secret
-
-    Returns:
-        LLMClient 实例。
     """
-    dashscope_key = os.environ.get("DASHSCOPE_API_KEY", "")
-    dashscope_model = os.environ.get("DASHSCOPE_MODEL", "qwen-plus")
-
     spark_app_id = os.environ.get("SPARK_APP_ID", "")
     spark_api_key = os.environ.get("SPARK_API_KEY", "")
     spark_api_secret = os.environ.get("SPARK_API_SECRET", "")
+    dashscope_key = os.environ.get("DASHSCOPE_API_KEY", "")
+    dashscope_model = os.environ.get("DASHSCOPE_MODEL", "qwen-plus")
 
-    if dashscope_key:
-        config = LLMConfig(
-            provider=Provider.DASHSCOPE,
-            dashscope_api_key=dashscope_key,
-            dashscope_model=dashscope_model,
-        )
-    elif spark_app_id and spark_api_key and spark_api_secret:
+    # 讯飞星火优先（第十五届中国软件杯赛题规定）
+    if spark_app_id and spark_api_key and spark_api_secret:
         config = LLMConfig(
             provider=Provider.IFLYTEK,
             spark_app_id=spark_app_id,
             spark_api_key=spark_api_key,
             spark_api_secret=spark_api_secret,
         )
+    elif dashscope_key:
+        config = LLMConfig(
+            provider=Provider.DASHSCOPE,
+            dashscope_api_key=dashscope_key,
+            dashscope_model=dashscope_model,
+        )
     else:
         raise RuntimeError(
             "未检测到可用的大模型 API Key。请设置以下环境变量之一:\n"
-            "  方案一 (DashScope): export DASHSCOPE_API_KEY=sk-xxx\n"
-            "  方案二 (iFlyTek):   export SPARK_APP_ID=xxx SPARK_API_KEY=xxx SPARK_API_SECRET=xxx"
+            "  优先（讯飞）: export SPARK_APP_ID=xxx SPARK_API_KEY=xxx SPARK_API_SECRET=xxx\n"
+            "  备用（阿里云）: export DASHSCOPE_API_KEY=sk-xxx"
         )
     return LLMClient(config)

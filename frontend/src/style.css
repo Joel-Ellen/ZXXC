@@ -183,68 +183,131 @@
   --aurora-mesh-4: rgba(59, 130, 246, 0.12);
 }
 
-/* Impeccable product pass: calm, high-contrast learning workspace tokens. */
+/* ═══════════════════════════════════════════════════════════════════════ */
+/* Design palette: Warm blue × soft pink × slate — light workspace theme   */
+/* Palette seed: #006BAD #5FA3CB #66A8CD #A5CDE2 #C9CEFE #668FCA          */
+/*               #D6DFEF #F8B9B8 #FFC6BC #FCE8E6                           */
+/* ═══════════════════════════════════════════════════════════════════════ */
 :root,
-[data-theme="dark"],
-[data-theme="light"] {
-  --space-bg: #F5F7FB;
+[data-theme="light"],
+[data-theme="dark"] {
+  /* ── Surface & Background ── */
+  --space-bg: #EFF4FA;
   --space-surface: #FFFFFF;
-  --space-panel: #FFFFFF;
-  --space-line: rgba(15, 23, 42, 0.08);
-  --space-elevated: #F8FAFC;
-  --workspace-veil: rgba(255, 255, 255, 0.92);
-  --workspace-veil-strong: rgba(255, 255, 255, 0.98);
-  --workspace-shadow-soft: 0 10px 28px rgba(15, 23, 42, 0.07);
-  --workspace-shadow-focus: 0 14px 34px rgba(15, 23, 42, 0.10);
+  --space-panel: rgba(255, 255, 255, 0.96);
+  --space-line: rgba(0, 107, 173, 0.07);
+  --space-elevated: #F7FAFD;
+  --workspace-veil: rgba(255, 255, 255, 0.90);
+  --workspace-veil-strong: rgba(255, 255, 255, 0.97);
+  --workspace-shadow-soft: 0 10px 30px rgba(0, 107, 173, 0.08);
+  --workspace-shadow-focus: 0 14px 38px rgba(0, 107, 173, 0.14);
 
-  --text-primary: #0F172A;
-  --text-secondary: #334155;
-  --text-muted: #64748B;
+  /* ── Text ── */
+  --text-primary: #082033;
+  --text-secondary: #1E4060;
+  --text-muted: #5B80A0;
 
-  --color-primary: #0F766E;
-  --color-primary-light: #14B8A6;
-  --color-primary-dark: #115E59;
-  --color-primary-soft: rgba(15, 118, 110, 0.10);
+  /* ── Blue family (primary) ── */
+  --color-primary: #006BAD;
+  --color-primary-light: #5FA3CB;
+  --color-primary-dark: #004E82;
+  --color-primary-soft: rgba(102, 168, 205, 0.14);
   --color-primary-text: #FFFFFF;
 
-  --color-secondary: #4F46E5;
-  --color-secondary-light: #6366F1;
-  --color-secondary-dark: #3730A3;
-  --color-secondary-soft: rgba(79, 70, 229, 0.10);
+  /* ── Periwinkle family (secondary) ── */
+  --color-secondary: #668FCA;
+  --color-secondary-light: #C9CEFE;
+  --color-secondary-dark: #3F6BAA;
+  --color-secondary-soft: rgba(102, 143, 202, 0.12);
   --color-secondary-text: #FFFFFF;
 
-  --color-tertiary: #BE123C;
-  --color-tertiary-light: #E11D48;
-  --color-tertiary-dark: #9F1239;
-  --color-tertiary-soft: rgba(190, 18, 60, 0.09);
-  --color-tertiary-text: #FFFFFF;
+  /* ── Warm pink family (tertiary / warm accent) ── */
+  --color-tertiary: #F8B9B8;
+  --color-tertiary-light: #FCE8E6;
+  --color-tertiary-dark: #C85F5E;
+  --color-tertiary-soft: rgba(248, 185, 184, 0.22);
+  --color-tertiary-text: #5A1F20;
 
-  --color-success: #047857;
-  --color-success-light: #10B981;
-  --color-success-dark: #065F46;
-  --color-success-soft: rgba(4, 120, 87, 0.10);
-  --color-warning: #B45309;
-  --color-warning-light: #D97706;
-  --color-warning-dark: #92400E;
-  --color-warning-soft: rgba(180, 83, 9, 0.10);
-  --color-error: #B91C1C;
-  --color-error-light: #DC2626;
-  --color-error-dark: #991B1B;
-  --color-error-soft: rgba(185, 28, 28, 0.10);
-  --color-info: #2563EB;
-  --color-info-light: #3B82F6;
-  --color-info-dark: #1D4ED8;
-  --color-info-soft: rgba(37, 99, 235, 0.10);
+  /* ── Semantic states ── */
+  --color-success: #2A8A6E;
+  --color-success-light: #4BB89A;
+  --color-success-dark: #1B6B54;
+  --color-success-soft: rgba(42, 138, 110, 0.10);
+  --color-success-text: #FFFFFF;
 
-  --border-subtle: rgba(15, 23, 42, 0.08);
-  --border-hover: rgba(15, 23, 42, 0.14);
-  --border-strong: rgba(15, 23, 42, 0.18);
+  --color-warning: #C07A2F;
+  --color-warning-light: #E8A457;
+  --color-warning-dark: #965E20;
+  --color-warning-soft: rgba(192, 122, 47, 0.11);
+  --color-warning-text: #3B2200;
+
+  --color-error: #C04040;
+  --color-error-light: #E57272;
+  --color-error-dark: #963030;
+  --color-error-soft: rgba(192, 64, 64, 0.10);
+  --color-error-text: #FFFFFF;
+
+  --color-info: #3F6BAA;
+  --color-info-light: #668FCA;
+  --color-info-dark: #2C4D7F;
+  --color-info-soft: rgba(63, 107, 170, 0.10);
+  --color-info-text: #FFFFFF;
+
+  /* ── Aurora aliases ── */
+  --aurora-mint: #66A8CD;
+  --aurora-purple: #668FCA;
+  --aurora-crimson: #FFC6BC;
+  --aurora-mint-contrast: #006BAD;
+  --aurora-purple-contrast: #3F6BAA;
+
+  /* ── Borders ── */
+  --border-subtle: rgba(0, 107, 173, 0.09);
+  --border-hover: rgba(0, 107, 173, 0.16);
+  --border-strong: rgba(0, 107, 173, 0.24);
+
+  /* ── Cards & Inputs ── */
   --card-bg: #FFFFFF;
-  --card-bg-hover: #F8FAFC;
+  --card-bg-hover: #F7FAFD;
   --input-bg: #FFFFFF;
-  --shadow-glass: 0 12px 32px rgba(15, 23, 42, 0.08);
-  --shadow-card: 0 8px 22px rgba(15, 23, 42, 0.06);
-  --shadow-glow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+
+  /* ── Shadows ── */
+  --shadow-glass: 0 14px 40px rgba(0, 107, 173, 0.10);
+  --shadow-card: 0 6px 20px rgba(0, 107, 173, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.90);
+  --shadow-glow: 0 0 0 3px rgba(102, 168, 205, 0.22);
+
+  /* ── Background orbs (aurora decorations) ── */
+  --aurora-orb-1: rgba(102, 168, 205, 0.20);
+  --aurora-orb-2: rgba(201, 206, 254, 0.24);
+  --aurora-orb-3: rgba(248, 185, 184, 0.18);
+  --aurora-orb-4: rgba(0, 107, 173, 0.12);
+  --aurora-mesh-1: rgba(95, 163, 203, 0.16);
+  --aurora-mesh-2: rgba(102, 143, 202, 0.14);
+  --aurora-mesh-3: rgba(255, 198, 188, 0.14);
+  --aurora-mesh-4: rgba(0, 107, 173, 0.08);
+
+  /* ── Learning-type tones ── */
+  --learning-concept: #5FA3CB;
+  --learning-concept-soft: rgba(95, 163, 203, 0.14);
+  --learning-concept-dark: #006BAD;
+  --learning-code: #3F6BAA;
+  --learning-code-soft: rgba(63, 107, 170, 0.12);
+  --learning-code-dark: #2C4D7F;
+  --learning-practice: #C85F5E;
+  --learning-practice-soft: rgba(248, 185, 184, 0.22);
+  --learning-practice-dark: #963030;
+  --learning-quiz: #C07A2F;
+  --learning-quiz-soft: rgba(255, 198, 188, 0.22);
+  --learning-quiz-dark: #965E20;
+  --learning-video: #668FCA;
+  --learning-video-soft: rgba(201, 206, 254, 0.20);
+  --learning-video-dark: #3F6BAA;
+  --learning-home: #66A8CD;
+  --learning-home-soft: rgba(102, 168, 205, 0.16);
+  --learning-home-dark: #006BAD;
+  --learning-path: #A5CDE2;
+  --learning-path-soft: rgba(165, 205, 226, 0.18);
+  --learning-all: #006BAD;
+  --learning-all-soft: rgba(0, 107, 173, 0.10);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════ */

@@ -1,237 +1,329 @@
 <template>
-  <section class="relative z-10 min-h-screen px-4 py-6 sm:px-6 lg:px-8">
-    <div class="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <header class="workspace-shell-card rounded-2xl px-5 py-5 sm:px-6">
-        <div class="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-          <div class="min-w-0">
-            <p class="text-[11px] font-black uppercase tracking-[0.14em] text-text-muted">入课问卷</p>
-            <h1 class="mt-2 text-[30px] font-black tracking-tight text-text-primary">
-              {{ course?.title_cn || "课程画像问卷" }}
-            </h1>
-            <p class="mt-3 max-w-3xl text-sm leading-7 text-text-secondary">
-              问卷结果会回写课程画像、用户资料和初始学习状态。这里用整页表单，不做弹窗压缩。
-            </p>
-          </div>
+  <section class="relative z-10 flex min-h-screen items-center justify-center px-4 py-8 sm:px-6">
+    <div class="mx-auto w-full max-w-2xl">
 
-          <button
-            type="button"
-            class="workspace-shell-btn focus-ring px-4 py-2.5 text-sm font-semibold"
-            @click="$emit('cancel')"
-          >
-            返回课程目录
-          </button>
+      <!-- Header -->
+      <header class="mb-6 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-soft text-primary">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+              <circle cx="12" cy="7" r="4"/>
+            </svg>
+          </div>
+          <div>
+            <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">智能画像构建</p>
+            <h1 class="text-[18px] font-black tracking-tight text-text-primary">
+              {{ course?.title_cn || "课程" }} · 个性化入课
+            </h1>
+          </div>
         </div>
+        <button type="button" class="workspace-shell-btn focus-ring px-3 py-2 text-[11px] font-semibold" @click="$emit('cancel')">
+          返回
+        </button>
       </header>
 
-      <section class="workspace-shell-card rounded-2xl px-5 py-5 sm:px-6">
-        <div class="grid gap-4 md:grid-cols-2">
-          <label class="block">
-            <span class="mb-2 block text-[11px] font-black uppercase tracking-[0.14em] text-text-muted">显示名称</span>
-            <input
-              :value="draft.profilePatch.display_name"
-              type="text"
-              class="workspace-shell-input focus-ring w-full rounded-2xl px-4 py-3 text-sm text-text-primary"
-              @input="patchProfile('display_name', $event.target.value)"
-            />
-          </label>
-          <label class="block">
-            <span class="mb-2 block text-[11px] font-black uppercase tracking-[0.14em] text-text-muted">邮箱</span>
-            <input
-              :value="draft.profilePatch.email"
-              type="email"
-              class="workspace-shell-input focus-ring w-full rounded-2xl px-4 py-3 text-sm text-text-primary"
-              @input="patchProfile('email', $event.target.value)"
-            />
-          </label>
-          <label class="block">
-            <span class="mb-2 block text-[11px] font-black uppercase tracking-[0.14em] text-text-muted">学校</span>
-            <input
-              :value="draft.profilePatch.university"
-              type="text"
-              class="workspace-shell-input focus-ring w-full rounded-2xl px-4 py-3 text-sm text-text-primary"
-              @input="patchProfile('university', $event.target.value)"
-            />
-          </label>
-          <label class="block">
-            <span class="mb-2 block text-[11px] font-black uppercase tracking-[0.14em] text-text-muted">专业</span>
-            <input
-              :value="draft.profilePatch.major"
-              type="text"
-              class="workspace-shell-input focus-ring w-full rounded-2xl px-4 py-3 text-sm text-text-primary"
-              @input="patchProfile('major', $event.target.value)"
-            />
-          </label>
+      <!-- Progress bar -->
+      <div class="mb-6">
+        <div class="mb-1.5 flex items-center justify-between">
+          <span class="text-[11px] font-semibold text-text-muted">问题 {{ currentStepIndex + 1 }} / {{ allSteps.length }}</span>
+          <span class="text-[11px] font-semibold text-primary">{{ progressPct }}%</span>
         </div>
-      </section>
+        <div class="h-1.5 overflow-hidden rounded-full bg-space-line">
+          <div class="h-full rounded-full bg-primary status-bar-fill transition-all duration-500"
+               :style="{ width: progressPct + '%' }" />
+        </div>
+      </div>
 
-      <section
-        v-for="section in survey.sections || []"
-        :key="section.id"
-        class="workspace-shell-card rounded-2xl px-5 py-5 sm:px-6"
-      >
-        <h2 class="text-xl font-black tracking-tight text-text-primary">{{ section.title }}</h2>
-        <p class="mt-2 text-sm leading-7 text-text-secondary">{{ section.description }}</p>
+      <!-- Chat conversation area -->
+      <div class="survey-chat-area mb-5 space-y-4 rounded-[24px] border border-subtle bg-space-panel p-5"
+           style="min-height: 340px; max-height: 520px; overflow-y: auto">
 
-        <div class="mt-5 space-y-6">
-          <div
-            v-for="question in section.questions || []"
-            :key="question.id"
-            class="workspace-shell-card-soft rounded-2xl px-4 py-4"
+        <!-- Answered steps (history) -->
+        <template v-for="(step, idx) in answeredSteps" :key="step.id">
+          <!-- System question bubble -->
+          <div class="flex justify-start animate-slideUp" :style="{ animationDelay: '0ms' }">
+            <div class="survey-bubble survey-bubble--system max-w-[88%]">
+              <p class="text-[10px] font-black uppercase tracking-[0.12em] text-primary mb-1.5">EduAgent</p>
+              <p class="text-sm leading-7 text-text-primary">{{ step.label }}</p>
+            </div>
+          </div>
+          <!-- User answer bubble -->
+          <div class="flex justify-end">
+            <div class="survey-bubble survey-bubble--user max-w-[88%]">
+              <p class="text-sm text-text-primary">{{ formatAnswer(step) }}</p>
+            </div>
+          </div>
+        </template>
+
+        <!-- Current question -->
+        <div v-if="currentStep" class="flex justify-start animate-slideUp">
+          <div class="survey-bubble survey-bubble--system max-w-[88%]">
+            <p class="text-[10px] font-black uppercase tracking-[0.12em] text-primary mb-1.5">EduAgent</p>
+            <p class="text-sm leading-7 text-text-primary">{{ currentStep.label }}</p>
+            <p v-if="!currentStep.required" class="mt-1 text-[11px] text-text-muted">（可选）</p>
+          </div>
+        </div>
+
+        <!-- Done message -->
+        <div v-if="isAllAnswered" class="flex justify-start animate-slideUp">
+          <div class="survey-bubble survey-bubble--system max-w-[88%]">
+            <p class="text-[10px] font-black uppercase tracking-[0.12em] text-primary mb-1.5">EduAgent</p>
+            <p class="text-sm leading-7 text-text-primary">
+              太好了！我已经了解你的学习背景 🎉 点击下方按钮开始你的个性化学习之旅。
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Answer input area -->
+      <div v-if="currentStep && !isAllAnswered" class="animate-slideUp">
+
+        <!-- Single choice -->
+        <div v-if="currentStep.type === 'single_choice'" class="grid gap-2 sm:grid-cols-2">
+          <button
+            v-for="option in currentStep.options || []"
+            :key="option"
+            type="button"
+            class="survey-option focus-ring text-left text-sm"
+            :class="draftAnswerFor(currentStep.id) === option ? 'survey-option--selected' : ''"
+            @click="pickAndAdvance(currentStep.id, option)"
           >
-            <div class="flex items-center gap-2">
-              <p class="text-sm font-semibold text-text-primary">{{ question.label }}</p>
-              <span v-if="question.required" class="text-[11px] font-semibold text-primary">必填</span>
-            </div>
-
-            <div v-if="question.type === 'single_choice'" class="mt-4 grid gap-2">
-              <button
-                v-for="option in question.options || []"
-                :key="option"
-                type="button"
-                class="focus-ring rounded-2xl border px-4 py-3 text-left text-sm transition-all"
-                :class="singleChoiceClass(question.id, option)"
-                @click="setSingleChoice(question.id, option)"
-              >
-                {{ option }}
-              </button>
-            </div>
-
-            <div v-else-if="question.type === 'multi_choice'" class="mt-4 grid gap-2">
-              <button
-                v-for="option in question.options || []"
-                :key="option"
-                type="button"
-                class="focus-ring rounded-2xl border px-4 py-3 text-left text-sm transition-all"
-                :class="multiChoiceClass(question.id, option)"
-                @click="toggleMultiChoice(question.id, option)"
-              >
-                {{ option }}
-              </button>
-            </div>
-
-            <textarea
-              v-else
-              :value="draft.answers[question.id] || ''"
-              :placeholder="question.placeholder || '请输入你的回答'"
-              class="workspace-shell-input focus-ring mt-4 min-h-[136px] w-full rounded-2xl px-4 py-3 text-sm leading-7 text-text-primary"
-              @input="setLongText(question.id, $event.target.value)"
-            />
-          </div>
+            {{ option }}
+          </button>
         </div>
-      </section>
 
-      <footer class="workspace-shell-card rounded-2xl px-5 py-5 sm:px-6">
-        <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <p class="text-sm leading-7 text-text-secondary">
-            提交后会完成选课、写入课程画像，并把用户资料同步到数据库。
-          </p>
-          <div class="flex flex-wrap items-center gap-2">
+        <!-- Multi choice -->
+        <div v-else-if="currentStep.type === 'multi_choice'" class="space-y-2">
+          <div class="grid gap-2 sm:grid-cols-2">
             <button
+              v-for="option in currentStep.options || []"
+              :key="option"
               type="button"
-              class="workspace-shell-btn focus-ring px-4 py-2.5 text-sm font-semibold"
-              @click="$emit('cancel')"
+              class="survey-option focus-ring text-left text-sm"
+              :class="multiSelected(currentStep.id, option) ? 'survey-option--selected' : ''"
+              @click="toggleMultiChoice(currentStep.id, option)"
             >
-              取消
+              {{ option }}
+            </button>
+          </div>
+          <button
+            type="button"
+            class="mt-3 workspace-shell-btn workspace-shell-btn--accent focus-ring w-full py-3 text-sm font-semibold"
+            :disabled="!hasMultiAnswer(currentStep.id)"
+            @click="advanceStep"
+          >
+            确认并继续 →
+          </button>
+        </div>
+
+        <!-- Text input -->
+        <div v-else class="space-y-3">
+          <input
+            v-if="currentStep.inputType !== 'textarea'"
+            :value="draftAnswerFor(currentStep.id)"
+            :type="currentStep.inputType || 'text'"
+            :placeholder="currentStep.placeholder || '请输入…'"
+            class="workspace-shell-input focus-ring w-full rounded-2xl px-4 py-3 text-sm text-text-primary"
+            @input="setAnswer(currentStep.id, $event.target.value)"
+            @keydown.enter="advanceStep"
+          />
+          <textarea
+            v-else
+            :value="draftAnswerFor(currentStep.id)"
+            :placeholder="currentStep.placeholder || '请输入…'"
+            rows="3"
+            class="workspace-shell-input focus-ring w-full rounded-2xl px-4 py-3 text-sm leading-7 text-text-primary"
+            @input="setAnswer(currentStep.id, $event.target.value)"
+          />
+          <div class="flex gap-2">
+            <button
+              v-if="!currentStep.required"
+              type="button"
+              class="workspace-shell-btn focus-ring flex-1 py-3 text-sm font-semibold"
+              @click="skipStep"
+            >
+              跳过
             </button>
             <button
               type="button"
-              class="workspace-shell-btn workspace-shell-btn--accent focus-ring px-4 py-2.5 text-sm font-semibold"
-              :disabled="busy || !isComplete"
-              @click="$emit('submit')"
+              class="workspace-shell-btn workspace-shell-btn--accent focus-ring flex-1 py-3 text-sm font-semibold"
+              :disabled="currentStep.required && !draftAnswerFor(currentStep.id)"
+              @click="advanceStep"
             >
-              提交问卷并加入课程
+              确认并继续 →
             </button>
           </div>
         </div>
-      </footer>
+      </div>
+
+      <!-- Submit footer -->
+      <div v-if="isAllAnswered" class="animate-slideUp">
+        <button
+          type="button"
+          class="btn-ripple w-full btn-primary py-4 text-sm font-bold tracking-[0.04em]"
+          :disabled="busy"
+          @click="$emit('submit')"
+        >
+          <span v-if="busy" class="flex items-center justify-center gap-2">
+            <span class="generating-dot" /><span class="generating-dot" /><span class="generating-dot" />
+          </span>
+          <span v-else>✦ 生成个性化学习路径</span>
+        </button>
+      </div>
+
     </div>
   </section>
 </template>
 
 <script setup>
-import { computed } from "vue";
+import { computed, ref } from "vue";
 
 const props = defineProps({
-  course: { type: Object, default: null },
-  survey: { type: Object, default: () => ({ sections: [] }) },
-  draft: { type: Object, required: true },
-  busy: { type: Boolean, default: false },
+  course:  { type: Object, default: null },
+  survey:  { type: Object, default: () => ({ sections: [] }) },
+  draft:   { type: Object, required: true },
+  busy:    { type: Boolean, default: false },
 });
 
 const emit = defineEmits(["update-draft", "submit", "cancel"]);
 
-const isComplete = computed(() =>
-  (props.survey.sections || []).every((section) =>
-    (section.questions || []).every((question) => {
-      if (!question.required) {
-        return true;
-      }
-      const value = props.draft.answers?.[question.id];
-      if (question.type === "multi_choice") {
-        return Array.isArray(value) && value.length > 0;
-      }
-      return typeof value === "string" ? value.trim().length > 0 : Boolean(value);
-    }),
-  ),
+// ── Build flat step list from survey + profile fields ─────────────────
+const allSteps = computed(() => {
+  const profileSteps = [
+    { id: "__display_name", label: "你叫什么名字？（昵称或真名均可）", type: "text", required: false, placeholder: "例：小明", _profile: "display_name" },
+    { id: "__university",   label: "你就读于哪所学校？", type: "text", required: false, placeholder: "例：北京大学", _profile: "university" },
+    { id: "__major",        label: "你的专业方向是什么？", type: "text", required: false, placeholder: "例：计算机科学与技术", _profile: "major" },
+  ];
+
+  const surveySteps = (props.survey.sections || []).flatMap(
+    (sec) => (sec.questions || []).map((q) => ({ ...q, _profile: null })),
+  );
+
+  return [...profileSteps, ...surveySteps];
+});
+
+// ── Step cursor ───────────────────────────────────────────────────────
+const currentStepIndex = ref(0);
+
+const currentStep = computed(() => allSteps.value[currentStepIndex.value] ?? null);
+const answeredSteps = computed(() => allSteps.value.slice(0, currentStepIndex.value));
+const isAllAnswered = computed(() => currentStepIndex.value >= allSteps.value.length);
+const progressPct = computed(() =>
+  allSteps.value.length ? Math.round((currentStepIndex.value / allSteps.value.length) * 100) : 0
 );
 
-function updateDraft(next) {
-  emit("update-draft", next);
+// ── Answer helpers ────────────────────────────────────────────────────
+function draftAnswerFor(id) {
+  if (id.startsWith("__")) {
+    const key = id.replace("__", "");
+    return props.draft.profilePatch?.[key] ?? "";
+  }
+  return props.draft.answers?.[id] ?? "";
 }
 
-function patchProfile(key, value) {
-  updateDraft({
+function multiSelected(id, option) {
+  const v = props.draft.answers?.[id];
+  return Array.isArray(v) && v.includes(option);
+}
+
+function hasMultiAnswer(id) {
+  const v = props.draft.answers?.[id];
+  return Array.isArray(v) && v.length > 0;
+}
+
+function setAnswer(id, value) {
+  if (id.startsWith("__")) {
+    const key = id.replace("__", "");
+    emit("update-draft", {
+      ...props.draft,
+      profilePatch: { ...(props.draft.profilePatch || {}), [key]: value },
+    });
+  } else {
+    emit("update-draft", {
+      ...props.draft,
+      answers: { ...(props.draft.answers || {}), [id]: value },
+    });
+  }
+}
+
+function toggleMultiChoice(id, option) {
+  const current = Array.isArray(props.draft.answers?.[id]) ? props.draft.answers[id] : [];
+  const next = current.includes(option) ? current.filter((x) => x !== option) : [...current, option];
+  emit("update-draft", {
     ...props.draft,
-    profilePatch: {
-      ...(props.draft.profilePatch || {}),
-      [key]: value,
-    },
+    answers: { ...(props.draft.answers || {}), [id]: next },
   });
 }
 
-function setSingleChoice(questionId, option) {
-  updateDraft({
-    ...props.draft,
-    answers: {
-      ...(props.draft.answers || {}),
-      [questionId]: option,
-    },
-  });
+// ── Navigation ────────────────────────────────────────────────────────
+function pickAndAdvance(id, option) {
+  setAnswer(id, option);
+  setTimeout(advanceStep, 180);
 }
 
-function toggleMultiChoice(questionId, option) {
-  const current = Array.isArray(props.draft.answers?.[questionId]) ? props.draft.answers[questionId] : [];
-  const nextValues = current.includes(option)
-    ? current.filter((item) => item !== option)
-    : [...current, option];
-  updateDraft({
-    ...props.draft,
-    answers: {
-      ...(props.draft.answers || {}),
-      [questionId]: nextValues,
-    },
-  });
+function advanceStep() {
+  if (currentStepIndex.value < allSteps.value.length) {
+    currentStepIndex.value += 1;
+    // Scroll chat area to bottom
+    setTimeout(() => {
+      const el = document.querySelector(".survey-chat-area");
+      if (el) el.scrollTop = el.scrollHeight;
+    }, 50);
+  }
 }
 
-function setLongText(questionId, value) {
-  updateDraft({
-    ...props.draft,
-    answers: {
-      ...(props.draft.answers || {}),
-      [questionId]: value,
-    },
-  });
+function skipStep() {
+  advanceStep();
 }
 
-function singleChoiceClass(questionId, option) {
-  return props.draft.answers?.[questionId] === option
-    ? "border-primary/35 bg-primary-soft text-primary"
-    : "border-subtle bg-space-panel text-text-secondary hover:border-hover hover:text-text-primary";
-}
-
-function multiChoiceClass(questionId, option) {
-  return Array.isArray(props.draft.answers?.[questionId]) && props.draft.answers[questionId].includes(option)
-    ? "border-primary/35 bg-primary-soft text-primary"
-    : "border-subtle bg-space-panel text-text-secondary hover:border-hover hover:text-text-primary";
+// ── Format answer for display in history ─────────────────────────────
+function formatAnswer(step) {
+  const v = draftAnswerFor(step.id);
+  if (Array.isArray(v)) return v.join("、") || "（已跳过）";
+  return v || "（已跳过）";
 }
 </script>
+
+<style scoped>
+.survey-bubble {
+  border-radius: 1.125rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border-subtle);
+}
+
+.survey-bubble--system {
+  border-top-left-radius: 0.25rem;
+  background: color-mix(in srgb, var(--color-primary-soft) 50%, var(--space-elevated));
+  border-color: color-mix(in srgb, var(--color-primary) 18%, var(--border-subtle));
+}
+
+.survey-bubble--user {
+  border-top-right-radius: 0.25rem;
+  background: color-mix(in srgb, var(--color-secondary-soft) 50%, var(--space-elevated));
+  border-color: color-mix(in srgb, var(--color-secondary) 18%, var(--border-subtle));
+}
+
+.survey-option {
+  border: 1px solid var(--border-subtle);
+  border-radius: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--space-elevated);
+  color: var(--text-secondary);
+  transition: all 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.survey-option:hover {
+  border-color: var(--border-hover);
+  background: var(--card-bg-hover);
+  color: var(--text-primary);
+  transform: translateY(-1px);
+}
+
+.survey-option--selected {
+  border-color: color-mix(in srgb, var(--color-primary) 40%, var(--border-subtle));
+  background: var(--color-primary-soft);
+  color: var(--color-primary-dark);
+  font-weight: 600;
+}
+</style>

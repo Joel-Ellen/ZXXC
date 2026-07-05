@@ -2106,6 +2106,43 @@ def _search_knowledge_base(query: str, top_k: int = 5) -> List[str]:
         return []
 
 
+async def _index_qa_to_knowledge_base(question: str, answer: str, course_id: str) -> None:
+    """将 Q&A 对异步索引到 ES 知识库（fire-and-forget，失败时静默忽略）。"""
+    try:
+        from src.vector.elasticsearch_knowledge_base import KnowledgeBaseChunk
+        client = _safe_get_es_kb()
+        if client is None:
+            return
+        import hashlib, time
+        chunk_id = hashlib.md5(f"qa:{course_id}:{question[:80]}:{time.time()}".encode()).hexdigest()
+        content  = f"Q: {question}\n\nA: {answer}"
+        chunk = KnowledgeBaseChunk(
+            chunk_id=chunk_id,
+            document_id=f"qa_{course_id}",
+            source_path=f"qa/{course_id}/runtime",
+            chunk_index=0,
+            content=content,
+            content_length=len(content),
+            chapter="课堂问答",
+            section=course_id,
+            knowledge_point=question[:60],
+            title_path=f"{course_id} > 课堂问答 > {question[:40]}",
+            heading_hierarchy=["课堂问答"],
+            language_tags=[],
+            has_code_block=False,
+            has_latex=False,
+            code_block_count=0,
+            latex_formula_count=0,
+            metadata={"course_id": course_id, "type": "qa_pair"},
+        )
+        # 生成 embedding
+        if _es_embedder is not None:
+            chunk.embedding = _es_embedder.embed(content)
+        await asyncio.to_thread(client.bulk_index_chunks, [chunk])
+    except Exception as e:
+        print(f"[ES] Q&A index failed (non-critical): {e}")
+
+
 def _persist_state(user_id: str, course_id: str, agent_state, cold_state=None) -> None:
     """持久化 AgentState 到 PostgreSQL + Neo4j（三层架构）。"""
     # 1. PostgreSQL: 完整状态 JSON blob
@@ -3040,6 +3077,77 @@ async def api_ask_tutor(request: Request) -> JSONResponse:
     })
 
 
+async def api_ask_tutor_stream(request: Request) -> EventSourceResponse:
+    """SSE 流式 Tutor 应答 — 逐 token 推送，先查 ES 知识库再调用 LLM chat_stream。"""
+    body = await request.json()
+    user_id  = body.get("user_id", "demo_user")
+    course_id = body.get("course_id", "data_structures")
+    question  = body.get("question", body.get("query", ""))
+
+    # 知识库检索（同步，先于流式推送）
+    ref_chunks = _search_knowledge_base(question, top_k=5)
+    context    = "\n\n---\n\n".join(ref_chunks[:5]) if ref_chunks else "无参考上下文"
+
+    system_prompt = (
+        "你是一个耐心、专业的计算机科学助教。请根据提供的参考知识库内容，"
+        "用清晰易懂的中文解答学生的问题。你的回答应包含：\n"
+        "1. 核心概念解释（用通俗语言）\n"
+        "2. 关键步骤或原理拆解\n"
+        "3. 一个简单的例子或类比帮助理解\n"
+        "请使用 Markdown 格式，结构清晰、层次分明。"
+    )
+    user_prompt = (
+        f"学生提问: {question}\n\n"
+        f"参考知识库内容:\n{context}\n\n"
+        f"请根据以上参考资料，为学生提供详细的学术原理解答。"
+    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user",   "content": user_prompt},
+    ]
+
+    async def event_generator():
+        llm = _get_llm()
+        full_text = []
+
+        if llm is None:
+            # LLM 不可用 — 直接把 ES 原文分段推流
+            fallback = (
+                f"## 关于「{question}」的相关知识点（来自知识库）\n\n"
+                f"{context}\n\n"
+                "> 提示: LLM 暂不可用，以上为知识库原文。"
+            )
+            for chunk in [fallback[i:i+80] for i in range(0, len(fallback), 80)]:
+                yield {"event": "token", "data": json.dumps({"token": chunk}, ensure_ascii=False)}
+                await asyncio.sleep(0.02)
+        else:
+            try:
+                async for token in llm.chat_stream(messages):
+                    if token:
+                        full_text.append(token)
+                        yield {"event": "token", "data": json.dumps({"token": token}, ensure_ascii=False)}
+            except Exception as exc:
+                yield {"event": "error", "data": json.dumps({"error": str(exc)}, ensure_ascii=False)}
+                return
+
+        # 完整回答入库 + 更新 agent_state
+        session = get_or_create_session(user_id, course_id)
+        agent_state: AgentState = session["agent_state"]
+        full_answer = "".join(full_text)
+        agent_state.tutor_response = {"text_explanation": full_answer, "mermaid_src": ""}
+        _persist_state(user_id, course_id, agent_state, session.get("cold_state"))
+
+        # 将 Q&A 对索引到知识库（异步任务，不阻塞响应）
+        try:
+            asyncio.ensure_future(_index_qa_to_knowledge_base(question, full_answer, course_id))
+        except Exception:
+            pass
+
+        yield {"event": "done", "data": json.dumps({"reference_count": len(ref_chunks)}, ensure_ascii=False)}
+
+    return EventSourceResponse(event_generator())
+
+
 async def api_knowledge_graph(request: Request) -> JSONResponse:
     """获取知识图谱数据（用于前端可视化，可按课程筛选）"""
     course_id = request.query_params.get("course_id", "data_structures")
@@ -3563,6 +3671,7 @@ app = Starlette(
         Route("/api/pipeline/step", api_run_pipeline_step, methods=["POST"]),
         Route("/api/pipeline/stream", api_stream_pipeline, methods=["GET"]),
         Route("/api/tutor/ask", api_ask_tutor, methods=["POST"]),
+        Route("/api/tutor/ask-stream", api_ask_tutor_stream, methods=["POST"]),
         Route("/api/knowledge-graph", api_knowledge_graph, methods=["GET"]),
         # ── 认证 API ──
         Route("/api/auth/captcha", api_auth_captcha, methods=["GET"]),
