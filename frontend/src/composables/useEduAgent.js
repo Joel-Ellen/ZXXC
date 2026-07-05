@@ -1,6 +1,7 @@
 import { computed, ref } from "vue";
 import {
   askTutor,
+  streamTutorAsk,
   enrollCourse,
   fetchCourses,
   fetchKnowledgeGraph,
@@ -530,7 +531,6 @@ export function useEduAgent() {
       return;
     }
 
-    // 组装展示标签
     const ctxLabel = {
       concept: "概念讲解",
       problem_solving: "解题思路",
@@ -543,34 +543,47 @@ export function useEduAgent() {
       : query.trim();
 
     const userMsg = { id: `u-${Date.now()}`, role: "user", content: displayQuery };
-    const assistantMsg = {
-      id: `a-${Date.now()}`,
-      role: "assistant",
-      content: "",
-      mermaidSource: "",
-      isStreaming: true,
-    };
-    messages.value = [...messages.value, userMsg, assistantMsg];
+    const assistantMsgId = `a-${Date.now()}`;
+    messages.value = [
+      ...messages.value,
+      userMsg,
+      { id: assistantMsgId, role: "assistant", content: "", mermaidSource: "", isStreaming: true },
+    ];
 
-    try {
-      const data = await askTutor({
+    // Helper: patch the assistant message by id (avoids stale closure on assistantMsg object)
+    const patch = (fields) => {
+      const idx = messages.value.findIndex((m) => m.id === assistantMsgId);
+      if (idx === -1) return;
+      const next = [...messages.value];
+      next[idx] = { ...next[idx], ...fields };
+      messages.value = next;
+    };
+
+    let accumulated = "";
+
+    await streamTutorAsk(
+      {
         user_id: userId.value,
-        query: query.trim(),
-        context_type: contextType,
-        code_snippet: codeSnippet,
-        error_message: errorMessage,
-      });
-      const response = data.tutor_response ?? {};
-      assistantMsg.content = response.text_explanation || "当前暂无可用回答，请稍后再试。";
-      assistantMsg.mermaidSource = response.mermaid_src || "";
-      if (Array.isArray(data.agent_feedback)) {
-        agentFeedback.value = data.agent_feedback;
-      }
-    } catch {
-      assistantMsg.content = "辅导服务暂时不可用。";
-    } finally {
-      assistantMsg.isStreaming = false;
-    }
+        course_id: courseId.value,
+        question: query.trim(),
+      },
+      {
+        onToken(token) {
+          accumulated += token;
+          patch({ content: accumulated });
+        },
+        onDone() {
+          patch({ isStreaming: false });
+          refreshStatuses();
+        },
+        onError() {
+          patch({
+            content: accumulated || "辅导服务暂时不可用。",
+            isStreaming: false,
+          });
+        },
+      },
+    );
   }
 
   function getCardLabel(type) {

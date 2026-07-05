@@ -67,6 +67,94 @@ export async function askTutor(payload) {
   return data;
 }
 
+/**
+ * 流式辅导问答 — SSE over fetch（后端为 POST，EventSource 不支持 POST，故用 ReadableStream 手动解析）。
+ *
+ * @param {Object} payload           - { user_id, course_id, question }
+ * @param {Object} handlers          - 回调集合
+ * @param {(token: string) => void}  handlers.onToken - 每个 token 到达时触发
+ * @param {(meta: Object) => void}   [handlers.onDone] - 流结束（done 事件）时触发
+ * @param {(err: Error) => void}     [handlers.onError] - 出错时触发
+ * @param {AbortSignal}              [handlers.signal] - 可选，用于中断
+ * @returns {Promise<void>}
+ */
+export async function streamTutorAsk(payload, { onToken, onDone, onError, signal } = {}) {
+  const token = tokenStore.getAccessToken();
+  let response;
+  try {
+    response = await fetch("/api/tutor/ask-stream", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(payload),
+      credentials: "include",
+      signal,
+    });
+  } catch (err) {
+    onError?.(err);
+    return;
+  }
+
+  if (!response.ok || !response.body) {
+    onError?.(new Error(`SSE 请求失败：HTTP ${response.status}`));
+    return;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+
+  const dispatch = (rawEvent) => {
+    // 单个 SSE 事件块可能包含多行 event:/data:
+    let eventName = "message";
+    const dataLines = [];
+    for (const line of rawEvent.split("\n")) {
+      if (line.startsWith("event:")) {
+        eventName = line.slice(6).trim();
+      } else if (line.startsWith("data:")) {
+        dataLines.push(line.slice(5).trimStart());
+      }
+    }
+    if (!dataLines.length) return;
+    const dataStr = dataLines.join("\n");
+    let parsed;
+    try {
+      parsed = JSON.parse(dataStr);
+    } catch {
+      return;
+    }
+    if (eventName === "token") {
+      if (parsed.token) onToken?.(parsed.token);
+    } else if (eventName === "done") {
+      onDone?.(parsed);
+    } else if (eventName === "error") {
+      onError?.(new Error(parsed.error || "流式辅导出错"));
+    }
+  };
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      // SSE 事件以空行（\n\n）分隔
+      let sepIndex;
+      while ((sepIndex = buffer.indexOf("\n\n")) !== -1) {
+        const rawEvent = buffer.slice(0, sepIndex);
+        buffer = buffer.slice(sepIndex + 2);
+        if (rawEvent.trim()) dispatch(rawEvent);
+      }
+    }
+    // 冲刷残余
+    if (buffer.trim()) dispatch(buffer);
+  } catch (err) {
+    if (err?.name !== "AbortError") onError?.(err);
+  }
+}
+
 export async function fetchKnowledgeGraph(courseId = "data_structures") {
   const { data } = await apiClient.get("/knowledge-graph", { params: { course_id: courseId } });
   return data;
