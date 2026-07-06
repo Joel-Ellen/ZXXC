@@ -1,61 +1,51 @@
 # -*- coding: utf-8 -*-
-"""
-EduAgent LLM Layer (v2 — merged)
-================================
-大模型接入层 — 统一封装多厂商 API：
+"""EduAgent LLM package exports.
 
-  - DashScope (阿里云灵积 / 通义千问)
-  - iFlyTek Spark (讯飞星火)
-  - DeepSeek
-  - OpenAI
-
-提供一致的调用接口注入到各 Agent Node。
-
-本包导出:
-  - LLMClient (v1 遗留，向后兼容)
-  - LLMClientV2: 统一异步大模型客户端（推荐）
-  - LLMConfig, Provider: 配置与枚举
-  - TokenEstimator, InputManager: Token 管理与溢出策略
-  - ContentFilter: 内容安全过滤
-  - HallucinationChecker: 防幻觉自洽校验
+The LLM package includes optional provider clients. Resolve exports lazily so
+utility imports such as ``src.llm.content_filter`` do not require provider SDKs.
 """
 
-# 向后兼容的 v1 导出
-from ._legacy_client import (
-    LLMClient,
-    LLMConfig,
-    Provider,
-    create_llm_client,
-    create_llm_client_from_env,
-)
+from __future__ import annotations
 
-# v2 导出（推荐）
-from .client_v2 import (
-    LLMClientV2,
-    create_llm_client_v2,
-    create_llm_client_v2_from_env,
-)
+from importlib import import_module
+from typing import Any
 
-# 工具类
-from .token_estimator import TokenEstimator
-from .input_manager import InputManager
-from .content_filter import ContentFilter
-from .hallucination_checker import HallucinationChecker
 
-__all__ = [
-    # v1 legacy
-    "LLMClient",
-    "LLMConfig",
-    "Provider",
-    "create_llm_client",
-    "create_llm_client_from_env",
-    # v2
+_OPTIONAL_PROVIDER_EXPORTS = {
     "LLMClientV2",
     "create_llm_client_v2",
     "create_llm_client_v2_from_env",
-    # utilities
-    "TokenEstimator",
-    "InputManager",
-    "ContentFilter",
-    "HallucinationChecker",
-]
+}
+
+_EXPORT_MODULES = {
+    "LLMClient": "._legacy_client",
+    "LLMConfig": "._legacy_client",
+    "Provider": "._legacy_client",
+    "create_llm_client": "._legacy_client",
+    "create_llm_client_from_env": "._legacy_client",
+    "LLMClientV2": ".client_v2",
+    "create_llm_client_v2": ".client_v2",
+    "create_llm_client_v2_from_env": ".client_v2",
+    "TokenEstimator": ".token_estimator",
+    "InputManager": ".input_manager",
+    "ContentFilter": ".content_filter",
+    "HallucinationChecker": ".hallucination_checker",
+}
+
+__all__ = list(_EXPORT_MODULES)
+
+
+def __getattr__(name: str) -> Any:
+    module_name = _EXPORT_MODULES.get(name)
+    if module_name is None:
+        raise AttributeError(f"module 'src.llm' has no attribute {name!r}")
+    try:
+        value = getattr(import_module(module_name, __name__), name)
+    except ModuleNotFoundError as exc:
+        if name in _OPTIONAL_PROVIDER_EXPORTS:
+            raise AttributeError(
+                f"module 'src.llm' cannot load optional provider export {name!r}: {exc}"
+            ) from exc
+        raise
+    globals()[name] = value
+    return value

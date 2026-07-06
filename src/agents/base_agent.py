@@ -12,15 +12,19 @@ BaseAgent — 多智能体基类（合并自 backend/）
 
 来源: backend/agents/base_agent.py (merged, adapted for src.llm.LLMClientV2)
 """
-import asyncio
-import time
-import uuid
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any, List, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
+import asyncio
+import logging
+import time
+import uuid
+from typing import Any, Callable, Dict, List, Optional
 
-from loguru import logger
+try:
+    from loguru import logger
+except ModuleNotFoundError:
+    logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -89,8 +93,9 @@ class BaseAgent(ABC):
         if self.verbose:
             try:
                 logger.log(level.upper(), f"[{self.name}] {message}")
-            except ValueError:
-                logger.info(f"[{self.name}] {message}")
+            except (TypeError, ValueError):
+                log_method = getattr(logger, level.lower(), logger.info)
+                log_method(f"[{self.name}] {message}")
 
     # ------------------------------------------------------------------
     # Shared Memory (并发安全)
