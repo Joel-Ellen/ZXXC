@@ -52,6 +52,10 @@ frontend/test-results/
 # Playwright / screenshot outputs
 output/playwright/
 output/*.json
+.playwright-cli/
+
+# Runtime regression logs
+output/runtime/*.err
 
 # Lock files
 skills-lock.json
