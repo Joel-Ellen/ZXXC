@@ -3705,13 +3705,13 @@ async def api_auth_login(request: Request) -> JSONResponse:
     token_pair = SecurityManager.create_token_pair(_user_value(user, "user_id"), _user_value(user, "role"))
 
     # Redis: 存储 Refresh Token JTI（高并发鉴权缓存）
-    store_refresh_token(user["user_id"], token_pair["refresh_jti"])
+    store_refresh_token(_user_value(user, "user_id"), token_pair["refresh_jti"])
 
     return JSONResponse({
         "access_token": token_pair["access_token"],
         "refresh_token": token_pair["refresh_token"],
         "token_type": "bearer",
-        "user": {k: user[k] for k in ("user_id", "email", "role", "display_name", "created_at", "last_login_at") if k in user},
+        "user": _user_public_payload(user),
     })
 
 
@@ -3780,7 +3780,7 @@ async def api_auth_refresh(request: Request) -> JSONResponse:
 
     store, _ = _get_auth()
     user = store.get_by_id(user_id)
-    role = user["role"] if user else "STUDENT"
+    role = _user_value(user, "role") if user else "STUDENT"
 
     token_pair = SecurityManager.create_token_pair(user_id, role)
 
@@ -3788,7 +3788,7 @@ async def api_auth_refresh(request: Request) -> JSONResponse:
     mark_rotated(old_jti, ttl=10)
     store_refresh_token(user_id, token_pair["refresh_jti"])
 
-    user_info = {k: user[k] for k in ("user_id", "email", "role", "display_name", "created_at", "last_login_at") if k in user} if user else {}
+    user_info = _user_public_payload(user) if user else {}
     return JSONResponse({
         "access_token": token_pair["access_token"],
         "refresh_token": token_pair["refresh_token"],
@@ -3819,7 +3819,7 @@ async def api_auth_me(request: Request) -> JSONResponse:
     if user is None:
         return JSONResponse({"detail": "用户不存在"}, status_code=404)
 
-    return JSONResponse({k: user[k] for k in ("user_id", "email", "role", "display_name", "created_at", "last_login_at") if k in user})
+    return JSONResponse(_user_public_payload(user))
 
 
 # Official route handlers: route -> application service -> response.

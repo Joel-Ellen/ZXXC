@@ -32,7 +32,7 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.auth.security import (
-    SecurityManager, FAKE_HASH, JWT_SECRET_KEY, ALGORITHM,
+    SecurityManager, FAKE_HASH, JWT_SECRET_KEY, ALGORITHM, ARGON2_AVAILABLE,
 )
 from src.auth.captcha import CaptchaGenerator, CaptchaRecord
 from src.auth.models import UserStore, UserRecord, PresetAccounts
@@ -68,7 +68,10 @@ class TestPasswordHashing:
         password = "Secure_Student_Pass_2026"
         h = SecurityManager.hash_password(password)
         assert h != password
-        assert h.startswith("$argon2id$")
+        if ARGON2_AVAILABLE:
+            assert h.startswith("$argon2id$")
+        else:
+            assert h.startswith("pbkdf2_sha256$")
         assert SecurityManager.verify_password(password, h) is True
 
     def test_wrong_password_rejected(self) -> None:
@@ -163,7 +166,10 @@ class TestConstantTime:
 
     def test_fake_hash_is_valid_argon2(self) -> None:
         """FAKE_HASH 应为合法的 Argon2 哈希。"""
-        assert FAKE_HASH.startswith("$argon2id$")
+        if ARGON2_AVAILABLE:
+            assert FAKE_HASH.startswith("$argon2id$")
+        else:
+            assert FAKE_HASH.startswith("pbkdf2_sha256$")
 
 
 # ============================================================================
