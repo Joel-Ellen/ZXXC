@@ -1,28 +1,23 @@
 import { computed, ref } from "vue";
 import {
   advanceSession,
-  askSessionTutor,
-  askTutor,
   buildSessionId,
   createSession,
-  generateNodeResources as apiGenerateNodeResources,
-  streamTutorAsk,
   enrollCourse,
   fetchCourses,
   fetchKnowledgeGraph,
   fetchMyProfile,
-  fetchProbe,
+  fetchSessionProfileProbe,
   fetchSessionResources,
-  fetchState,
   getSession,
   fetchUserCourses,
   getCaptcha,
-  initLearningPath,
+  initSessionPath,
   login,
   refreshToken,
   register,
-  runPipelineStep,
-  submitProbeAnswer,
+  streamSessionTutor,
+  submitSessionProfileInput,
   switchCourse,
 } from "../services/eduAgentApi";
 
@@ -95,27 +90,19 @@ export function useEduAgent() {
   const sessionId = computed(() => buildSessionId(userId.value, courseId.value));
 
   async function fetchCurrentSession() {
-    try {
-      return await getSession(sessionId.value);
-    } catch {
-      return fetchState(userId.value, courseId.value);
-    }
+    return getSession(sessionId.value);
   }
 
   async function advanceCurrentSession(payload) {
-    try {
-      return await advanceSession(sessionId.value, payload);
-    } catch {
-      return runPipelineStep(payload);
-    }
+    return advanceSession(sessionId.value, payload);
   }
 
   async function fetchCurrentNodeResources(nodeId, force = false) {
-    try {
-      return await fetchSessionResources(sessionId.value, nodeId, { force });
-    } catch {
-      return apiGenerateNodeResources({ user_id: userId.value, course_id: courseId.value, node_id: nodeId, force });
-    }
+    return fetchSessionResources(sessionId.value, nodeId, { force });
+  }
+
+  async function fetchCurrentProbe() {
+    return fetchSessionProfileProbe(sessionId.value);
   }
 
   function setInfo(message, durationMs = 3000) {
@@ -141,16 +128,61 @@ export function useEduAgent() {
     stepLogs.value = [];
   }
 
+  function pathIdsFromDto(state) {
+    const dtoNodes = state?.learning_path?.nodes;
+    if (Array.isArray(dtoNodes)) {
+      return dtoNodes.map((node) => node?.id).filter(Boolean);
+    }
+    return [];
+  }
+
+  function masteryFromDto(state) {
+    const dtoMastery = state?.dynamic_profile?.knowledge_mastery;
+    if (dtoMastery && typeof dtoMastery === "object") {
+      return dtoMastery;
+    }
+
+    const masteryByNode = {};
+    const dtoNodes = state?.learning_path?.nodes;
+    if (Array.isArray(dtoNodes)) {
+      dtoNodes.forEach((node) => {
+        if (node?.id) masteryByNode[node.id] = node.mastery ?? 0;
+      });
+    }
+    return Object.keys(masteryByNode).length ? masteryByNode : {};
+  }
+
+  function resourcesFromDto(state) {
+    if (state?.resources && typeof state.resources === "object") {
+      return state.resources;
+    }
+    return {};
+  }
+
+  function currentNodeFromDto(state) {
+    return state?.session?.current_node_id || state?.learning_path?.current_node_id || "";
+  }
+
+  function feedbackFromDto(...responses) {
+    return responses.find((item) => Array.isArray(item?.agent_feedback))?.agent_feedback ?? [];
+  }
+
+  function logsFromDto(...responses) {
+    return responses.find((item) => Array.isArray(item?.step_logs))?.step_logs
+      ?? responses.find((item) => Array.isArray(item?.pipeline_log))?.pipeline_log
+      ?? [];
+  }
+
   function hydrateState(state) {
     if (!state) {
       return;
     }
 
-    activePath.value = state.active_path ?? [];
-    mastery.value = state.dynamic_profile?.knowledge_mastery ?? {};
+    activePath.value = pathIdsFromDto(state);
+    mastery.value = masteryFromDto(state);
     capabilityRadar.value = state.dynamic_profile?.capability_radar ?? capabilityRadar.value;
     diagnosticReport.value = state.dynamic_profile?.diagnostic_report_md ?? "";
-    resources.value = state.generated_resources ?? {};
+    resources.value = resourcesFromDto(state);
     agentFeedback.value = state.agent_feedback ?? [];
 
     // 从持久化的 pipeline_log 提取最新 Agent 运行记录
@@ -161,7 +193,7 @@ export function useEduAgent() {
 
     if (!currentNode.value) {
       const firstPending = activePath.value.find((id) => (mastery.value[id] ?? 0) < 0.65);
-      currentNode.value = state.current_node_id || firstPending || activePath.value[0] || "";
+      currentNode.value = currentNodeFromDto(state) || firstPending || activePath.value[0] || "";
     }
   }
 
@@ -310,7 +342,7 @@ export function useEduAgent() {
     isSubmittingProbe.value = true;
     try {
       const answer = Array.isArray(values) && values.length === 1 ? values[0] : values;
-      const response = await submitProbeAnswer(userId.value, answer, courseId.value);
+      const response = await submitSessionProfileInput(sessionId.value, answer);
 
       if (response.phase === "complete") {
         probe.value = null;
@@ -320,7 +352,7 @@ export function useEduAgent() {
       }
 
       probeCollected.value = response.collected ?? probeCollected.value;
-      const next = await fetchProbe(userId.value, courseId.value);
+      const next = await fetchCurrentProbe();
       probe.value = next.probe;
       probeCollected.value = next.collected ?? probeCollected.value;
     } catch {
@@ -331,7 +363,7 @@ export function useEduAgent() {
   }
 
   async function initPathAndEnter() {
-    await initLearningPath(userId.value, courseId.value);
+    await initSessionPath(sessionId.value);
     await createSession({ user_id: userId.value, course_id: courseId.value });
       const state = await fetchCurrentSession();
     hydrateState(state);
@@ -396,7 +428,7 @@ export function useEduAgent() {
           await loadNode(currentNode.value, true);
         }
       } else {
-        const probeState = await fetchProbe(userId.value, courseId.value);
+        const probeState = await fetchCurrentProbe();
         if (probeState.phase === "complete") {
           await initPathAndEnter();
         } else {
@@ -420,7 +452,7 @@ export function useEduAgent() {
       activeCourse.value = result.course;
       await loadUserCourses();
 
-      const probeState = await fetchProbe(userId.value, courseId.value);
+      const probeState = await fetchCurrentProbe();
       if (probeState.phase === "complete") {
         await initPathAndEnter();
       } else {
@@ -455,7 +487,7 @@ export function useEduAgent() {
           await loadNode(currentNode.value, true);
         }
       } else {
-        const probeState = await fetchProbe(userId.value, courseId.value);
+        const probeState = await fetchCurrentProbe();
         if (probeState.phase === "complete") {
           await initPathAndEnter();
         } else {
@@ -493,8 +525,8 @@ export function useEduAgent() {
       });
       const state = await fetchCurrentSession();
       hydrateState(state);
-      currentNode.value = state.current_node_id || nodeId;
-      const cardCount = (state.generated_resources?.[currentNode.value] || []).length;
+      currentNode.value = currentNodeFromDto(state) || nodeId;
+      const cardCount = (resourcesFromDto(state)?.[currentNode.value] || []).length;
       if (!silent) {
         setInfo(cardCount ? `${nodeLabel} 已加载 ${cardCount} 份资源。` : `${nodeLabel} 资源生成完成。`);
       }
@@ -525,25 +557,27 @@ export function useEduAgent() {
       });
       const state = await fetchCurrentSession();
       hydrateState(state);
-      currentNode.value = response.current_node_id || state.current_node_id || evaluatedNodeId;
+      currentNode.value = currentNodeFromDto(state) || evaluatedNodeId;
 
-      const nextNodeId = response.next_node_id || response.current_node_id || "";
+      const nextNodeId = response.next_node_id || currentNodeFromDto(state) || "";
+      const responseLogs = logsFromDto(response, state);
+      const responseFeedback = feedbackFromDto(response, state);
       lastDiagnostic.value = {
         score,
         evaluatedNodeId: response.evaluated_node_id || evaluatedNodeId,
         evaluatedNodeTitle: nodeTitles.value[response.evaluated_node_id || evaluatedNodeId] || response.evaluated_node_id || evaluatedNodeId,
         masteryBefore: response.previous_mastery ?? previousMastery,
-        masteryAfter: response.evaluated_node_mastery ?? state.dynamic_profile?.knowledge_mastery?.[evaluatedNodeId] ?? previousMastery,
+        masteryAfter: response.evaluated_node_mastery ?? masteryFromDto(state)?.[evaluatedNodeId] ?? previousMastery,
         advancedToNextNode: Boolean(response.advanced_to_next_node),
         nextNodeId,
         nextNodeTitle: nodeTitles.value[nextNodeId] || nextNodeId,
         masteryThreshold: response.mastery_threshold ?? 0.65,
-        step_logs: response.step_logs || [],
-        agent_feedback: response.agent_feedback || state.agent_feedback || [],
+        step_logs: responseLogs,
+        agent_feedback: responseFeedback,
       };
-      agentFeedback.value = response.agent_feedback || state.agent_feedback || [];
-      if (response.step_logs?.length) {
-        stepLogs.value = response.step_logs.filter((l) => l.agent);
+      agentFeedback.value = responseFeedback;
+      if (responseLogs.length) {
+        stepLogs.value = responseLogs.filter((l) => l.agent);
       }
 
       if (lastDiagnostic.value.advancedToNextNode) {
@@ -559,7 +593,7 @@ export function useEduAgent() {
     }
   }
 
-  async function generateNodeResources(nodeId, force = false) {
+  async function refreshNodeResources(nodeId, force = false) {
     if (!nodeId) return;
 
     const nodeLabel = nodeTitles.value[nodeId] || nodeId;
@@ -568,13 +602,14 @@ export function useEduAgent() {
 
     try {
       const result = await fetchCurrentNodeResources(nodeId, force);
+      const nodeResources = result.resources ?? [];
       // 将后端返回的卡片合并进本地 resources
-      if (result.cards?.length) {
+      if (nodeResources.length) {
         const updated = { ...resources.value };
-        updated[nodeId] = result.cards;
+        updated[nodeId] = nodeResources;
         resources.value = updated;
       }
-      const cardCount = result.cards?.length ?? 0;
+      const cardCount = nodeResources.length;
       setInfo(
         result.status === "already_exists"
           ? `「${nodeLabel}」资源已就绪（${cardCount} 份），无需重新生成。`
@@ -624,12 +659,9 @@ export function useEduAgent() {
 
     let accumulated = "";
 
-    await streamTutorAsk(
-      {
-        user_id: userId.value,
-        course_id: courseId.value,
-        question: query.trim(),
-      },
+    await streamSessionTutor(
+      sessionId.value,
+      { question: query.trim() },
       {
         onToken(token) {
           accumulated += token;
@@ -729,7 +761,7 @@ export function useEduAgent() {
     bootstrap,
     submitProbe,
     loadNode,
-    generateNodeResources,
+    refreshNodeResources,
     submitQuiz,
     sendTutorMessage,
     getCardLabel,

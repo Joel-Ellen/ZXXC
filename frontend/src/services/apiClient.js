@@ -3,6 +3,13 @@ import axios from "axios";
 const ACCESS_TOKEN_KEY = "access_token";
 const REFRESH_TOKEN_KEY = "refresh_token";
 
+export function createRequestId() {
+  if (typeof window !== "undefined" && window.crypto?.randomUUID) {
+    return window.crypto.randomUUID().replaceAll("-", "");
+  }
+  return `${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
+}
+
 export const tokenStore = {
   getAccessToken() {
     return window.localStorage.getItem(ACCESS_TOKEN_KEY);
@@ -32,6 +39,10 @@ const apiClient = axios.create({
 
 apiClient.interceptors.request.use((config) => {
   const token = tokenStore.getAccessToken();
+  config.headers = config.headers ?? {};
+  if (!config.headers["X-Request-ID"]) {
+    config.headers["X-Request-ID"] = createRequestId();
+  }
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }

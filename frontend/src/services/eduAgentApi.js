@@ -1,4 +1,4 @@
-import apiClient, { tokenStore } from "./apiClient";
+import apiClient, { createRequestId, tokenStore } from "./apiClient";
 
 // ── 认证 ──
 export async function getCaptcha() {
@@ -53,6 +53,16 @@ export async function submitSessionProfileInput(sessionId, answer) {
   return data;
 }
 
+export async function fetchSessionProfileProbe(sessionId) {
+  const { data } = await apiClient.get(`/sessions/${encodeURIComponent(sessionId)}/profile-probe`);
+  return data;
+}
+
+export async function initSessionPath(sessionId) {
+  const { data } = await apiClient.post(`/sessions/${encodeURIComponent(sessionId)}/path/init`, {});
+  return data;
+}
+
 export async function advanceSession(sessionId, payload = {}) {
   const { data } = await apiClient.post(`/sessions/${encodeURIComponent(sessionId)}/advance`, payload);
   return data;
@@ -66,6 +76,14 @@ export async function submitSessionBehavior(sessionId, payload = {}) {
 export async function askSessionTutor(sessionId, payload = {}) {
   const { data } = await apiClient.post(`/sessions/${encodeURIComponent(sessionId)}/tutor`, payload);
   return data;
+}
+
+export async function streamSessionTutor(sessionId, payload, handlers = {}) {
+  return streamSsePost(
+    `/api/sessions/${encodeURIComponent(sessionId)}/tutor`,
+    { ...payload, stream: true },
+    handlers,
+  );
 }
 
 export async function replanSession(sessionId, payload = {}) {
@@ -84,48 +102,6 @@ export async function resetSession(userId) {
   return data;
 }
 
-export async function fetchState(userId, courseId = "data_structures") {
-  const { data } = await apiClient.get("/state", { params: { user_id: userId, course_id: courseId } });
-  return data;
-}
-
-export async function fetchProbe(userId, courseId = "data_structures") {
-  const { data } = await apiClient.get("/cold-start/probe", { params: { user_id: userId, course_id: courseId } });
-  return data;
-}
-
-export async function submitProbeAnswer(userId, answer, courseId = "data_structures") {
-  const { data } = await apiClient.post("/cold-start/answer", { user_id: userId, answer, course_id: courseId });
-  return data;
-}
-
-export async function initLearningPath(userId, courseId = "data_structures") {
-  const { data } = await apiClient.post("/init-path", { user_id: userId, course_id: courseId });
-  return data;
-}
-
-export async function runPipelineStep(payload) {
-  const { data } = await apiClient.post("/pipeline/step", payload);
-  return data;
-}
-
-export async function askTutor(payload) {
-  const { data } = await apiClient.post("/tutor/ask", payload);
-  return data;
-}
-
-/**
- * 显式生成或重新生成某节点的学习资源。
- * 仅在用户主动点击"生成"/"重新生成"时调用，不在页面加载时自动触发。
- *
- * @param {{ user_id: string, course_id: string, node_id: string, force?: boolean }} payload
- * @returns {Promise<{ status: string, node_id: string, cards: Array }>}
- */
-export async function generateNodeResources(payload) {
-  const { data } = await apiClient.post("/resources/generate-node", payload);
-  return data;
-}
-
 /**
  * 流式辅导问答 — SSE over fetch（后端为 POST，EventSource 不支持 POST，故用 ReadableStream 手动解析）。
  *
@@ -137,15 +113,17 @@ export async function generateNodeResources(payload) {
  * @param {AbortSignal}              [handlers.signal] - 可选，用于中断
  * @returns {Promise<void>}
  */
-export async function streamTutorAsk(payload, { onToken, onDone, onError, signal } = {}) {
+// Shared transport for session tutor streaming.
+async function streamSsePost(url, payload, { onToken, onDone, onError, signal } = {}) {
   const token = tokenStore.getAccessToken();
   let response;
   try {
-    response = await fetch("/api/tutor/ask-stream", {
+    response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Accept: "text/event-stream",
+        "X-Request-ID": createRequestId(),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify(payload),
