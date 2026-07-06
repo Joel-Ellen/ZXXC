@@ -6,8 +6,10 @@ def test_session_bootstrap_restores_or_creates(monkeypatch):
     fake = install_fake_runtime(monkeypatch)
     disable_persistence(monkeypatch)
     response = session_service.restore_or_create_session("u1", "course1")
-    assert response["user_id"] == "u1"
-    assert response["course_id"] == "course1"
+    assert response["session"]["user_id"] == "u1"
+    assert response["session"]["course_id"] == "course1"
+    assert "user_id" not in response
+    assert "generated_resources" not in response
     assert fake.peek_session("u1", "course1") is not None
 
 

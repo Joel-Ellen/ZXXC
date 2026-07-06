@@ -9,5 +9,6 @@ def test_resource_regeneration_rejects_invalid_generation(monkeypatch):
 
     result = resource_service.generate_current_node_resources("u5", "course1", "N01", force=True)
     assert result["status"] == "generated"
-    assert result["cards"] == []
+    assert result["resources"] == []
+    assert "cards" not in result
     assert fake.get_session("u5", "course1").agent_state.errors

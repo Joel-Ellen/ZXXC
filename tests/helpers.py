@@ -59,9 +59,10 @@ class FakeRuntime:
 
 
 class FakeValidationPipeline:
-    def __init__(self, pass_resource=True, pass_tutor=True):
+    def __init__(self, pass_resource=True, pass_tutor=True, pass_input=True):
         self.pass_resource = pass_resource
         self.pass_tutor = pass_tutor
+        self.pass_input = pass_input
 
     def validate_resource_card(self, card, ground_truth_context=""):
         from src.validation.result import ValidationResult
@@ -74,6 +75,8 @@ class FakeValidationPipeline:
     def validate_input(self, text="", payload=None, field="input"):
         from src.validation.result import ValidationResult
         result = ValidationResult()
+        if not self.pass_input:
+            result.add_issue("forced_input_reject", "forced input reject", field=field)
         result.sanitized_text = text
         return result
 
