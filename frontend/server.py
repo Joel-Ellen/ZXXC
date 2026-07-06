@@ -25,6 +25,7 @@ if _PROJECT_ROOT not in sys.path:
 
 import uvicorn
 from starlette.applications import Starlette
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.routing import Route, Mount
 from starlette.staticfiles import StaticFiles
 from starlette.responses import JSONResponse, Response
@@ -36,6 +37,15 @@ from starlette.requests import Request
 # --- Course System ---
 from src.courses import CourseStore
 from src.application import profile_service, resource_service, session_service, tutor_service
+from src.observability import (
+    bind_context,
+    configure_logging,
+    incr_metric,
+    log_event,
+    metrics_snapshot,
+    new_request_id,
+    observe_metric,
+)
 from sse_starlette.sse import EventSourceResponse
 
 
@@ -66,6 +76,7 @@ from typing import Dict, Any, Optional, List, Tuple
 # 将项目根目录加入 sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+configure_logging()
 
 # ─── LLM 客户端（全局单例）─────────────────────────────────
 _llm_client = None
@@ -623,13 +634,13 @@ def _resource_card_constraints(card_type: str) -> List[str]:
     ]
     per_type = {
         "concept_map": [
-            "summary 用 2 到 4 句话搭建整体认知框架。",
-            "sections 至少 4 个，覆盖定义、机制、应用、与前后知识点关系。",
-            "每个 section.body 至少 2 句，不能只写短语。",
-            "learning_objectives 至少 3 条，bullets 至少 4 条。",
-            "common_misconceptions 必须是学生常犯错，不是换个说法重复定义。",
-            "review_prompts 至少 3 条，且至少 1 条是迁移型问题。",
-            "mermaid_source 必须是可渲染的 graph TD。",
+            "summary 用 3 到 4 句话搭建整体认知框架，必须说明该知识点解决什么问题、核心约束是什么、学习重点在哪里。",
+            "sections 至少 4 个，覆盖定义与约束、工作机制、典型应用场景、与前后知识点关系。",
+            "每个 section.body 至少 3 句，必须包含具体机制说明或典型例子，不能只写一句定义就结束。",
+            "learning_objectives 至少 3 条，每条必须是可验证的行为描述（能做什么，而不是笼统的了解或理解），bullets 至少 5 条。",
+            "common_misconceptions 必须是学生真正常犯的错，每条都要说明错在哪里，不是换个说法重复定义。",
+            "review_prompts 至少 3 条，且至少 1 条是迁移型问题（把知识点应用到没见过的新场景）。",
+            "mermaid_source 必须是可渲染的 graph TD，节点至少 8 个，体现定义→机制→应用→关联的层次。",
         ],
         "code_snippet": [
             "code 必须是真实代码，不能写伪代码、注释占位或省略号。",
@@ -675,17 +686,48 @@ def _resource_fewshot_examples(card_type: str) -> List[Dict[str, Any]]:
             "output": {
                 "render_type": "concept_map",
                 "title": "栈及其应用",
-                "summary": "栈的核心约束是后进先出。学习重点不是背 API，而是理解它为什么适合处理最近未闭合状态。",
-                "learning_objectives": ["说明 LIFO 的含义", "判断什么题适合用栈", "识别常见误区"],
-                "sections": [
-                    {"heading": "核心定义", "body": "栈是一种只允许在一端插入和删除的线性结构。"},
-                    {"heading": "工作机制", "body": "新元素压入栈顶，访问和删除也优先发生在栈顶。"},
-                    {"heading": "典型应用", "body": "括号匹配、函数调用、表达式求值都依赖最近状态优先处理。"},
+                "summary": "栈是一种遵循后进先出（LIFO）原则的线性数据结构，核心价值在于天然维护【最近状态优先】这一约束。学习栈的重点不是背 API 列表，而是能识别哪类问题依赖于回退到最近未处理状态，并判断此时用栈比递归或队列更合适。掌握后你应当能从问题描述中直接看出是否需要维护最近未关闭项，而不是靠套模板。",
+                "learning_objectives": [
+                    "能用自己的话说明 LIFO 约束的含义，并举出至少两个真实场景解释为什么这个顺序是必要的",
+                    "能识别一个新问题是否需要维护最近状态，并判断应使用栈而非队列或直接递归",
+                    "能在括号匹配、函数调用等场景中手工追踪栈的入栈和出栈过程，验证结果正确性",
                 ],
-                "bullets": ["栈顶是唯一活跃出口", "最近状态优先", "适合回退与匹配"],
-                "common_misconceptions": ["把栈当成普通数组来理解", "会背定义却不会判断题型"],
-                "mermaid_source": "graph TD\nROOT[栈] --> DEF[LIFO]\nROOT --> OPS[入栈/出栈]\nROOT --> USE[括号匹配]",
-                "review_prompts": ["为什么括号匹配更适合栈？"],
+                "sections": [
+                    {
+                        "heading": "核心定义与约束",
+                        "body": "栈是一种只允许在同一端（栈顶）进行插入（push）和删除（pop）操作的线性结构，这个约束意味着后压入的元素总是先被取出，即后进先出（LIFO）。与数组的随机访问不同，栈的访问路径是单一的：只能看到栈顶，无法直接访问底部元素。这种限制看似不便，实际上正是它能天然解决【最近未关闭状态】问题的根本原因——只要逻辑上需要先处理最新的再回到之前的，栈就是最自然的载体。",
+                    },
+                    {
+                        "heading": "工作机制",
+                        "body": "操作层面上，push(x) 将元素 x 放到栈顶，时间复杂度 O(1)；pop() 移除并返回栈顶元素，同样是 O(1)；peek() 只读取栈顶而不移除。栈可用数组或链表实现：数组实现需要维护 top 指针，每次 push 后 top 前进，每次 pop 后 top 退后；链表实现则以链表头作为栈顶，push/pop 即链表头插/删。关键要追踪的状态是 top 指针的移动——这个往复运动就是回溯语义的物理载体，理解它比记住 API 名称重要得多。",
+                    },
+                    {
+                        "heading": "典型应用场景",
+                        "body": "括号匹配：遇到左括号就 push，遇到右括号时检查栈顶是否匹配对应的左括号，若不匹配或栈空则非法，最终栈空即合法。函数调用栈：每次调用时系统将当前帧（参数、返回地址、局部变量）压栈，被调函数执行完后弹出，保证嵌套调用能正确返回到调用者——递归本质上就是在隐式使用这个栈。逆波兰表达式求值：遇到操作数 push，遇到运算符则 pop 两个操作数计算后把结果 push 回去，最终栈顶即为答案。三种场景的共同模式是：需要记住最近打开但还没有关闭或完成的项。",
+                    },
+                    {
+                        "heading": "与相关知识点的关系",
+                        "body": "栈与队列的关键区别在于服务顺序：栈是 LIFO（最近优先），队列是 FIFO（最早优先），选择哪个取决于问题是需要回退还是按到达顺序处理。递归与栈深层等价：任何递归都可用显式栈改写，系统调用栈就是隐式地在做这件事，面试中常要求将递归 DFS 改成迭代版本正是这个原因。在图算法中，DFS 的迭代版直接用栈实现，而 BFS 用队列——这个对比是理解两种遍历顺序差异的最直接入口。",
+                    },
+                ],
+                "bullets": [
+                    "LIFO 约束：后压入的先取出——不是限制，是它天然解决回溯问题的来源",
+                    "push / pop / peek 均为 O(1)，操作代价极低",
+                    "只有栈顶可见，无法随机访问——使用前必须理解这个约束",
+                    "适用判断：问题是否需要维护最近未关闭或未处理的状态",
+                    "递归与显式栈等价，可互相转换——理解这个等价是进阶的关键",
+                ],
+                "common_misconceptions": [
+                    "认为栈就是受限的数组，忽略了 LIFO 约束正是其解决特定问题的核心机制，而非单纯的功能限制",
+                    "括号匹配时只检查相邻括号是否成对，忽视了栈维护的是最近未匹配的开括号，需要 pop 来匹配而不是线性扫描",
+                    "把递归程序和显式栈程序视为两种不同思路，实际上递归就是让系统替你维护了一个隐式调用栈",
+                ],
+                "mermaid_source": "graph TD\nROOT[栈 Stack] --> CONSTRAINT[约束: LIFO 后进先出]\nROOT --> OPS[基本操作]\nROOT --> USE[典型应用]\nROOT --> RELATE[相关概念]\nOPS --> PUSH[push O1]\nOPS --> POP[pop O1]\nOPS --> PEEK[peek O1]\nUSE --> BRACKET[括号匹配]\nUSE --> CALLSTACK[函数调用栈]\nUSE --> EXPR[逆波兰表达式]\nRELATE --> QUEUE[对比队列 FIFO]\nRELATE --> RECURSION[递归等价隐式栈]",
+                "review_prompts": [
+                    "如果面试官问你如何判断一个字符串的括号是否合法，你的第一反应是什么数据结构？为什么不是队列或直接线性扫描？",
+                    "给你一个只有 push/pop/peek/isEmpty 接口的栈，如何用两个栈实现一个队列？",
+                    "迁移题：浏览器的前进和后退按钮背后需要维护几个栈？每个栈里存的是什么？当标签页被关闭后这些栈发生了什么？",
+                ],
             },
         }],
         "code_snippet": [{
@@ -1020,7 +1062,9 @@ def _generate_card_with_qwen(
         {"role": "user", "content": user_prompt},
     ]
 
-    result = llm.chat_sync(messages, temperature=0.35, max_tokens=2600, json_mode=True)
+    # concept_map 内容最丰富，给更多 token 空间以避免在 review_prompts 前截断
+    max_tokens = 4096 if card_type == "concept_map" else 2600
+    result = llm.chat_sync(messages, temperature=0.35, max_tokens=max_tokens, json_mode=True)
     raw_content = result.get("content", "") if isinstance(result, dict) else str(result)
     payload = _extract_json_object(raw_content)
     if not payload:
@@ -3570,6 +3614,22 @@ async def api_auth_captcha_json(request: Request) -> JSONResponse:
     return JSONResponse({"svg": svg, "captcha_token": token})
 
 
+def _user_value(user: Any, field: str) -> Any:
+    if isinstance(user, dict):
+        return user.get(field)
+    return getattr(user, field, None)
+
+
+def _user_public_payload(user: Any) -> Dict[str, Any]:
+    fields = ("user_id", "email", "role", "display_name", "created_at", "last_login_at")
+    payload: Dict[str, Any] = {}
+    for field in fields:
+        value = _user_value(user, field)
+        if value is not None:
+            payload[field] = value
+    return payload
+
+
 async def api_auth_register(request: Request) -> JSONResponse:
     """POST /api/auth/register — 用户注册。"""
     store, captcha = _get_auth()
@@ -3605,12 +3665,12 @@ async def api_auth_register(request: Request) -> JSONResponse:
     except ValueError as e:
         return JSONResponse({"detail": str(e)}, status_code=409)
 
-    token_pair = SecurityManager.create_token_pair(user["user_id"], user["role"])
+    token_pair = SecurityManager.create_token_pair(_user_value(user, "user_id"), _user_value(user, "role"))
     return JSONResponse({
         "access_token": token_pair["access_token"],
         "refresh_token": token_pair["refresh_token"],
         "token_type": "bearer",
-        "user": {k: user[k] for k in ("user_id", "email", "role", "display_name", "created_at", "last_login_at") if k in user},
+        "user": _user_public_payload(user),
     })
 
 
@@ -3642,7 +3702,7 @@ async def api_auth_login(request: Request) -> JSONResponse:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    token_pair = SecurityManager.create_token_pair(user["user_id"], user["role"])
+    token_pair = SecurityManager.create_token_pair(_user_value(user, "user_id"), _user_value(user, "role"))
 
     # Redis: 存储 Refresh Token JTI（高并发鉴权缓存）
     store_refresh_token(user["user_id"], token_pair["refresh_jti"])
@@ -3764,6 +3824,26 @@ async def api_auth_me(request: Request) -> JSONResponse:
 
 # Official route handlers: route -> application service -> response.
 # Older implementations above are retained as legacy migration references only.
+COMPAT_INTERNAL_HEADERS = {
+    "X-EduAgent-Api-Surface": "compat/internal",
+    "X-EduAgent-Api-Status": "deprecated",
+    "X-EduAgent-Canonical-Api": "/api/sessions",
+}
+
+SESSION_TUTOR_ALIAS_HEADERS = {
+    "X-EduAgent-Api-Status": "deprecated",
+    "X-EduAgent-Canonical-Api": "/api/sessions/{session_id}/tutor",
+}
+
+
+def _compat_json_response(payload: Dict[str, Any], status_code: int = 200) -> JSONResponse:
+    return JSONResponse(payload, status_code=status_code, headers=COMPAT_INTERNAL_HEADERS)
+
+
+def _compat_sse_response(generator: Any) -> EventSourceResponse:
+    return EventSourceResponse(generator, headers=COMPAT_INTERNAL_HEADERS)
+
+
 async def api_reset(request: Request) -> JSONResponse:
     body = await request.json()
     return JSONResponse(session_service.reset_learning_session(
@@ -3772,40 +3852,40 @@ async def api_reset(request: Request) -> JSONResponse:
     ))
 
 
-async def api_get_state(request: Request) -> JSONResponse:
-    return JSONResponse(session_service.get_learning_state(
+async def api_compat_get_state(request: Request) -> JSONResponse:
+    return _compat_json_response(session_service.get_learning_state(
         request.query_params.get("user_id", "demo_user"),
         request.query_params.get("course_id", "data_structures"),
     ))
 
 
-async def api_cold_start_probe(request: Request) -> JSONResponse:
-    return JSONResponse(profile_service.get_probe(
+async def api_compat_cold_start_probe(request: Request) -> JSONResponse:
+    return _compat_json_response(profile_service.get_probe(
         request.query_params.get("user_id", "demo_user"),
         request.query_params.get("course_id", "data_structures"),
     ))
 
 
-async def api_cold_start_answer(request: Request) -> JSONResponse:
+async def api_compat_cold_start_answer(request: Request) -> JSONResponse:
     body = await request.json()
-    return JSONResponse(profile_service.submit_probe_answer(
+    return _compat_json_response(profile_service.submit_probe_answer(
         body.get("user_id", "demo_user"),
         body.get("course_id", "data_structures"),
         body.get("answer"),
     ))
 
 
-async def api_init_path(request: Request) -> JSONResponse:
+async def api_compat_init_path(request: Request) -> JSONResponse:
     body = await request.json()
-    return JSONResponse(session_service.init_path(
+    return _compat_json_response(session_service.init_path(
         body.get("user_id", "demo_user"),
         body.get("course_id", "data_structures"),
     ))
 
 
-async def api_run_pipeline_step(request: Request) -> JSONResponse:
+async def api_compat_run_pipeline_step(request: Request) -> JSONResponse:
     body = await request.json()
-    return JSONResponse(session_service.advance_session(
+    return _compat_json_response(session_service.advance_session(
         body.get("user_id", "demo_user"),
         body.get("course_id", "data_structures"),
         user_input=body.get("tutor_query"),
@@ -3813,34 +3893,70 @@ async def api_run_pipeline_step(request: Request) -> JSONResponse:
     ))
 
 
-async def api_ask_tutor(request: Request) -> JSONResponse:
+async def api_compat_stream_pipeline(request: Request) -> EventSourceResponse:
+    # Compat/internal bridge. Official advancement should use /api/sessions/{session_id}/advance.
+    user_id = request.query_params.get("user_id", "demo_user")
+    course_id = request.query_params.get("course_id", "data_structures")
+    behavior = {
+        "interaction_type": request.query_params.get("interaction_type", "practice"),
+        "current_node_id": request.query_params.get("current_node_id") or None,
+        "correctness": float(request.query_params.get("correctness", "0.75")),
+        "time_spent_ratio": float(request.query_params.get("time_spent_ratio", "1.0")),
+        "code_pass_rate": float(request.query_params.get("code_pass_rate", "0.70")),
+        "tutor_query": request.query_params.get("tutor_query", "") or None,
+    }
+
+    async def event_generator():
+        yield {
+            "event": "compat_notice",
+            "data": json.dumps({
+                "surface": "compat/internal",
+                "canonical_api": "/api/sessions/{session_id}/advance",
+            }, ensure_ascii=False),
+        }
+        result = await asyncio.to_thread(
+            session_service.advance_session,
+            user_id,
+            course_id,
+            behavior.get("tutor_query"),
+            behavior,
+        )
+        yield {"event": "done", "data": json.dumps(result, ensure_ascii=False)}
+
+    return _compat_sse_response(event_generator())
+
+
+async def api_compat_ask_tutor(request: Request) -> JSONResponse:
+    # Compat/internal bridge. Official tutor traffic should use /api/sessions/{session_id}/tutor.
     body = await request.json()
-    return JSONResponse(tutor_service.run_tutor(
+    return _compat_json_response(tutor_service.run_tutor(
         body.get("user_id", "demo_user"),
         body.get("course_id", "data_structures"),
         body.get("query", body.get("question", "")),
     ))
 
 
-async def api_ask_tutor_stream(request: Request) -> EventSourceResponse:
+async def api_compat_ask_tutor_stream(request: Request) -> EventSourceResponse:
+    # Compat/internal bridge. Official tutor streaming should use /api/sessions/{session_id}/tutor with stream=true.
     body = await request.json()
-    return EventSourceResponse(tutor_service.stream_tutor(
+    return _compat_sse_response(tutor_service.stream_tutor(
         body.get("user_id", "demo_user"),
         body.get("course_id", "data_structures"),
         body.get("question", body.get("query", "")),
     ))
 
 
-async def api_generate_node_resources(request: Request) -> JSONResponse:
+async def api_compat_generate_node_resources(request: Request) -> JSONResponse:
     body = await request.json()
     result = resource_service.generate_current_node_resources(
         body.get("user_id", "demo_user"),
         body.get("course_id", "data_structures"),
         body.get("node_id", ""),
         bool(body.get("force", False)),
+        include_legacy=True,
     )
     status_code = int(result.pop("status_code", 200))
-    return JSONResponse(result, status_code=status_code)
+    return _compat_json_response(result, status_code=status_code)
 
 def _session_ids(session_id: str) -> tuple[str, str]:
     if ":" in session_id:
@@ -3865,10 +3981,20 @@ async def api_get_session(request: Request) -> JSONResponse:
     return JSONResponse(data)
 
 
+async def api_session_profile_probe(request: Request) -> JSONResponse:
+    user_id, course_id = _session_ids(request.path_params.get("session_id", ""))
+    return JSONResponse(profile_service.get_probe(user_id, course_id))
+
+
 async def api_session_profile_input(request: Request) -> JSONResponse:
     user_id, course_id = _session_ids(request.path_params.get("session_id", ""))
     body = await request.json()
     return JSONResponse(profile_service.submit_probe_answer(user_id, course_id, body.get("answer")))
+
+
+async def api_session_init_path(request: Request) -> JSONResponse:
+    user_id, course_id = _session_ids(request.path_params.get("session_id", ""))
+    return JSONResponse(session_service.init_path(user_id, course_id))
 
 
 async def api_session_advance(request: Request) -> JSONResponse:
@@ -3884,17 +4010,31 @@ async def api_session_behavior(request: Request) -> JSONResponse:
     return JSONResponse(session_service.advance_session(user_id, course_id, behavior=body))
 
 
-async def api_session_tutor(request: Request) -> JSONResponse:
+async def api_session_tutor(request: Request):
     user_id, course_id = _session_ids(request.path_params.get("session_id", ""))
     body = await request.json()
-    return JSONResponse(tutor_service.run_tutor(user_id, course_id, body.get("query", body.get("question", ""))))
+    question = body.get("query", body.get("question", ""))
+    wants_stream = bool(body.get("stream")) or "text/event-stream" in request.headers.get("accept", "")
+    if wants_stream:
+        return EventSourceResponse(tutor_service.stream_tutor(user_id, course_id, question))
+    return JSONResponse(tutor_service.run_tutor(user_id, course_id, question))
+
+
+async def api_session_tutor_stream(request: Request) -> EventSourceResponse:
+    # Short-term alias only; canonical streaming is /api/sessions/{session_id}/tutor.
+    user_id, course_id = _session_ids(request.path_params.get("session_id", ""))
+    body = await request.json()
+    question = body.get("question", body.get("query", ""))
+    return EventSourceResponse(
+        tutor_service.stream_tutor(user_id, course_id, question),
+        headers=SESSION_TUTOR_ALIAS_HEADERS,
+    )
 
 
 async def api_session_replan(request: Request) -> JSONResponse:
     user_id, course_id = _session_ids(request.path_params.get("session_id", ""))
-    session = session_service.get_session(user_id, course_id)
-    session.agent_state.trigger_replan()
-    return JSONResponse(session_service.advance_session(user_id, course_id, behavior={"interaction_type": "load_node"}))
+    body = await request.json()
+    return JSONResponse(session_service.request_replan(user_id, course_id, payload=body))
 
 
 async def api_session_resources(request: Request) -> JSONResponse:
@@ -3904,33 +4044,51 @@ async def api_session_resources(request: Request) -> JSONResponse:
     result = resource_service.generate_current_node_resources(user_id, course_id, node_id, force)
     status_code = int(result.pop("status_code", 200))
     return JSONResponse(result, status_code=status_code)
+
+
+async def api_ops_metrics(request: Request) -> JSONResponse:
+    return JSONResponse(metrics_snapshot())
 app = Starlette(
     debug=True,
     routes=[
+        # Official session API - main frontend flow.
         Route("/api/sessions", api_create_session, methods=["POST"]),
         Route("/api/sessions/{session_id}", api_get_session, methods=["GET"]),
+        Route("/api/sessions/{session_id}/profile-probe", api_session_profile_probe, methods=["GET"]),
         Route("/api/sessions/{session_id}/profile-input", api_session_profile_input, methods=["POST"]),
+        Route("/api/sessions/{session_id}/path/init", api_session_init_path, methods=["POST"]),
         Route("/api/sessions/{session_id}/advance", api_session_advance, methods=["POST"]),
         Route("/api/sessions/{session_id}/behavior", api_session_behavior, methods=["POST"]),
         Route("/api/sessions/{session_id}/tutor", api_session_tutor, methods=["POST"]),
+        # Short-term deprecated alias. Main app and new clients must use /tutor with stream=true or Accept: text/event-stream.
+        Route("/api/sessions/{session_id}/tutor-stream", api_session_tutor_stream, methods=["POST"]),
         Route("/api/sessions/{session_id}/replan", api_session_replan, methods=["POST"]),
-        Route("/api/sessions/{session_id}/resources/{node_id}", api_session_resources, methods=["GET"]),        Route("/api/courses", api_list_courses, methods=["GET"]),
+        Route("/api/sessions/{session_id}/resources/{node_id}", api_session_resources, methods=["GET"]),
+
+        # Course, user, and shared support APIs used by the main app.
+        Route("/api/courses", api_list_courses, methods=["GET"]),
         Route("/api/courses/{course_id}", api_get_course, methods=["GET"]),
         Route("/api/user/courses", api_get_user_courses, methods=["GET"]),
         Route("/api/user/courses/enroll", api_enroll_course, methods=["POST"]),
         Route("/api/user/courses/switch", api_switch_course, methods=["POST"]),
-        Route("/api/reset", api_reset, methods=["POST"]),
-        Route("/api/state", api_get_state, methods=["GET"]),
-        Route("/api/cold-start/probe", api_cold_start_probe, methods=["GET"]),
-        Route("/api/cold-start/answer", api_cold_start_answer, methods=["POST"]),
-        Route("/api/init-path", api_init_path, methods=["POST"]),
-        Route("/api/pipeline/step", api_run_pipeline_step, methods=["POST"]),
-        Route("/api/pipeline/stream", api_stream_pipeline, methods=["GET"]),
-        Route("/api/tutor/ask", api_ask_tutor, methods=["POST"]),
-        Route("/api/tutor/ask-stream", api_ask_tutor_stream, methods=["POST"]),
-        Route("/api/resources/generate-node", api_generate_node_resources, methods=["POST"]),
         Route("/api/knowledge-graph", api_knowledge_graph, methods=["GET"]),
-        # ── 认证 API ──
+        Route("/api/ops/metrics", api_ops_metrics, methods=["GET"]),
+        Route("/api/reset", api_reset, methods=["POST"]),
+
+        # Compat/internal legacy learning endpoints.
+        # Frozen bridge paths for old clients and diagnostics only.
+        # Main app code must use /api/sessions/*; compat responses carry X-EduAgent-Api-Surface.
+        Route("/api/state", api_compat_get_state, methods=["GET"]),
+        Route("/api/cold-start/probe", api_compat_cold_start_probe, methods=["GET"]),
+        Route("/api/cold-start/answer", api_compat_cold_start_answer, methods=["POST"]),
+        Route("/api/init-path", api_compat_init_path, methods=["POST"]),
+        Route("/api/pipeline/step", api_compat_run_pipeline_step, methods=["POST"]),
+        Route("/api/pipeline/stream", api_compat_stream_pipeline, methods=["GET"]),
+        Route("/api/tutor/ask", api_compat_ask_tutor, methods=["POST"]),
+        Route("/api/tutor/ask-stream", api_compat_ask_tutor_stream, methods=["POST"]),
+        Route("/api/resources/generate-node", api_compat_generate_node_resources, methods=["POST"]),
+
+        # Auth API.
         Route("/api/auth/captcha", api_auth_captcha, methods=["GET"]),
         Route("/api/auth/captcha-json", api_auth_captcha_json, methods=["GET"]),
         Route("/api/auth/register", api_auth_register, methods=["POST"]),
@@ -3938,14 +4096,86 @@ app = Starlette(
         Route("/api/auth/refresh", api_auth_refresh, methods=["POST"]),
         Route("/api/auth/logout", api_auth_logout, methods=["POST"]),
         Route("/api/auth/me", api_auth_me, methods=["GET"]),
-        # ── 新增 API (合并自 backend/) ──
+
+        # Additional API routes merged from backend modules.
         *new_routes,
         Mount("/", app=StaticFiles(directory=str(static_dir), html=True)),
     ],
 )
 
 
-@app.on_event("startup")
+def _request_surface(path: str) -> str:
+    if path.startswith("/api/sessions"):
+        return "session_api"
+    if path.startswith("/api/"):
+        return "api"
+    return "static"
+
+
+class ObservabilityMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        request_id = request.headers.get("x-request-id") or new_request_id()
+        path = request.url.path
+        surface = _request_surface(path)
+        started = time.perf_counter()
+
+        with bind_context(
+            request_id=request_id,
+            method=request.method,
+            path=path,
+            surface=surface,
+        ):
+            request.state.request_id = request_id
+            try:
+                response = await call_next(request)
+            except Exception as exc:
+                duration_ms = round((time.perf_counter() - started) * 1000, 3)
+                incr_metric(
+                    "http.request_total",
+                    method=request.method,
+                    surface=surface,
+                    status_family="5xx",
+                )
+                observe_metric(
+                    "http.request.duration_ms",
+                    duration_ms,
+                    method=request.method,
+                    surface=surface,
+                )
+                log_event(
+                    "http.request.failed",
+                    level="error",
+                    status_code=500,
+                    duration_ms=duration_ms,
+                    error=str(exc),
+                )
+                raise
+
+            response.headers["X-Request-ID"] = request_id
+            duration_ms = round((time.perf_counter() - started) * 1000, 3)
+            incr_metric(
+                "http.request_total",
+                method=request.method,
+                surface=surface,
+                status_family=f"{response.status_code // 100}xx",
+            )
+            observe_metric(
+                "http.request.duration_ms",
+                duration_ms,
+                method=request.method,
+                surface=surface,
+            )
+            log_event(
+                "http.request.complete",
+                status_code=response.status_code,
+                duration_ms=duration_ms,
+            )
+            return response
+
+
+app.add_middleware(ObservabilityMiddleware)
+
+
 async def _preload_services() -> None:
     """异步预加载 ES 知识库，避免首次请求时阻塞。"""
     import asyncio
@@ -3958,6 +4188,24 @@ async def _preload_services() -> None:
 
     # 不阻塞应用启动；知识库可用时自动增强，不可用时保持降级链路可用。
     asyncio.create_task(_warm_es_in_background())
+
+
+def _register_startup_handler() -> None:
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _lifespan(_app):
+        await _preload_services()
+        yield
+
+    if hasattr(app.router, "lifespan_context"):
+        app.router.lifespan_context = _lifespan
+        return
+
+    app.on_event("startup")(_preload_services)
+
+
+_register_startup_handler()
 
 
 if __name__ == "__main__":
