@@ -7,7 +7,7 @@ from typing import Any, Dict
 
 from src.infrastructure.cold_start import ColdStartPhase
 
-from ._common import get_session, persist_session
+from ._common import get_session, persist_session, validate_service_input, validation_blocked_response
 
 
 def get_probe(user_id: str, course_id: str = "data_structures") -> Dict[str, Any]:
@@ -35,6 +35,16 @@ def get_probe(user_id: str, course_id: str = "data_structures") -> Dict[str, Any
 
 
 def submit_probe_answer(user_id: str, course_id: str, answer: Any) -> Dict[str, Any]:
+    input_validation = validate_service_input(
+        payload={"answer": answer},
+        text=answer if isinstance(answer, str) else None,
+        field="answer",
+    )
+    if not input_validation.passed:
+        return validation_blocked_response(input_validation, action="submit_probe_answer")
+    if isinstance(answer, str):
+        answer = input_validation.sanitized_text or answer
+
     session = get_session(user_id, course_id)
     state = session.agent_state
     state.internal_state.setdefault("_cold_start_answers", []).append(answer)

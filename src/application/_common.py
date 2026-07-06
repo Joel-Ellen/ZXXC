@@ -13,7 +13,10 @@ except Exception:
     SessionSnapshotRepo = None
 
 from src.orchestration_runtime import RuntimeSession, get_runtime
+from src.observability import incr_metric, log_event
 from src.state.agent_state import AgentFeedbackItem, ResourceCard
+from src.validation.pipeline import get_validation_pipeline
+from src.validation.result import ValidationResult
 
 RESOURCE_CONTRACT_VERSION = 1
 AGENT_FEEDBACK_VERSION = 1
@@ -58,7 +61,12 @@ def persist_session(session: RuntimeSession) -> None:
     try:
         if SessionSnapshotRepo is None:
             return
-        from src.adapters.state_to_domain import assessment_from_state, path_from_state, profile_from_state, resources_from_state
+        from src.adapters.state_to_domain import (
+            assessment_from_state,
+            path_from_state,
+            profile_from_state,
+            resources_from_state,
+        )
 
         SessionSnapshotRepo().save_snapshot(
             state.user_id,
@@ -130,7 +138,14 @@ def normalize_resource_card(card: ResourceCard) -> ResourceCard:
     metadata.setdefault("contract_version", RESOURCE_CONTRACT_VERSION)
     metadata.setdefault("resource_type", card.card_type)
     metadata.setdefault("body_markdown", card.content)
-    metadata.setdefault("structured_payload", {key: value for key, value in metadata.items() if key not in {"validation", "safety", "artifacts", "source_refs"}})
+    metadata.setdefault(
+        "structured_payload",
+        {
+            key: value
+            for key, value in metadata.items()
+            if key not in {"validation", "safety", "artifacts", "source_refs"}
+        },
+    )
     metadata.setdefault("artifacts", {})
     metadata.setdefault("validation", {"status": "pending", "issues": []})
     metadata.setdefault("safety", {"status": "unknown", "issues": []})
@@ -169,11 +184,12 @@ def upsert_resource_card(agent_state, card: ResourceCard) -> None:
     normalize_state_resources(agent_state)
 
 
-def state_response(session: RuntimeSession) -> Dict[str, Any]:
+def state_response(session: RuntimeSession, include_legacy: bool = False) -> Dict[str, Any]:
     from src.adapters.domain_to_response import session_response_from_runtime
 
     normalize_state_resources(session.agent_state)
-    return session_response_from_runtime(session).to_compatible_dict()
+    response = session_response_from_runtime(session)
+    return response.to_compatible_dict() if include_legacy else response.to_dto_dict()
 
 
 def feedback_item(
@@ -196,3 +212,46 @@ def feedback_item(
         structured_data=structured_data or {},
         artifacts=artifacts or {},
     )
+
+
+def validate_service_input(
+    *,
+    payload: Optional[Dict[str, Any]] = None,
+    text: Optional[str] = None,
+    field: str = "input",
+) -> ValidationResult:
+    """Run the official input gate for service-layer session entry points."""
+    return get_validation_pipeline().validate_input(
+        text=str(text) if text is not None else "",
+        payload=payload,
+        field=field,
+    )
+
+
+def validation_blocked_response(
+    validation: ValidationResult,
+    action: str = "input_validation",
+) -> Dict[str, Any]:
+    issue_codes = [getattr(issue, "code", "") for issue in validation.issues]
+    primary_code = next((code for code in issue_codes if code), "validation_blocked")
+    incr_metric(
+        "validation.reject_total",
+        action=action,
+        stage="input",
+        code=primary_code,
+    )
+    log_event(
+        "validation.reject",
+        level="warning",
+        action=action,
+        stage="input",
+        issue_codes=issue_codes,
+        issue_count=len(issue_codes),
+    )
+    return {
+        "status": "blocked",
+        "blocked": True,
+        "action": action,
+        "validation": validation.to_contract_validation(),
+        "errors": [issue.message for issue in validation.issues],
+    }
