@@ -1,46 +1,45 @@
 # -*- coding: utf-8 -*-
-"""
-EduAgent Auth Layer
-===================
-工业级安全认证模块 — Argon2id 密码哈希 + JWT 双令牌 + LangGraph 上下文防护。
+"""EduAgent auth package exports.
 
-本包包含：
-  - SecurityManager    : 密码哈希 + 令牌签发/校验
-  - AsyncAuthGuard     : FastAPI 异步认证中间件 (Redis 黑名单 + 令牌轮转)
-  - GraphGuard         : LangGraph 运行时不可变上下文防护
-  - CaptchaGenerator   : SVG 数学验证码生成
-  - UserStore          : JSON 文件持久化用户存储
-  - AuthRouter         : FastAPI 认证路由 (注册/登录/验证码/刷新)
-  - PromptDefense      : Prompt 注入攻击检测与清洗
-  - RateLimiter        : 内存滑动窗口限流器
+The package exposes the same public names as before, but resolves them lazily so
+lightweight imports such as ``src.auth.prompt_defense`` do not require the full
+auth dependency stack.
 """
 
-from .security import SecurityManager, FAKE_HASH, JWT_SECRET_KEY, ALGORITHM
-from .captcha import CaptchaGenerator, CaptchaRecord
-from .models import UserRecord, UserStore, PresetAccounts
-from .middleware import AsyncAuthGuard, oauth2_scheme
-from .graph_guard import LangGraphImmutableContextGuard
-from .routes import AuthRouter, create_auth_router
-from .prompt_defense import PromptDefense, get_prompt_defense
-from .rate_limiter import RateLimiter, get_rate_limiter
+from __future__ import annotations
 
-__all__ = [
-    "SecurityManager",
-    "FAKE_HASH",
-    "JWT_SECRET_KEY",
-    "ALGORITHM",
-    "CaptchaGenerator",
-    "CaptchaRecord",
-    "UserRecord",
-    "UserStore",
-    "PresetAccounts",
-    "AsyncAuthGuard",
-    "oauth2_scheme",
-    "LangGraphImmutableContextGuard",
-    "AuthRouter",
-    "create_auth_router",
-    "PromptDefense",
-    "get_prompt_defense",
-    "RateLimiter",
-    "get_rate_limiter",
-]
+from importlib import import_module
+from typing import Any
+
+
+_EXPORT_MODULES = {
+    "SecurityManager": ".security",
+    "FAKE_HASH": ".security",
+    "JWT_SECRET_KEY": ".security",
+    "ALGORITHM": ".security",
+    "CaptchaGenerator": ".captcha",
+    "CaptchaRecord": ".captcha",
+    "UserRecord": ".models",
+    "UserStore": ".models",
+    "PresetAccounts": ".models",
+    "AsyncAuthGuard": ".middleware",
+    "oauth2_scheme": ".middleware",
+    "LangGraphImmutableContextGuard": ".graph_guard",
+    "AuthRouter": ".routes",
+    "create_auth_router": ".routes",
+    "PromptDefense": ".prompt_defense",
+    "get_prompt_defense": ".prompt_defense",
+    "RateLimiter": ".rate_limiter",
+    "get_rate_limiter": ".rate_limiter",
+}
+
+__all__ = list(_EXPORT_MODULES)
+
+
+def __getattr__(name: str) -> Any:
+    module_name = _EXPORT_MODULES.get(name)
+    if module_name is None:
+        raise AttributeError(f"module 'src.auth' has no attribute {name!r}")
+    value = getattr(import_module(module_name, __name__), name)
+    globals()[name] = value
+    return value

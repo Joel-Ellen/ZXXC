@@ -1,28 +1,93 @@
 # -*- coding: utf-8 -*-
 """
-核心密码学与安全配置组件
-=========================
-- Argon2id 高强度密码哈希 (memory=65536, time=3, parallelism=4)
-- JWT 双轨令牌 (Access Token 15min + Refresh Token 7day)
-- 等时退避计算 (防止用户名枚举计时攻击)
+Core password hashing and JWT token helpers.
+
+Prefers Argon2id when available and falls back to stdlib PBKDF2 so auth routes
+remain operational even in slim runtime environments.
 """
 
+from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
 import os
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Any
+from typing import Any, Dict
 
-from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError
 import jwt
 
-# Argon2id 配置: memory=65536 (64MB), time=3, parallelism=4
-ph = PasswordHasher(memory_cost=65536, time_cost=3, parallelism=4)
+from src.observability import incr_metric, log_event
 
-# 伪密码哈希密文 — 用于等时退避，防止用户名枚举
+try:
+    from argon2 import PasswordHasher  # type: ignore
+    from argon2.exceptions import VerifyMismatchError  # type: ignore
+
+    ARGON2_AVAILABLE = True
+except Exception:
+    ARGON2_AVAILABLE = False
+
+    class VerifyMismatchError(Exception):
+        """Compatibility fallback when argon2 is unavailable."""
+
+    class PasswordHasher:  # type: ignore[override]
+        def __init__(self, iterations: int = 390000):
+            self.iterations = iterations
+
+        @staticmethod
+        def _b64encode(raw: bytes) -> str:
+            return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+        @staticmethod
+        def _b64decode(text: str) -> bytes:
+            padding = "=" * (-len(text) % 4)
+            return base64.urlsafe_b64decode(text + padding)
+
+        def hash(self, password: str) -> str:
+            salt = secrets.token_bytes(16)
+            digest = hashlib.pbkdf2_hmac(
+                "sha256",
+                password.encode("utf-8"),
+                salt,
+                self.iterations,
+            )
+            return (
+                f"pbkdf2_sha256${self.iterations}$"
+                f"{self._b64encode(salt)}${self._b64encode(digest)}"
+            )
+
+        def verify(self, hashed_password: str, plain_password: str) -> bool:
+            if not hashed_password.startswith("pbkdf2_sha256$"):
+                raise VerifyMismatchError("unsupported hash format without argon2")
+            _, iterations_text, salt_text, digest_text = hashed_password.split("$", 3)
+            iterations = int(iterations_text)
+            salt = self._b64decode(salt_text)
+            expected = self._b64decode(digest_text)
+            actual = hashlib.pbkdf2_hmac(
+                "sha256",
+                plain_password.encode("utf-8"),
+                salt,
+                iterations,
+            )
+            if not hmac.compare_digest(actual, expected):
+                raise VerifyMismatchError("password mismatch")
+            return True
+
+
+ph = PasswordHasher(memory_cost=65536, time_cost=3, parallelism=4) if ARGON2_AVAILABLE else PasswordHasher()
 FAKE_HASH = ph.hash("stabled_dummy_password_for_constant_time")
 
-# JWT 配置
+if not ARGON2_AVAILABLE:
+    incr_metric("auth.hash_fallback_total", algorithm="pbkdf2_sha256")
+    log_event(
+        "auth.hash_fallback_enabled",
+        level="warning",
+        algorithm="pbkdf2_sha256",
+    )
+
+
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "prod_secret_sign_key_997126_edu_agent")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 15
@@ -30,20 +95,14 @@ REFRESH_TOKEN_EXPIRE_DAYS = 7
 
 
 class SecurityManager:
-    """密码哈希与 JWT 令牌管理。"""
-
-    # ------------------------------------------------------------------
-    # 密码哈希
-    # ------------------------------------------------------------------
+    """Password hashing and JWT token management."""
 
     @staticmethod
     def hash_password(password: str) -> str:
-        """对原始密码执行高强度单向哈希加盐 (Argon2id)。"""
         return ph.hash(password)
 
     @staticmethod
     def verify_password(plain_password: str, hashed_password: str) -> bool:
-        """验证明文密码与哈希密文是否对齐。"""
         try:
             return ph.verify(hashed_password, plain_password)
         except VerifyMismatchError:
@@ -51,45 +110,15 @@ class SecurityManager:
 
     @staticmethod
     def execute_constant_time_fallback() -> None:
-        """执行等时退避计算，抹平用户名不存在时的响应时差。
-
-        调用方式:
-            当用户登录时用户名不存在，调用此方法后再返回 401。
-            这样攻击者无法通过计时分析判断用户名是否有效。
-        """
         try:
             ph.verify(FAKE_HASH, "invalid_match_trigger")
         except VerifyMismatchError:
-            pass  # 预期行为
-
-    # ------------------------------------------------------------------
-    # JWT 令牌
-    # ------------------------------------------------------------------
+            pass
 
     @staticmethod
     def create_token_pair(user_id: str, role: str) -> Dict[str, str]:
-        """签发双轨安全令牌对 (Access + Refresh)。
-
-        Access Token:
-          - 短寿命 (默认 15min)
-          - 包含 role 和 type="access"
-          - 唯一 jti 用于黑名单注销
-
-        Refresh Token:
-          - 长寿命 (默认 7day)
-          - type="refresh"
-          - 唯一 jti 用于轮转检测
-
-        Args:
-            user_id: 用户唯一 ID。
-            role: 用户角色 (如 STUDENT / ADMIN)。
-
-        Returns:
-            {"access_token", "refresh_token", "access_jti", "refresh_jti"}
-        """
         now = datetime.now(timezone.utc)
 
-        # 1. Access Token
         access_jti = str(uuid.uuid4())
         access_expire = now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         access_payload = {
@@ -100,7 +129,6 @@ class SecurityManager:
             "type": "access",
         }
 
-        # 2. Refresh Token
         refresh_jti = str(uuid.uuid4())
         refresh_expire = now + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
         refresh_payload = {
@@ -119,15 +147,6 @@ class SecurityManager:
 
     @staticmethod
     def decode_token(token: str) -> Dict[str, Any]:
-        """Token 解签与有效期校验。
-
-        Returns:
-            Decoded payload dict.
-
-        Raises:
-            ValueError("TOKEN_EXPIRED"): 令牌已过期。
-            ValueError("TOKEN_INVALID"): 令牌无效（签名不匹配/格式错误）。
-        """
         try:
             return jwt.decode(token, JWT_SECRET_KEY, algorithms=[ALGORITHM])
         except jwt.ExpiredSignatureError:
