@@ -60,7 +60,7 @@ def generate_current_node_resources(
         for card_type in RESOURCE_CARD_ORDER:
             if not force and card_type in existing_types:
                 continue
-            content = runtime._generate_resource_content(target_node, card_type, difficulty)
+            content = runtime.generate_resource_content(target_node, card_type, difficulty)
             raw_card = ResourceCard(
                 resource_id=f"{target_node}_{card_type}_supp",
                 node_id=target_node,

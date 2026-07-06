@@ -13,7 +13,7 @@ def test_orchestrator_llm_failure_falls_back(monkeypatch):
     monkeypatch.setattr(src.llm, "LLMClientV2", raise_init, raising=False)
     runtime = OrchestrationRuntime()
     assert runtime.get_llm() is None
-    content = runtime._generate_resource_content("N01", "concept_map", 0.5)
+    content = runtime.generate_resource_content("N01", "concept_map", 0.5)
     assert "N01" in content
 
 
@@ -28,6 +28,6 @@ def test_resource_generation_timeout_falls_back(monkeypatch):
 
     runtime = OrchestrationRuntime()
     runtime._llm_client = SlowLLM()
-    content = runtime._generate_resource_content("N01", "concept_map", 0.5)
+    content = runtime.generate_resource_content("N01", "concept_map", 0.5)
     assert "N01" in content
     assert "late content" not in content

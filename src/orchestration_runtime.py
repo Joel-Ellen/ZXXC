@@ -58,7 +58,7 @@ class OrchestrationRuntime:
         self.profiler = ProfilerNode(seed=42)
         self.planner = PlannerNode()
         self.tutor = TutorAgentNode(llm_generator=llm)
-        self.mesh = ContentMeshNode(generate_fn=self._generate_resource_content)
+        self.mesh = ContentMeshNode(generate_fn=self.generate_resource_content)
         self.validator = ValidatorNode(nli_fn=llm.compute_nli_entailment if llm else None)
         self.assessment = AssessmentReporterNode(alpha=0.2)
 
@@ -202,7 +202,7 @@ class OrchestrationRuntime:
             candidates.append((provider, client))
         return candidates
 
-    def _generate_resource_content(self, node_id: str, card_type: str, difficulty: float) -> str:
+    def generate_resource_content(self, node_id: str, card_type: str, difficulty: float) -> str:
         candidates = self._candidate_llms()
         for provider_name, llm in candidates:
             for attempt in range(1, self._resource_llm_retries + 1):
