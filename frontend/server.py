@@ -3830,9 +3830,17 @@ COMPAT_INTERNAL_HEADERS = {
     "X-EduAgent-Canonical-Api": "/api/sessions",
 }
 
+TUTOR_CANONICAL_API = "/api/sessions/{session_id}/tutor"
+
+TUTOR_COMPAT_HEADERS = {
+    **COMPAT_INTERNAL_HEADERS,
+    "X-EduAgent-Canonical-Api": TUTOR_CANONICAL_API,
+}
+
 SESSION_TUTOR_ALIAS_HEADERS = {
+    "X-EduAgent-Api-Surface": "alias/bridge",
     "X-EduAgent-Api-Status": "deprecated",
-    "X-EduAgent-Canonical-Api": "/api/sessions/{session_id}/tutor",
+    "X-EduAgent-Canonical-Api": TUTOR_CANONICAL_API,
 }
 
 
@@ -3842,6 +3850,26 @@ def _compat_json_response(payload: Dict[str, Any], status_code: int = 200) -> JS
 
 def _compat_sse_response(generator: Any) -> EventSourceResponse:
     return EventSourceResponse(generator, headers=COMPAT_INTERNAL_HEADERS)
+
+
+def _session_tutor_response(
+    user_id: str,
+    course_id: str,
+    body: Dict[str, Any],
+    accept_header: str = "",
+    headers: Optional[Dict[str, str]] = None,
+) -> JSONResponse | EventSourceResponse:
+    question = body.get("query", body.get("question", ""))
+    wants_stream = bool(body.get("stream")) or "text/event-stream" in accept_header.lower()
+    if wants_stream:
+        return EventSourceResponse(
+            tutor_service.stream_tutor(user_id, course_id, question),
+            headers=headers,
+        )
+    return JSONResponse(
+        tutor_service.run_tutor(user_id, course_id, question),
+        headers=headers,
+    )
 
 
 async def api_reset(request: Request) -> JSONResponse:
@@ -3929,21 +3957,25 @@ async def api_compat_stream_pipeline(request: Request) -> EventSourceResponse:
 async def api_compat_ask_tutor(request: Request) -> JSONResponse:
     # Compat/internal bridge. Official tutor traffic should use /api/sessions/{session_id}/tutor.
     body = await request.json()
-    return _compat_json_response(tutor_service.run_tutor(
+    body = {**body, "stream": False}
+    return _session_tutor_response(
         body.get("user_id", "demo_user"),
         body.get("course_id", "data_structures"),
-        body.get("query", body.get("question", "")),
-    ))
+        body,
+        headers=TUTOR_COMPAT_HEADERS,
+    )
 
 
 async def api_compat_ask_tutor_stream(request: Request) -> EventSourceResponse:
     # Compat/internal bridge. Official tutor streaming should use /api/sessions/{session_id}/tutor with stream=true.
     body = await request.json()
-    return _compat_sse_response(tutor_service.stream_tutor(
+    body = {**body, "stream": True}
+    return _session_tutor_response(
         body.get("user_id", "demo_user"),
         body.get("course_id", "data_structures"),
-        body.get("question", body.get("query", "")),
-    ))
+        body,
+        headers=TUTOR_COMPAT_HEADERS,
+    )
 
 
 async def api_compat_generate_node_resources(request: Request) -> JSONResponse:
@@ -3957,6 +3989,11 @@ async def api_compat_generate_node_resources(request: Request) -> JSONResponse:
     )
     status_code = int(result.pop("status_code", 200))
     return _compat_json_response(result, status_code=status_code)
+
+
+# Legacy import names are bridges too; only routes below define the supported HTTP surface.
+api_ask_tutor = api_compat_ask_tutor
+api_ask_tutor_stream = api_compat_ask_tutor_stream
 
 def _session_ids(session_id: str) -> tuple[str, str]:
     if ":" in session_id:
@@ -4013,20 +4050,18 @@ async def api_session_behavior(request: Request) -> JSONResponse:
 async def api_session_tutor(request: Request):
     user_id, course_id = _session_ids(request.path_params.get("session_id", ""))
     body = await request.json()
-    question = body.get("query", body.get("question", ""))
-    wants_stream = bool(body.get("stream")) or "text/event-stream" in request.headers.get("accept", "")
-    if wants_stream:
-        return EventSourceResponse(tutor_service.stream_tutor(user_id, course_id, question))
-    return JSONResponse(tutor_service.run_tutor(user_id, course_id, question))
+    return _session_tutor_response(user_id, course_id, body, request.headers.get("accept", ""))
 
 
 async def api_session_tutor_stream(request: Request) -> EventSourceResponse:
     # Short-term alias only; canonical streaming is /api/sessions/{session_id}/tutor.
     user_id, course_id = _session_ids(request.path_params.get("session_id", ""))
     body = await request.json()
-    question = body.get("question", body.get("query", ""))
-    return EventSourceResponse(
-        tutor_service.stream_tutor(user_id, course_id, question),
+    body = {**body, "stream": True}
+    return _session_tutor_response(
+        user_id,
+        course_id,
+        body,
         headers=SESSION_TUTOR_ALIAS_HEADERS,
     )
 

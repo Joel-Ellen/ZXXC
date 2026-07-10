@@ -37,17 +37,21 @@ def test_frontend_main_flow_does_not_call_compat_learning_api():
 def test_legacy_learning_routes_are_explicit_compat_bridges():
     text = SERVER.read_text(encoding="utf-8")
     assert "COMPAT_INTERNAL_HEADERS" in text
+    assert "TUTOR_COMPAT_HEADERS" in text
     assert 'Route("/api/state", api_compat_get_state' in text
     assert 'Route("/api/pipeline/step", api_compat_run_pipeline_step' in text
     assert 'Route("/api/pipeline/stream", api_compat_stream_pipeline' in text
     assert 'Route("/api/tutor/ask", api_compat_ask_tutor' in text
     assert 'Route("/api/tutor/ask-stream", api_compat_ask_tutor_stream' in text
     assert 'Route("/api/resources/generate-node", api_compat_generate_node_resources' in text
+    assert "api_ask_tutor = api_compat_ask_tutor" in text
+    assert "api_ask_tutor_stream = api_compat_ask_tutor_stream" in text
 
 
 def test_session_tutor_stream_alias_is_short_term_deprecated():
     text = SERVER.read_text(encoding="utf-8")
+    assert 'TUTOR_CANONICAL_API = "/api/sessions/{session_id}/tutor"' in text
     assert "SESSION_TUTOR_ALIAS_HEADERS" in text
     assert 'Route("/api/sessions/{session_id}/tutor", api_session_tutor' in text
     assert 'Route("/api/sessions/{session_id}/tutor-stream", api_session_tutor_stream' in text
-    assert '"X-EduAgent-Canonical-Api": "/api/sessions/{session_id}/tutor"' in text
+    assert '"X-EduAgent-Canonical-Api": TUTOR_CANONICAL_API' in text

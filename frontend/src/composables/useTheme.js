@@ -5,31 +5,62 @@ const VALID_THEMES = ["dark", "light"];
 const theme = ref("dark");
 let isThemeInitialized = false;
 
-function getInitialTheme() {
+function getStoredTheme() {
   if (typeof window === "undefined") {
-    return "dark";
+    return null;
   }
-  const stored = window.localStorage.getItem(STORAGE_KEY);
-  if (stored && VALID_THEMES.includes(stored)) {
-    return stored;
+
+  try {
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    if (stored && VALID_THEMES.includes(stored)) {
+      return stored;
+    }
+  } catch {
+    return null;
   }
-  if (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) {
-    return "light";
+
+  return null;
+}
+
+function getSystemTheme() {
+  if (typeof window !== "undefined" && window.matchMedia) {
+    return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
   }
+
   return "dark";
 }
 
+function normalizeTheme(next) {
+  return VALID_THEMES.includes(next) ? next : null;
+}
+
+function getInitialTheme() {
+  const stored = getStoredTheme();
+  if (stored) {
+    return stored;
+  }
+
+  return getSystemTheme();
+}
+
 function persistTheme(next) {
+  const normalized = normalizeTheme(next) || "dark";
+
   if (typeof document !== "undefined") {
-    document.documentElement.setAttribute("data-theme", next);
+    document.documentElement.setAttribute("data-theme", normalized);
+    document.documentElement.style.removeProperty("color-scheme");
   }
 
   if (typeof window !== "undefined") {
-    window.localStorage.setItem(STORAGE_KEY, next);
+    try {
+      window.localStorage.setItem(STORAGE_KEY, normalized);
+    } catch {
+      // Storage can be unavailable in private or embedded browsing contexts.
+    }
   }
 }
 
-function ensureThemeInitialized() {
+export function initTheme() {
   if (isThemeInitialized) {
     return;
   }
@@ -45,19 +76,20 @@ function ensureThemeInitialized() {
 }
 
 export function useTheme() {
-  ensureThemeInitialized();
+  initTheme();
 
   function applyTheme(next) {
-    if (!VALID_THEMES.includes(next)) {
+    const normalized = normalizeTheme(next);
+    if (!normalized) {
       return;
     }
 
-    if (theme.value === next) {
-      persistTheme(next);
+    if (theme.value === normalized) {
+      persistTheme(normalized);
       return;
     }
 
-    theme.value = next;
+    theme.value = normalized;
   }
 
   function toggleTheme() {

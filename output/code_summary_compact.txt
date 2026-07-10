@@ -1,0 +1,532 @@
+﻿
+### src\observability.py
+CLASS InMemoryMetrics bases=  methods= __init__,incr,observe,counter_value,snapshot,reset
+FUNCS configure_logging, new_request_id, get_request_context, get_request_id, bind_context, _normalize_value, log_event, _metric_key, incr_metric, observe_metric, metrics_snapshot, reset_metrics, timed_operation
+
+### src\orchestration.py
+Deprecated orchestration compatibility facade for core exports.
+FUNCS __getattr__
+
+### src\orchestration_core.py
+LangGraph 全局网络编排 — 多智能体协同系统主控图
+CLASS EduAgentGraph bases=  methods= __init__,graph,inject_llm,build,_route_decision,_should_terminate,_evaluator_node_wrapper,_profiler_node_wrapper,_planner_node_wrapper,_content_mesh_node_wrapper,_validator_node_wrapper,_tutor_node_wrapper
+CLASS ColdStartOrchestrator bases=  methods= __init__,is_complete,process_interaction,finalize
+CLASS LearningStepResult bases=  methods= 
+FUNCS run_official_learning_step
+
+### src\orchestration_runtime.py
+Stable orchestration runtime for the official learning flow.
+CLASS RuntimeSession bases=  methods= 
+CLASS OrchestrationRuntime bases=  methods= __init__,_build_provider_order,_provider_has_credentials,_get_or_create_llm_for_provider,get_llm,_read_float_env,_read_int_env,get_graph,peek_session,get_session,replace_session_state,reset_session
+FUNCS get_runtime
+
+### src\adapters\domain_to_response.py
+
+### src\adapters\state_to_domain.py
+
+### src\adapters\__init__.py
+
+### src\agents\agent_factory.py
+Shared helpers for constructing LLM-enabled agents consistently.
+FUNCS get_default_llm, build_agent
+
+### src\agents\assessment_node.py
+Assessment reporter node.
+CLASS AssessmentInput bases= BaseModel methods= 
+CLASS AssessmentOutput bases= BaseModel methods= 
+CLASS CapabilityRadar bases= BaseModel methods= to_list,from_list,compute_mean,describe
+CLASS HysteresisStrategyController bases=  methods= decide
+CLASS AssessmentReporterNode bases=  methods= __init__,t_low,t_high,__call__,execute_evaluation,_compute_dimension_scores,_update_boundary_ema,_generate_diagnostic_report,generate_llm_report,inject_llm
+FUNCS create_assessment_node
+
+### src\agents\base_agent.py
+BaseAgent — 多智能体基类（合并自 backend/）
+CLASS AgentMessage bases=  methods= 
+CLASS BaseAgentState bases=  methods= 
+CLASS BaseAgent bases= ABC methods= __init__,_log,update_shared_memory,read_shared_memory,read_shared_memory_sync,send_message,receive_message,register_handler,chat_llm,chat_llm_stream,set_progress,get_status
+
+### src\agents\coding_practice_agent.py
+Compatibility wrapper for the unified resource generation agent.
+
+### src\agents\content_mesh_node.py
+Content Mesh Node — 资源生成与调度网络
+CLASS QueueClass bases= str,Enum methods= 
+CLASS CardType bases= str,Enum methods= 
+CLASS GenerationStatus bases= str,Enum methods= 
+CLASS ShadowStatus bases= str,Enum methods= 
+CLASS WfqConfig bases= BaseModel methods= 
+CLASS ShadowPregenConfig bases= BaseModel methods= 
+CLASS MeshInput bases= BaseModel methods= 
+CLASS GenerationTask bases= BaseModel methods= 
+CLASS MeshOutput bases= BaseModel methods= 
+CLASS WFQScheduler bases=  methods= __init__,config,enqueue,dequeue,complete_task,abort_tasks_by_node,get_queue_sizes
+CLASS MarkovShadowPregen bases=  methods= __init__,config,predict_top1_target,cache_put,cache_get,abort_shadow,get_cache_stats
+CLASS ContentMeshNode bases=  methods= __init__,__call__,mesh,set_adjacency,_default_generate
+FUNCS create_content_mesh_node
+
+### src\agents\evaluator_node.py
+Evaluator Node — LangGraph 核心评估控制节点
+CLASS AnomalyType bases= str,Enum methods= 
+CLASS ReplanDecision bases= str,Enum methods= 
+CLASS BehaviorVector bases= BaseModel methods= ratio_must_be_non_negative
+CLASS BehaviorAnomaly bases= BaseModel methods= 
+CLASS CleanedBehavior bases= BaseModel methods= 
+CLASS PIDReplanGate bases= BaseModel methods= record_control_value,reset
+CLASS EvaluatorInput bases= BaseModel methods= 
+CLASS GateConfig bases= BaseModel methods= 
+CLASS EvaluatorOutput bases= BaseModel methods= 
+CLASS BehaviorCleaner bases=  methods= _sigmoid,clean
+CLASS PIDReplanController bases=  methods= __init__,evaluate,reset_gate,_ensure_gate,get_gate,get_pid
+CLASS EvaluatorNode bases=  methods= __init__,controller,cleaner,__call__,evaluate,_classify_errors,_update_error_distribution
+FUNCS create_evaluator_node
+
+### src\agents\knowledge_analysis_agent.py
+Knowledge analysis agent.
+CLASS KnowledgeAnalysisAgent bases= BaseAgent methods= __init__,execute,_extract_json
+
+### src\agents\mindmap_generator_agent.py
+Compatibility wrapper for the unified resource generation agent.
+
+### src\agents\planner_node.py
+Path Planner Node — LangGraph 图谱寻路大脑
+CLASS PlannerInput bases= BaseModel methods= 
+CLASS PathEdgeInfo bases= BaseModel methods= 
+CLASS PlannerOutput bases= BaseModel methods= 
+CLASS DAGDijkstraSolver bases=  methods= __init__,build_graph,compute_topological_order,edge_cost,solve,node_count,edge_count
+CLASS PlannerNode bases=  methods= __init__,solver,__call__,plan
+FUNCS create_planner_node
+
+### src\agents\ppt_generator_agent.py
+Compatibility wrapper for the unified resource generation agent.
+
+### src\agents\profiler_node.py
+Profiler Node — LangGraph 画像演进大脑
+CLASS ProfilerInput bases= BaseModel methods= 
+CLASS StyleProfileResult bases= BaseModel methods= 
+CLASS ForgettingCurveResult bases= BaseModel methods= 
+CLASS ProfilerOutput bases= BaseModel methods= 
+CLASS ThompsonSampler bases=  methods= __init__,set_params,get_params,load_from_cognitive_distribution,save_to_cognitive_distribution,sample,sample_excluding,update,get_expected_rewards
+CLASS EbbinghausForgettingEngine bases=  methods= __init__,get_strength,set_strength,apply_decay,update_strength
+CLASS ProfilerNode bases=  methods= __init__,mab,forgetting,__call__,profile
+FUNCS create_profiler_node
+
+### src\agents\prompt_adapters.py
+Prompt-backed adapters for complex legacy agent modules.
+FUNCS run_tutor_mode_with_llm, run_assessment_report_with_llm, patch_tutor_node_class, patch_assessment_node_class
+
+### src\agents\prompt_registry.py
+Centralized prompt registry for all LLM-driven agents.
+CLASS PromptDefinition bases=  methods= build_user_prompt
+FUNCS _to_json, _build_student_profile_extract, _build_student_profile_converse, _build_knowledge_analysis, _build_learning_path, _build_resource_prompt, _build_resource_ppt, _build_resource_quiz, _build_resource_mindmap, _build_resource_coding, _build_resource_video, _build_tutor_prompt, _build_assessment_report, get_prompt_definition, get_system_prompt, build_user_prompt
+
+### src\agents\question_generator_agent.py
+Compatibility wrapper for the unified resource generation agent.
+
+### src\agents\resource_generation_agent.py
+Unified resource generation agent.
+CLASS ResourceGenerationAgent bases= BaseAgent methods= __init__,execute,_parse_result
+CLASS PPTGeneratorAgent bases= ResourceGenerationAgent methods= __init__
+CLASS QuestionGeneratorAgent bases= ResourceGenerationAgent methods= __init__
+CLASS MindMapGeneratorAgent bases= ResourceGenerationAgent methods= __init__
+CLASS CodingPracticeAgent bases= ResourceGenerationAgent methods= __init__
+CLASS VideoScriptAgent bases= ResourceGenerationAgent methods= __init__
+
+### src\agents\resource_planner_agent.py
+Learning path planner agent.
+CLASS ResourcePlannerAgent bases= BaseAgent methods= __init__,execute,_extract_json
+
+### src\agents\student_profiler_agent.py
+Student profiler agent.
+CLASS StudentProfilerAgent bases= BaseAgent methods= __init__,execute,_extract_profile,_generate_next_question,_extract_json
+
+### src\agents\tutor_node.py
+Tutor agent node.
+CLASS TutoringMode bases= str,Enum methods= 
+CLASS TutorInput bases= BaseModel methods= 
+CLASS TutorOutput bases= BaseModel methods= 
+CLASS VideoHydrationCard bases= BaseModel methods= 
+CLASS TutorResponseCard bases= BaseModel methods= 
+CLASS MermaidSyntaxGuard bases=  methods= validate_and_repair
+CLASS TutorAgentNode bases=  methods= __init__,__call__,_extract_query,_extract_current_node,_retrieve_parent_context,_generate_text_explanation,_generate_mermaid,_template_mermaid,_search_video_slices,tutor_with_mode
+FUNCS create_tutor_node
+
+### src\agents\validator_node.py
+Validator Node — 双极防幻觉校验链
+CLASS ValidationPhase bases= str,Enum methods= 
+CLASS NLIEntailment bases= str,Enum methods= 
+CLASS Pole1Result bases= BaseModel methods= 
+CLASS SlidingWindowChunk bases= BaseModel methods= 
+CLASS Pole2ChunkResult bases= BaseModel methods= 
+CLASS Pole2Result bases= BaseModel methods= 
+CLASS ValidatorInput bases= BaseModel methods= 
+CLASS ValidatorOutput bases= BaseModel methods= 
+CLASS EntityExtractor bases=  methods= extract_formulas,extract_code_blocks,check_formula_syntax,check_python_ast
+CLASS SlidingWindowSplitter bases=  methods= __init__,split
+CLASS Pole1Gate bases=  methods= validate
+CLASS Pole2Gate bases=  methods= validate,refine,_compute_entailment,_find_best_replacement
+CLASS ValidatorNode bases=  methods= __init__,__call__,validate
+FUNCS create_validator_node
+
+### src\agents\video_script_agent.py
+Compatibility wrapper for the unified resource generation agent.
+
+### src\agents\__init__.py
+EduAgent agent package exports.
+FUNCS __getattr__
+
+### src\api_models\profile_response.py
+
+### src\api_models\resource_response.py
+
+### src\api_models\session_response.py
+
+### src\api_models\tutor_response.py
+
+### src\api_models\__init__.py
+
+### src\application\assessment_service.py
+
+### src\application\profile_service.py
+
+### src\application\resource_service.py
+Resource lookup and regeneration for the current learning node.
+FUNCS generate_current_node_resources
+
+### src\application\session_service.py
+Session creation, restoration, and official learning advancement.
+FUNCS load_session, restore_or_create_session, create_session, restore_session, reset_learning_session, get_learning_state, init_path, advance_session, request_replan
+
+### src\application\tutor_service.py
+Tutor question answering, with streaming and non-streaming entry points.
+FUNCS _read_int_env, _read_float_env, _tutor_timeout_sec, _fallback_tutor_response, _blocked_tutor_payload, _validation_issue_codes, run_tutor, async stream_tutor
+
+### src\application\_common.py
+
+### src\application\__init__.py
+
+### src\auth\captcha.py
+验证码生成器 — SVG 数学公式验证码
+CLASS CaptchaRecord bases=  methods= is_expired
+CLASS CaptchaGenerator bases=  methods= __init__,generate,verify,_render_svg,_maybe_cleanup
+
+### src\auth\graph_guard.py
+LangGraph 运行时不可变上下文防护节点
+CLASS LangGraphImmutableContextGuard bases=  methods= create_secure_node_wrapper,wrap_all_nodes
+
+### src\auth\middleware.py
+异步网关拦截与越权阻断中间件
+CLASS AsyncAuthGuard bases=  methods= __init__,get_current_secure_user,handle_token_rotation,revoke_token
+
+### src\auth\models.py
+用户数据模型与持久化存储
+CLASS UserRecord bases= BaseModel methods= email_must_contain_at,to_safe_dict
+CLASS UserStore bases=  methods= __init__,create_user,get_by_id,get_by_email,verify_login,update_password,list_users,count,_load,_save
+CLASS PresetAccounts bases=  methods= ensure_presets,ensure_presets_db
+
+### src\auth\prompt_defense.py
+PromptDefense — Prompt 注入攻击防御
+CLASS PromptDefense bases=  methods= __init__,detect_injection,sanitize
+FUNCS get_prompt_defense
+
+### src\auth\rate_limiter.py
+RateLimiter — 内存滑动窗口限流器
+CLASS RateLimiter bases=  methods= __init__,is_allowed,reset
+FUNCS get_rate_limiter
+
+### src\auth\routes.py
+认证 API 路由 — 注册 / 登录 / 验证码 / 令牌刷新
+CLASS RegisterRequest bases= BaseModel methods= validate_email
+CLASS LoginRequest bases= BaseModel methods= 
+CLASS TokenResponse bases= BaseModel methods= 
+CLASS RefreshRequest bases= BaseModel methods= 
+CLASS MessageResponse bases= BaseModel methods= 
+CLASS AuthRouter bases=  methods= __init__,build
+FUNCS create_auth_router
+
+### src\auth\security.py
+Core password hashing and JWT token helpers.
+CLASS SecurityManager bases=  methods= hash_password,verify_password,execute_constant_time_fallback,create_token_pair,decode_token
+
+### src\auth\__init__.py
+EduAgent auth package exports.
+FUNCS __getattr__
+
+### src\contracts\resource_contract.py
+
+### src\contracts\__init__.py
+
+### src\courses\models.py
+课程数据模型
+CLASS CourseRecord bases= BaseModel methods= to_api_dict
+
+### src\courses\seed.py
+预设课程种子数据
+
+### src\courses\store.py
+课程持久化存储
+CLASS CourseStore bases=  methods= __init__,list_courses,get_by_id,count,add_course,_load,_save,_ensure_seed
+
+### src\courses\__init__.py
+EduAgent Course Management Layer
+
+### src\database\async_session.py
+Async Session — 异步数据库会话管理
+FUNCS get_engine, get_async_session, async init_db, async get_db
+
+### src\database\connection.py
+PostgreSQL 数据库连接管理
+CLASS Database bases=  methods= __init__,_get_conn,conn,execute,commit,_ensure_init,_migrate_users,_migrate_enrollments
+CLASS _CursorWrapper bases=  methods= __init__,fetchone,fetchall
+
+### src\database\course_repo.py
+课程目录仓库
+CLASS CourseRepo bases=  methods= list_courses,get_by_id,upsert_course,count,_hydrate
+
+### src\database\enrollment_repo.py
+选课数据仓库
+CLASS EnrollmentRepo bases=  methods= get_user_enrollments,enroll,switch_course,update_progress
+
+### src\database\evaluation_repo.py
+Evaluation Repo — 评估报告异步持久化
+CLASS EvaluationRepo bases=  methods= __init__,create,get_by_user,get_latest
+
+### src\database\models_sqlalchemy.py
+SQLAlchemy Models — 异步数据库模型（合并自 backend/）
+CLASS Base bases= AsyncAttrs,DeclarativeBase methods= 
+CLASS ResourceType bases= str,enum.Enum methods= 
+CLASS DifficultyLevel bases= str,enum.Enum methods= 
+CLASS LearningStage bases= str,enum.Enum methods= 
+CLASS TaskStatus bases= str,enum.Enum methods= 
+CLASS User bases= Base methods= 
+CLASS StudentProfile bases= Base methods= 
+CLASS LearningSessionModel bases= Base methods= 
+CLASS SessionSnapshotModel bases= Base methods= 
+CLASS LearningPath bases= Base methods= 
+CLASS LearningTask bases= Base methods= 
+CLASS GeneratedResource bases= Base methods= 
+CLASS ConversationHistory bases= Base methods= 
+CLASS QuizRecord bases= Base methods= 
+CLASS EvaluationReport bases= Base methods= 
+CLASS KnowledgePoint bases= Base methods= 
+CLASS AgentTaskLog bases= Base methods= 
+
+### src\database\profile_repo.py
+Profile Repo — 学生画像异步持久化
+CLASS ProfileRepo bases=  methods= __init__,get_by_user_id,create_or_update,update_dimension
+
+### src\database\redis_client.py
+Redis 会话与流控客户端
+FUNCS get_redis, blacklist_token, is_blacklisted, mark_rotated, is_rotated, store_refresh_token, revoke_all_user_sessions
+
+### src\database\resource_repo.py
+Resource Repo — 生成资源异步持久化
+CLASS ResourceRepo bases=  methods= __init__,create,get_by_user,get_by_id
+
+### src\database\session_repo.py
+
+### src\database\session_snapshot_repo.py
+
+### src\database\state_repo.py
+学习状态数据仓库
+CLASS StateRepo bases=  methods= load_state,save_state,delete_state
+
+### src\database\user_course_profile_repo.py
+课程级画像与问卷仓库
+CLASS UserCourseProfileRepo bases=  methods= get_by_user_course,upsert
+
+### src\database\user_profile_repo.py
+用户资料仓库
+CLASS UserProfileRepo bases=  methods= get_by_user_id,upsert
+
+### src\database\user_repo.py
+用户数据仓库
+CLASS UserRepo bases=  methods= get_by_id,get_by_email,list_users,count,create_user,verify_login,update_last_login,update_password,ensure_presets
+
+### src\database\__init__.py
+EduAgent Database Layer
+
+### src\domain\assessment.py
+
+### src\domain\path.py
+
+### src\domain\profile.py
+
+### src\domain\resource.py
+
+### src\domain\session.py
+
+### src\domain\__init__.py
+
+### src\graph\knowledge_graph_manager.py
+KnowledgeGraphManager — 知识图谱统一管理层
+CLASS KnowledgeGraphManager bases=  methods= __init__,is_neo4j_available,get_all_nodes,get_all_edges,get_node_by_id,get_node_title,get_knowledge_mastery_map,get_node_id_to_title_map,create_path_planner,_try_connect_neo4j,_seed_neo4j,seed_course
+FUNCS get_kg_manager
+
+### src\graph\neo4j_client.py
+Neo4jClient — 知识图谱 CRUD 与拓扑数据查询引擎
+CLASS Neo4jConfig bases= BaseModel methods= 
+CLASS QueryResult bases= BaseModel methods= 
+CLASS Neo4jClient bases=  methods= __init__,config,connect,close,is_connected,__enter__,__exit__,_ensure_driver,execute_read,execute_write,create_knowledge_node,create_knowledge_nodes_batch
+
+### src\graph\__init__.py
+EduAgent Graph Layer
+FUNCS __getattr__
+
+### src\infrastructure\cold_start.py
+冷启动交互辅助组件 (辅助算法三扩展)
+CLASS ColdStartPhase bases= str,Enum methods= 
+CLASS BackgroundField bases= str,Enum methods= 
+CLASS EducationLevel bases= str,Enum methods= 
+CLASS MotivationType bases= str,Enum methods= 
+CLASS SituationProbe bases= BaseModel methods= 
+CLASS DimensionStatus bases= BaseModel methods= 
+CLASS ColdStartState bases= BaseModel methods= mark_dimension_collected,all_dimensions_collected,missing_dimensions,increment_epoch,should_fuse
+CLASS BayesianPriorFusion bases=  methods= fuse_cognitive_style,fuse_motivation,fuse_time_budget,infer_knowledge_categories,execute_full_fusion
+CLASS ProbeFactory bases=  methods= create_probe
+CLASS ColdStartEngine bases=  methods= __init__,initialize,get_next_probe,process_response,execute_fusion,apply_to_agent_state,_phase_to_dimension,_get_next_phase
+FUNCS handle_cold_start_interaction
+
+### src\infrastructure\document_chunker.py
+数据治理辅助组件一：Layout-Aware 版面感知动态语义切片引擎
+CLASS ChunkStrategy bases= str,Enum methods= 
+CLASS AtomicBlock bases= BaseModel methods= 
+CLASS ChunkConfig bases= BaseModel methods= 
+CLASS SliceMetadata bases= BaseModel methods= 
+CLASS ChunkResult bases= BaseModel methods= 
+CLASS LayoutParser bases=  methods= __init__,parse,_extract_pattern,_reconstruct_ordered_blocks,_estimate_tokens
+CLASS SemanticChunker bases=  methods= __init__,config,chunk,_split_text_by_sentence_boundary,_build_parent,_extract_heading_hierarchy
+CLASS DocumentIngestionPipeline bases=  methods= __init__,ingest,chunker
+
+### src\infrastructure\graph_builder.py
+数据治理辅助组件二：知识图谱构建器 (Graph Builder)
+CLASS GraphBuildConfig bases= BaseModel methods= 
+CLASS SCCDetectionResult bases= BaseModel methods= 
+CLASS TransitiveReductionResult bases= BaseModel methods= 
+CLASS GraphBuildResult bases= BaseModel methods= 
+CLASS TarjanSCC bases=  methods= __init__,find_sccs,_strongconnect,has_cycle,get_cycle_nodes
+CLASS TransitiveReducer bases=  methods= __init__,reduce,_has_alternative_path
+CLASS GraphBuilder bases=  methods= __init__,config,build,_build_adjacency,_build_weighted_adjacency,_detect_and_resolve_cycles,validate_dag,load_and_validate
+
+### src\infrastructure\path_planner.py
+辅助算法三：基于拓扑排序与最短路径的知识图谱寻路引擎 (Path Planner)
+CLASS PathPlanStrategy bases= str,Enum methods= 
+CLASS KnowledgeNode bases= BaseModel methods= 
+CLASS KnowledgeEdge bases= BaseModel methods= 
+CLASS PlanContext bases= BaseModel methods= 
+CLASS PathPlanResult bases= BaseModel methods= 
+CLASS ReplanTrigger bases= BaseModel methods= 
+CLASS PathPlanner bases=  methods= __init__,_load_nodes,_load_edges,add_node,add_edge,_invalidate_cache,compute_topological_order,get_topo_rank,_dag_sssp,_make_weight_fn,_prune_mastered_nodes,_reconstruct_path
+
+### src\infrastructure\pid_controller.py
+辅助算法一：PID 控制论驱动的难度与步长自适应调节器 (PID Controller)
+CLASS PIDConfig bases= BaseModel methods= clamp_must_exceed_output_range
+CLASS PIDStepInput bases= BaseModel methods= 
+CLASS PIDStepResult bases= BaseModel methods= 
+CLASS PIDState bases=  methods= to_dict,from_dict
+CLASS PIDController bases=  methods= __init__,config,step,_compute_adaptive_gains,_compute_integral_term,_compute_derivative_term,_evaluate_intervention,evaluate_window_intervention,_clamp,reset_node,reset_all,get_state
+FUNCS sync_pid_state_to_agent_state, restore_pid_state_from_agent_state
+
+### src\infrastructure\__init__.py
+EduAgent Infrastructure Layer
+
+### src\llm\client.py
+LLMClient — 统一大模型接入层
+CLASS Provider bases= str,Enum methods= 
+CLASS LLMConfig bases=  methods= 
+CLASS LLMClient bases=  methods= __init__,config,chat,_chat_dashscope,_chat_spark,generate_content,generate_academic_explanation,generate_mermaid_graph,compute_nli_entailment
+FUNCS create_llm_client, create_llm_client_from_env
+
+### src\llm\client_v2.py
+LLMClientV2 — 统一大模型客户端 v2（合并版）
+CLASS Provider bases= str,Enum methods= 
+CLASS LLMClientV2 bases=  methods= __init__,has_input_limit,_init_client,chat,_single_chat,_chat_spark_http,_map_reduce_chat,_build_synthesis_prompt,chat_stream,extract_json,generate_content,generate_academic_explanation
+FUNCS create_llm_client_v2, create_llm_client_v2_from_env
+
+### src\llm\content_filter.py
+ContentFilter — 内容安全过滤
+CLASS ContentFilter bases=  methods= check_content,sanitize
+
+### src\llm\hallucination_checker.py
+HallucinationChecker — 防幻觉自洽性校验
+CLASS HallucinationChecker bases=  methods= __init__,verify_factual_claims
+
+### src\llm\input_manager.py
+InputManager — 上下文窗口溢出管理
+CLASS InputManager bases=  methods= __init__,check_and_plan,_build_map_reduce_batches,_build_smart_truncate,_build_sliding_window,_semantic_chunk,_force_split,_chop_by_chars,_sliding_window_chunk,_truncate_to_tokens
+
+### src\llm\token_estimator.py
+TokenEstimator — 轻量级 Token 估算器
+CLASS TokenEstimator bases=  methods= estimate,estimate_messages,estimate_system_overhead
+
+### src\llm\_legacy_client.py
+LLMClient — 统一大模型接入层
+CLASS Provider bases= str,Enum methods= 
+CLASS LLMConfig bases=  methods= 
+CLASS LLMClient bases=  methods= __init__,config,chat,_chat_dashscope,_chat_spark,generate_content,generate_academic_explanation,generate_mermaid_graph,compute_nli_entailment
+FUNCS create_llm_client, create_llm_client_from_env
+
+### src\llm\__init__.py
+EduAgent LLM package exports.
+FUNCS __getattr__
+
+### src\routes\content_normalizer.py
+Content Normalizer — Agent 输出规范化
+CLASS ContentFormat bases= str,Enum methods= 
+FUNCS normalize_agent_output, build_markdown_response, build_mindmap_response, build_quiz_response, build_learning_path_response, build_tutoring_response, build_profile_response, build_evaluation_response, build_resource_contract_response
+
+### src\routes\new_api_routes.py
+Legacy/internal API routes with unified agent creation.
+FUNCS build_health_response, async api_health, async api_profile_build, async api_profile_me, async api_generate_learning_path, _resource_agent_map, _resource_normalizer_name, async api_generate_resource, async api_generate_all_resources, async api_generate_evaluation, async api_agents_status, async api_knowledge_search, async api_knowledge_stats
+
+### src\routes\__init__.py
+EduAgent Routes Layer
+
+### src\state\agent_state.py
+AgentState — LangGraph 全局上下文强类型定义
+CLASS CognitiveStyleDistribution bases= BaseModel methods= to_dict,compute_means
+CLASS StaticProfile bases= BaseModel methods= check_motivation
+CLASS KnowledgeMasteryRecord bases= BaseModel methods= 
+CLASS ErrorTypeDistribution bases= BaseModel methods= normalize
+CLASS PIDErrorRecord bases= BaseModel methods= 
+CLASS DynamicProfile bases= BaseModel methods= 
+CLASS LatestBehavior bases= BaseModel methods= 
+CLASS ResourceCard bases= BaseModel methods= 
+CLASS AgentFeedbackItem bases= BaseModel methods= 
+CLASS AgentState bases= BaseModel methods= increment_epoch,record_error,is_cold_start,trigger_replan,clear_replan,get_next_node
+
+### src\state\__init__.py
+EduAgent State Layer
+
+### src\validation\input_guard.py
+
+### src\validation\output_guard.py
+
+### src\validation\pipeline.py
+
+### src\validation\result.py
+
+### src\validation\__init__.py
+
+### src\vector\elasticsearch_knowledge_base.py
+Elasticsearch-based knowledge base ingestion and hybrid retrieval.
+CLASS ElasticsearchKnowledgeBaseConfig bases= BaseModel methods= _validate_headers
+CLASS KnowledgeBaseChunk bases= BaseModel methods= 
+CLASS HashingTextEmbedder bases=  methods= __init__,dims,embed,embed_batch,_tokens
+CLASS SentenceTransformerEmbedder bases=  methods= __init__,model_name,dims,embed,embed_batch
+CLASS _PhysicalSection bases=  methods= 
+CLASS _HeaderSplitDocument bases=  methods= 
+CLASS MarkdownKnowledgeBaseChunker bases=  methods= __init__,config,chunk_markdown,_build_header_splitter,_split_by_headers,_fallback_split_by_headers,_section_has_meaningful_body,_updated_heading_metadata,_split_section_with_protection,_adjust_split_end,_adjust_split_start,_prefer_natural_boundary
+CLASS ElasticsearchKnowledgeBaseClient bases=  methods= __init__,config,connect,is_connected,close,set_embedding_function,create_index,bulk_index_chunks,hybrid_search,hybrid_search_client_rrf,build_rrf_search_body,_build_index_settings
+CLASS ElasticsearchKnowledgeBasePipeline bases=  methods= __init__,chunker,ingest_markdown_file,_derive_document_id
+
+### src\vector\milvus_client.py
+MilvusClient — Parent-Child 双层向量检索引擎
+CLASS MilvusConfig bases= BaseModel methods= 
+CLASS ParentChunk bases= BaseModel methods= 
+CLASS ChildChunk bases= BaseModel methods= 
+CLASS SearchResult bases= BaseModel methods= 
+CLASS ChunkSearchResult bases= BaseModel methods= 
+CLASS MilvusClient bases=  methods= __init__,config,connect,disconnect,is_connected,_ensure_connected,set_embedding_function,embed_text,embed_texts,create_collections,create_indexes,load_collections
+
+### src\vector\__init__.py
+EduAgent Vector Layer

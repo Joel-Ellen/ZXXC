@@ -1,0 +1,178 @@
+﻿
+### App.vue
+size 174 functions []
+uses RouterView
+
+### components\AgentFeedbackPanel.vue
+size 4760 functions ['statusClass', 'structuredEntries']
+uses MarkdownContent
+
+### components\AuroraBackground.vue
+size 4965 functions []
+
+### components\AuthView.vue
+size 7490 functions ['fetchCaptcha', 'onSubmit']
+emits [('login', ''), ('register', ''), ('go-home', '')]
+
+### components\brand\BrandCTASection.vue
+size 2309 functions []
+uses RouterLink
+
+### components\brand\BrandHero.vue
+size 5596 functions []
+uses RouterLink
+
+### components\brand\BrandTopNav.vue
+size 3004 functions []
+uses RouterLink
+
+### components\ChatArea.vue
+size 14198 functions ['submit', 'sendPrompt', 'handleScroll', 'shouldAutoScroll', 'isNearBottom', 'scrollToBottom', 'forwardWheelToMessages']
+emits [('send', ''), ('submit-probe', '')]
+uses MarkdownContent, ProbeDeck, StreamText
+
+### components\CourseCatalogView.vue
+size 5309 functions []
+emits [('back', ''), ('update-search', ''), ('update-category', ''), ('select-course', '')]
+
+### components\CourseManagementView.vue
+size 9974 functions ['requestDelete', 'confirmDelete']
+emits [('open-catalog', ''), ('open-settings', ''), ('enter-course', ''), ('delete-course', '')]
+
+### components\CourseSelectionView.vue
+size 7961 functions ['onSearchInput', 'isEnrolled', 'selectCourse']
+emits [('select', ''), ('go-home', '')]
+
+### components\CourseSurveyView.vue
+size 12317 functions ['draftAnswerFor', 'multiSelected', 'hasMultiAnswer', 'setAnswer', 'toggleMultiChoice', 'pickAndAdvance', 'advanceStep', 'skipStep', 'formatAnswer']
+emits [('update-draft', ''), ('submit', ''), ('cancel', '')]
+
+### components\FloatingChatTray.vue
+size 10814 functions ['openTray', 'closeTray', 'toggleMinimize', 'startDrag', 'onDrag', 'stopDrag', 'startResize', 'onResize', 'stopResize']
+emits [('send', ''), ('submit-probe', '')]
+uses ChatArea, Teleport
+
+### components\icons\IconChat.vue
+size 419 functions []
+
+### components\icons\IconCheck.vue
+size 379 functions []
+
+### components\icons\IconDoc.vue
+size 584 functions []
+
+### components\icons\IconExpand.vue
+size 510 functions []
+
+### components\icons\IconLock.vue
+size 445 functions []
+
+### components\icons\IconMinimize.vue
+size 421 functions []
+
+### components\icons\IconPin.vue
+size 482 functions []
+
+### components\icons\IconQuiz.vue
+size 480 functions []
+
+### components\icons\IconRadar.vue
+size 528 functions []
+
+### components\icons\IconSettings.vue
+size 1186 functions []
+
+### components\icons\IconTree.vue
+size 610 functions []
+
+### components\KnowledgeTree.vue
+size 6404 functions ['isLocked', 'statusChipLabel', 'statusChipClass', 'buttonClass']
+emits [('select', '')]
+uses IconCheck, IconLock
+
+### components\LandingView.vue
+size 87774 functions ['enterApp', 'scrollToTop', 'toggleFaq', 'animateCountUp', 'handleScroll', 'setupObserver']
+emits [('enter', '')]
+uses IconChat, IconCheck, IconDoc, IconExpand, IconQuiz, IconRadar, IconSettings, IconTree, RadarCanvas
+
+### components\MarkdownContent.vue
+size 1957 functions ['loadMarkdownRuntime', 'loadMermaidRuntime', 'renderHtml', 'renderMermaid']
+
+### components\MindMapViewer.vue
+size 7693 functions ['buildTreeLayout']
+uses Background, Controls, VueFlow
+
+### components\PremiumWorkspace.vue
+size 15562 functions ['onSidebarSelect', 'openPanel', 'onDrawerPanelSwitch', 'onSelectNode', 'onSwitchCourse', 'handleBrowseCourses', 'handleCoachSend', 'handleNav', 'isDrawerAction', 'isNavActive', 'navTargetId', 'navExpandedState']
+emits [('select-node', ''), ('submit-quiz', ''), ('send-tutor', ''), ('submit-probe', ''), ('logout', ''), ('go-home', ''), ('switch-course', ''), ('refresh-resources', ''), ('generate-card', '')]
+uses LearningPane, SessionHeader, SidebarDrawer, TutorPane, WorkspaceShell
+
+### components\ProbeDeck.vue
+size 4102 functions ['toggleOption', 'selectedClass']
+emits [('submit', '')]
+
+### components\RadarCanvas.vue
+size 4092 functions ['getColor', 'draw']
+
+### components\ResourceCanvas.vue
+size 46378 functions ['resourceType', 'bodyMarkdown', 'structuredPayload', 'cardMetadata', 'previewText', 'previewCode', 'conceptMarkdown', 'conceptMermaidSource', 'conceptSummary', 'conceptObjectives', 'conceptSections', 'conceptBullets']
+emits [('submit-quiz', ''), ('select-node', ''), ('refresh', ''), ('generate-card', '')]
+uses MarkdownContent, ResourceCard
+
+### components\ResourceCard.vue
+size 7508 functions ['handleActivate']
+emits [('activate', ''), ('pin', ''), ('minimize', '')]
+uses IconMinimize, IconPin
+
+### components\SidebarDrawer.vue
+size 20565 functions ['radarBarClass', 'radarTextClass', 'handleKeydown', 'focusInitialElement', 'restoreFocus', 'trapFocus', 'getFocusableElements', 'panelTabId', 'panelRegionId']
+emits [('select-node', ''), ('switch-panel', ''), ('toggle-contrast', ''), ('toggle-motion', ''), ('set-font-size', ''), ('close', '')]
+uses KnowledgeTree, RadarCanvas
+
+### components\SidebarRail.vue
+size 7739 functions []
+emits [('select', '')]
+uses IconTree
+
+### components\StreamText.vue
+size 1708 functions ['renderLoop', 'schedule']
+
+### components\TopStatusBar.vue
+size 5160 functions ['statusKindColor', 'iconForStatus', 'statusPhaseColor', 'dotClass', 'statusClass', 'statusA11yLabel']
+
+### components\UserSettingsView.vue
+size 7759 functions ['patch']
+emits [('save', ''), ('back', '')]
+
+### components\workspace\CourseSwitcher.vue
+size 10254 functions ['openMenu', 'toggleMenu', 'closeMenu', 'menuItems', 'focusMenuItem', 'moveFocus', 'onMenuKeydown', 'selectCourse', 'browseCourses', 'formatProgress']
+emits [('switch-course', ''), ('browse-courses', '')]
+uses IconCheck
+
+### components\workspace\LearningPane.vue
+size 1948 functions ['focus', 'getElement']
+emits [('submit-quiz', ''), ('select-node', ''), ('refresh', ''), ('generate-card', '')]
+uses ResourceCanvas
+
+### components\workspace\SessionHeader.vue
+size 13273 functions []
+emits [('switch-course', ''), ('browse-courses', ''), ('go-home', ''), ('logout', ''), ('navigate', '')]
+uses CourseSwitcher
+
+### components\workspace\TutorPane.vue
+size 2998 functions ['focus', 'getElement']
+emits [('send', ''), ('submit-probe', '')]
+uses AgentFeedbackPanel, ChatArea
+
+### components\workspace\WorkspaceShell.vue
+size 2047 functions []
+emits [('select-panel', ''), ('workspace-wheel', '')]
+uses SidebarRail
+
+### views\AppWorkspaceView.vue
+size 5132 functions ['onLogin', 'onRegister', 'goHome', 'onCourseSelect', 'onSendTutorMessage', 'onSwitchCourse', 'onGenerateCard']
+uses AuroraBackground, AuthView, CourseSelectionView, PremiumWorkspace
+
+### views\BrandPage.vue
+size 2162 functions []
+uses BrandCTASection, BrandHero, BrandTopNav

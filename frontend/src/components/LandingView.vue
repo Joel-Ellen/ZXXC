@@ -8,9 +8,9 @@
     <!-- Fixed minimal nav -->
     <nav
       class="fixed inset-x-0 top-0 z-50 transition-all duration-500"
-      :class="navScrolled ? 'bg-space-panel/85 backdrop-blur-xl border-b border-subtle' : 'bg-transparent'"
+      :class="navScrolled ? 'bg-card backdrop-blur-xl border-b border-subtle' : 'bg-transparent'"
     >
-      <div class="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6">
+      <div class="mx-auto flex h-14 max-w-7xl items-center justify-between px-6">
         <a href="#" class="flex items-center gap-2" @click.prevent="scrollToTop">
           <div class="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-primary to-secondary text-[10px] font-black text-primary-text">
             EA
@@ -29,7 +29,7 @@
           <a href="#faq" class="transition-colors hover:text-text-primary">FAQ</a>
         </div>
 
-        <div class="flex shrink-0 items-center gap-3">
+        <div class="flex items-center gap-3">
           <button
             type="button"
             class="focus-ring hidden rounded-full border border-subtle bg-card px-4 py-1.5 text-xs font-semibold text-text-secondary transition-all duration-200 hover:border-primary/30 hover:text-primary hover:bg-card-hover md:inline-flex"
@@ -39,14 +39,14 @@
           </button>
           <button
             type="button"
-            class="focus-ring hidden rounded-full bg-text-primary px-4 py-1.5 text-xs font-semibold text-space-bg transition-transform duration-200 hover:scale-105 active:scale-95 sm:inline-flex"
+            class="focus-ring rounded-full bg-text-primary px-4 py-1.5 text-xs font-semibold text-space-bg transition-transform duration-200 hover:scale-105 active:scale-95"
             @click="enterApp"
           >
             进入工作台
           </button>
           <button
             type="button"
-            class="focus-ring flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-subtle bg-text-primary text-space-bg shadow-card md:hidden"
+            class="focus-ring flex h-8 w-8 items-center justify-center rounded-full border border-subtle text-text-secondary md:hidden"
             aria-label="打开菜单"
             @click="mobileMenuOpen = true"
           >
@@ -61,7 +61,7 @@
     <!-- Mobile menu -->
     <transition name="fade">
       <div v-if="mobileMenuOpen" class="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm md:hidden" @click="mobileMenuOpen = false">
-        <div class="absolute right-4 top-4 w-64 rounded-[24px] border border-subtle bg-space-panel p-5 shadow-2xl" @click.stop>
+        <div class="absolute right-4 top-4 w-64 rounded-[24px] border border-subtle bg-card p-5 shadow-2xl" @click.stop>
           <div class="mb-4 flex items-center justify-between">
             <span class="text-sm font-bold">菜单</span>
             <button type="button" class="rounded-full p-1 text-text-muted hover:text-text-primary" @click="mobileMenuOpen = false">
@@ -134,10 +134,10 @@
 
         <!-- Hero pills -->
         <div ref="heroPills" class="reveal mt-10 flex flex-wrap items-center justify-center gap-3">
-          <span class="rounded-full border border-subtle bg-card/80 px-3 py-1.5 text-xs text-text-secondary backdrop-blur-sm">冷启动测评</span>
-          <span class="rounded-full border border-subtle bg-card/80 px-3 py-1.5 text-xs text-text-secondary backdrop-blur-sm">知识图谱</span>
-          <span class="rounded-full border border-subtle bg-card/80 px-3 py-1.5 text-xs text-text-secondary backdrop-blur-sm">对话辅导</span>
-          <span class="rounded-full border border-subtle bg-card/80 px-3 py-1.5 text-xs text-text-secondary backdrop-blur-sm">能力雷达</span>
+          <span class="rounded-full border border-subtle bg-card px-3 py-1.5 text-xs text-text-secondary backdrop-blur-sm">冷启动测评</span>
+          <span class="rounded-full border border-subtle bg-card px-3 py-1.5 text-xs text-text-secondary backdrop-blur-sm">知识图谱</span>
+          <span class="rounded-full border border-subtle bg-card px-3 py-1.5 text-xs text-text-secondary backdrop-blur-sm">对话辅导</span>
+          <span class="rounded-full border border-subtle bg-card px-3 py-1.5 text-xs text-text-secondary backdrop-blur-sm">能力雷达</span>
         </div>
       </div>
 
@@ -146,85 +146,215 @@
         ref="heroVisual"
         class="reveal relative z-10 mx-auto mt-16 w-full max-w-5xl"
       >
-        <div class="relative mx-auto aspect-[16/10] w-full overflow-hidden rounded-[36px] border border-subtle bg-space-panel/60 shadow-2xl backdrop-blur-xl">
+        <div class="relative mx-auto aspect-[16/10] w-full overflow-hidden rounded-[36px] border border-subtle bg-card shadow-2xl backdrop-blur-xl">
           <!-- App mockup header -->
-          <div class="flex h-12 items-center gap-3 border-b border-subtle px-5">
+          <div class="flex h-12 items-center gap-3 border-b border-amber-200/60 bg-gradient-to-r from-amber-50 via-white to-sky-50 px-5">
             <div class="flex items-center gap-2">
               <div class="h-3 w-3 rounded-full bg-error" />
               <div class="h-3 w-3 rounded-full bg-warning" />
               <div class="h-3 w-3 rounded-full bg-success" />
             </div>
-            <div class="ml-4 flex h-6 flex-1 items-center gap-2 rounded-full bg-card px-3">
-              <div class="h-2 w-2 rounded-full bg-primary" />
-              <div class="h-2 w-20 rounded-full bg-text-muted/20" />
+            <div class="ml-4 flex h-7 flex-1 items-center gap-3 rounded-full border border-amber-200/70 bg-white px-3 shadow-sm">
+              <span class="flex h-4 w-4 items-center justify-center rounded-full bg-primary/10 text-primary">
+                <IconSettings :size="10" />
+              </span>
+              <span class="h-2 w-28 rounded-full bg-gradient-to-r from-primary/40 via-secondary/30 to-info/30" />
+              <span class="ml-auto flex items-center gap-1 text-[10px] font-bold text-success">
+                <span class="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
+                AI &#31169;&#25945;&#22312;&#32447;
+              </span>
             </div>
           </div>
           <!-- Mockup body -->
-          <div class="grid h-[calc(100%-48px)] grid-cols-12 gap-px bg-subtle">
-            <div class="col-span-3 bg-space-surface/50 p-4">
-              <div class="mb-4 flex h-10 items-center gap-2 rounded-xl bg-card px-3">
-                <div class="h-2 w-2 rounded-full bg-primary" />
-                <div class="h-2 w-12 rounded bg-text-muted/20" />
+          <div class="grid h-[calc(100%-48px)] grid-cols-12 gap-px bg-amber-100/70">
+            <div class="col-span-3 bg-white p-4">
+              <div class="mb-4 rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/10 via-white to-secondary/10 p-3 shadow-sm animate-float-slow">
+                <div class="mb-3 flex items-center gap-2">
+                  <div class="flex h-8 w-8 items-center justify-center rounded-xl bg-primary text-primary-text shadow-md shadow-primary/20">
+                    <IconTree :size="15" />
+                  </div>
+                  <div>
+                    <div class="text-[11px] font-black text-text-primary">&#23398;&#20064;&#30011;&#20687;</div>
+                    <div class="text-[9px] font-semibold text-primary">6 &#20010;&#27169;&#22359;&#21516;&#27493;&#20998;&#26512;</div>
+                  </div>
+                </div>
+                <div class="space-y-2">
+                  <div class="h-1.5 rounded-full bg-primary/10">
+                    <div class="h-full w-4/5 rounded-full bg-gradient-to-r from-primary to-secondary animate-pulse" />
+                  </div>
+                  <div class="flex justify-between text-[9px] font-bold text-text-muted">
+                    <span>&#36335;&#24452;&#21305;&#37197;</span>
+                    <span>82%</span>
+                  </div>
+                </div>
               </div>
+
+              <div class="space-y-2">
+                <div class="rounded-xl border border-amber-200/70 bg-amber-50 p-2 shadow-sm transition-transform duration-300 hover:-translate-y-0.5">
+                  <div class="flex items-center justify-between text-[10px] font-bold text-amber-700">
+                    <span>&#20919;&#21551;&#21160;&#27979;&#35780;</span>
+                    <IconQuiz :size="12" />
+                  </div>
+                  <div class="mt-2 h-1.5 rounded-full bg-amber-200/70">
+                    <div class="h-full w-2/3 rounded-full bg-warning" />
+                  </div>
+                </div>
+                <div class="rounded-xl border border-emerald-200/70 bg-emerald-50 p-2 shadow-sm transition-transform duration-300 hover:-translate-y-0.5">
+                  <div class="flex items-center justify-between text-[10px] font-bold text-emerald-700">
+                    <span>&#25484;&#25569;&#33410;&#28857;</span>
+                    <IconCheck :size="12" />
+                  </div>
+                  <div class="mt-2 flex gap-1">
+                    <span class="h-1.5 flex-1 rounded-full bg-success" />
+                    <span class="h-1.5 flex-1 rounded-full bg-success/80" />
+                    <span class="h-1.5 flex-1 rounded-full bg-success/40" />
+                  </div>
+                </div>
+                <div class="rounded-xl border border-sky-200/70 bg-sky-50 p-2 shadow-sm transition-transform duration-300 hover:-translate-y-0.5">
+                  <div class="flex items-center justify-between text-[10px] font-bold text-sky-700">
+                    <span>&#36164;&#28304;&#29983;&#25104;</span>
+                    <IconDoc :size="12" />
+                  </div>
+                  <div class="mt-2 grid grid-cols-3 gap-1">
+                    <span class="h-5 rounded-md bg-info/20" />
+                    <span class="h-5 rounded-md bg-primary/20" />
+                    <span class="h-5 rounded-md bg-secondary/20" />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-span-4 bg-white p-4">
+              <div class="mb-3 flex items-center justify-between">
+                <div>
+                  <div class="text-xs font-black text-text-primary">AI &#31169;&#25945;&#23545;&#35805;</div>
+                  <div class="text-[10px] font-semibold text-text-muted">&#33487;&#26684;&#25289;&#24213;&#24335;&#24341;&#23548;&#36827;&#34892;&#20013;</div>
+                </div>
+                <div class="rounded-full bg-secondary/10 px-2 py-1 text-[9px] font-black text-secondary animate-pulse">&#23454;&#26102;&#21453;&#39304;</div>
+              </div>
+
               <div class="space-y-3">
-                <div v-for="i in 5" :key="i" class="h-8 rounded-lg bg-card" :style="{ opacity: 1 - i * 0.12 }" />
+                <div class="rounded-2xl border border-violet-200/70 bg-violet-50 p-3 shadow-sm animate-float-medium">
+                  <div class="mb-2 flex items-center gap-2 text-[10px] font-black text-violet-700">
+                    <IconChat :size="13" />
+                    &#25512;&#23548;&#25552;&#31034;
+                  </div>
+                  <div class="space-y-2">
+                    <div class="h-2 w-full rounded-full bg-violet-200/70" />
+                    <div class="h-2 w-5/6 rounded-full bg-violet-200/60" />
+                    <div class="h-2 w-2/3 rounded-full bg-violet-200/40" />
+                  </div>
+                </div>
+
+                <div class="rounded-2xl border border-cyan-200/70 bg-cyan-50 p-3 shadow-sm">
+                  <div class="mb-3 flex items-center justify-between text-[10px] font-black text-cyan-700">
+                    <span>&#30693;&#35782;&#36335;&#24452;&#32534;&#25490;</span>
+                    <IconExpand :size="13" />
+                  </div>
+                  <div class="grid grid-cols-3 gap-2">
+                    <div class="rounded-xl bg-white/80 p-2 text-center shadow-sm">
+                      <div class="mx-auto mb-1 h-6 w-6 rounded-full bg-primary/20 animate-pulse" />
+                      <div class="text-[9px] font-bold text-primary">&#27010;&#24565;</div>
+                    </div>
+                    <div class="rounded-xl bg-white/80 p-2 text-center shadow-sm">
+                      <div class="mx-auto mb-1 h-6 w-6 rounded-full bg-secondary/20 animate-pulse" style="animation-delay: 0.25s;" />
+                      <div class="text-[9px] font-bold text-secondary">&#32451;&#20064;</div>
+                    </div>
+                    <div class="rounded-xl bg-white/80 p-2 text-center shadow-sm">
+                      <div class="mx-auto mb-1 h-6 w-6 rounded-full bg-info/20 animate-pulse" style="animation-delay: 0.5s;" />
+                      <div class="text-[9px] font-bold text-info">&#22797;&#30424;</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="rounded-2xl border border-rose-200/70 bg-rose-50 p-3 shadow-sm transition-transform duration-500 hover:scale-[1.02]">
+                  <div class="flex items-center justify-between text-[10px] font-black text-rose-700">
+                    <span>&#38169;&#22240;&#35786;&#26029;</span>
+                    <span class="rounded-full bg-white px-2 py-0.5 text-[9px]">&#38656;&#24041;&#22266;</span>
+                  </div>
+                  <div class="mt-2 flex gap-1.5">
+                    <span class="h-8 flex-1 rounded-lg bg-rose-200/70" />
+                    <span class="h-8 flex-1 rounded-lg bg-amber-200/80" />
+                    <span class="h-8 flex-1 rounded-lg bg-primary/20" />
+                  </div>
+                </div>
               </div>
             </div>
-            <div class="col-span-4 bg-space-surface/30 p-4">
-              <div class="mb-4 h-6 rounded-lg bg-card" />
-              <div class="space-y-4">
-                <div class="rounded-2xl border border-primary/20 bg-primary-soft p-4">
-                  <div class="flex items-center gap-2">
-                    <div class="h-2 w-2 rounded-full bg-primary" />
-                    <div class="h-3 w-1/3 rounded bg-primary/30" />
-                  </div>
-                  <div class="mt-3 space-y-2">
-                    <div class="h-2 w-full rounded bg-card" />
-                    <div class="h-2 w-5/6 rounded bg-card" />
-                    <div class="h-2 w-4/6 rounded bg-card" />
-                  </div>
+
+            <div class="col-span-5 bg-white p-4">
+              <div class="mb-3 flex items-center justify-between">
+                <div>
+                  <div class="text-xs font-black text-text-primary">&#33021;&#21147;&#38647;&#36798;&#19982;&#25512;&#33616;</div>
+                  <div class="text-[10px] font-semibold text-text-muted">&#22810;&#26234;&#33021;&#20307;&#21327;&#21516;&#36755;&#20986;</div>
                 </div>
-                <div class="rounded-2xl border border-subtle bg-card p-4">
-                  <div class="h-3 w-1/2 rounded bg-text-muted/20" />
-                  <div class="mt-3 h-20 rounded-xl bg-space-surface/50" />
+                <div class="flex gap-1">
+                  <span class="h-2 w-2 rounded-full bg-primary animate-pulse" />
+                  <span class="h-2 w-2 rounded-full bg-secondary animate-pulse" style="animation-delay: 0.2s;" />
+                  <span class="h-2 w-2 rounded-full bg-info animate-pulse" style="animation-delay: 0.4s;" />
                 </div>
               </div>
-            </div>
-            <div class="col-span-5 bg-space-bg/50 p-4">
-              <div class="mb-4 flex items-center justify-between">
-                <div class="h-6 w-1/3 rounded-lg bg-card" />
-                <div class="h-6 w-16 rounded-full bg-card" />
-              </div>
-              <div class="grid grid-cols-2 gap-3">
-                <div class="col-span-2 h-32 rounded-2xl border border-secondary/20 bg-secondary-soft p-4">
-                  <div class="flex h-full w-full items-center justify-center rounded-xl bg-card/50">
-                    <div class="h-16 w-16 rounded-full border-2 border-secondary/30" />
+
+              <div class="grid h-[calc(100%-32px)] grid-cols-2 gap-3">
+                <div class="relative col-span-2 overflow-hidden rounded-2xl border border-secondary/20 bg-gradient-to-br from-secondary/10 via-white to-primary/10 p-4 shadow-sm animate-float-fast">
+                  <div class="absolute right-4 top-4 h-14 w-14 rounded-full border border-secondary/20 animate-ping" />
+                  <div class="relative flex h-full items-center gap-4">
+                    <div class="relative h-20 w-20 shrink-0 rounded-full border-2 border-secondary/30 bg-white/75">
+                      <div class="absolute inset-3 rounded-full border border-dashed border-primary/30" />
+                      <div class="absolute inset-6 rounded-full bg-gradient-to-br from-secondary/30 to-primary/20" />
+                      <div class="absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-secondary" />
+                    </div>
+                    <div class="min-w-0 flex-1">
+                      <div class="mb-2 text-[11px] font-black text-secondary">&#33021;&#21147;&#38647;&#36798;&#26356;&#26032;</div>
+                      <div class="space-y-2">
+                        <div class="h-2 rounded-full bg-white/80"><div class="h-full w-4/5 rounded-full bg-secondary" /></div>
+                        <div class="h-2 rounded-full bg-white/80"><div class="h-full w-3/5 rounded-full bg-primary" /></div>
+                        <div class="h-2 rounded-full bg-white/80"><div class="h-full w-2/3 rounded-full bg-info" /></div>
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <div class="h-28 rounded-2xl border border-info/20 bg-info-soft p-3">
-                  <div class="h-full w-full rounded-xl bg-card/50" />
+
+                <div class="rounded-2xl border border-lime-200/70 bg-lime-50 p-3 shadow-sm transition-transform duration-500 hover:-translate-y-1">
+                  <div class="mb-2 flex items-center justify-between text-[10px] font-black text-lime-700">
+                    <span>&#19979;&#19968;&#27493;&#20219;&#21153;</span>
+                    <IconCheck :size="13" />
+                  </div>
+                  <div class="space-y-2">
+                    <div class="h-8 rounded-xl bg-white/80 p-1.5">
+                      <div class="h-full w-3/4 rounded-lg bg-success/30 animate-pulse" />
+                    </div>
+                    <div class="h-2 w-2/3 rounded-full bg-lime-300/70" />
+                  </div>
                 </div>
-                <div class="h-28 rounded-2xl border border-tertiary/20 bg-tertiary-soft p-3">
-                  <div class="h-full w-full rounded-xl bg-card/50" />
+
+                <div class="rounded-2xl border border-orange-200/70 bg-orange-50 p-3 shadow-sm transition-transform duration-500 hover:-translate-y-1">
+                  <div class="mb-2 flex items-center justify-between text-[10px] font-black text-orange-700">
+                    <span>&#36164;&#28304;&#21253;</span>
+                    <IconDoc :size="13" />
+                  </div>
+                  <div class="grid grid-cols-2 gap-2">
+                    <div class="h-10 rounded-xl bg-white/80 p-1.5 shadow-sm"><div class="h-full rounded-lg bg-warning/30" /></div>
+                    <div class="h-10 rounded-xl bg-white/80 p-1.5 shadow-sm"><div class="h-full rounded-lg bg-info/20 animate-pulse" /></div>
+                    <div class="col-span-2 h-2 rounded-full bg-orange-300/70" />
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-
           <!-- Floating agent pills -->
-          <div class="absolute left-4 top-20 flex items-center gap-2 rounded-full border border-primary/30 bg-card/90 px-3 py-1.5 text-xs font-medium text-primary shadow-lg backdrop-blur-md animate-float-slow">
+          <div class="absolute left-4 top-20 flex items-center gap-2 rounded-full border border-primary/30 bg-card px-3 py-1.5 text-xs font-medium text-primary shadow-lg backdrop-blur-md animate-float-slow">
             <span class="h-1.5 w-1.5 rounded-full bg-primary animate-breathe" />
             辅导智能体就绪
           </div>
-          <div class="absolute bottom-24 right-6 flex items-center gap-2 rounded-full border border-success/30 bg-card/90 px-3 py-1.5 text-xs font-medium text-success shadow-lg backdrop-blur-md animate-float-medium">
+          <div class="absolute bottom-24 right-6 flex items-center gap-2 rounded-full border border-success/30 bg-card px-3 py-1.5 text-xs font-medium text-success shadow-lg backdrop-blur-md animate-float-medium">
             <IconCheck :size="12" />
             知识节点已掌握
           </div>
-          <div class="absolute top-32 right-12 flex items-center gap-2 rounded-full border border-secondary/30 bg-card/90 px-3 py-1.5 text-xs font-medium text-secondary shadow-lg backdrop-blur-md animate-float-fast">
+          <div class="absolute top-32 right-12 flex items-center gap-2 rounded-full border border-secondary/30 bg-card px-3 py-1.5 text-xs font-medium text-secondary shadow-lg backdrop-blur-md animate-float-fast">
             <IconRadar :size="12" />
             能力雷达更新
           </div>
-          <div class="absolute bottom-12 left-12 flex items-center gap-2 rounded-full border border-info/30 bg-card/90 px-3 py-1.5 text-xs font-medium text-info shadow-lg backdrop-blur-md animate-float-fast" style="animation-delay: 0.5s;">
+          <div class="absolute bottom-12 left-12 flex items-center gap-2 rounded-full border border-info/30 bg-card px-3 py-1.5 text-xs font-medium text-info shadow-lg backdrop-blur-md animate-float-fast" style="animation-delay: 0.5s;">
             <IconDoc :size="12" />
             资源已生成
           </div>
@@ -240,7 +370,7 @@
     </section>
 
     <!-- Ribbon -->
-    <section class="border-y border-subtle bg-space-surface/30 py-4 backdrop-blur-sm">
+    <section class="border-y border-subtle bg-card py-4 backdrop-blur-sm">
       <div class="flex animate-marquee whitespace-nowrap">
         <span v-for="i in 2" :key="i" class="flex items-center gap-12 px-12 text-xs font-bold uppercase tracking-[0.2em] text-text-muted">
           <span class="flex items-center gap-3"><IconTree :size="16" /> 知识路径</span>
@@ -278,7 +408,7 @@
             :style="{ transitionDelay: `${idx * 80}ms` }"
           >
             <div class="mb-5 flex items-center justify-between">
-              <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-space-surface transition-colors duration-300 group-hover:bg-card-hover">
+              <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-card transition-colors duration-300 group-hover:bg-card-hover">
                 <component :is="mod.icon" :size="22" :class="`text-${mod.accent}`" />
               </div>
               <span class="text-[11px] font-mono font-bold uppercase tracking-[0.12em] text-text-muted">{{ mod.count }} 节点</span>
@@ -289,7 +419,7 @@
               <span
                 v-for="tag in mod.tags"
                 :key="tag"
-                class="rounded-full border border-subtle bg-space-surface/50 px-2.5 py-1 text-[11px] font-medium text-text-muted transition-colors group-hover:border-hover group-hover:text-text-secondary"
+                class="rounded-full border border-subtle bg-card px-2.5 py-1 text-[11px] font-medium text-text-muted transition-colors group-hover:border-hover group-hover:text-text-secondary"
               >{{ tag }}</span>
             </div>
             <div class="absolute -right-8 -bottom-8 h-32 w-32 rounded-full opacity-0 blur-2xl transition-opacity duration-500 group-hover:opacity-100" :class="`bg-${mod.accent}/5`" />
@@ -315,7 +445,7 @@
           </div>
           <div class="reveal space-y-6" style="transition-delay: 120ms;">
             <div v-for="(pain, idx) in painPoints" :key="pain.title" class="group flex gap-5 rounded-2xl border border-subtle bg-card p-5 transition-all duration-300 hover:-translate-y-0.5 hover:border-primary/20 hover:shadow-card">
-              <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-space-surface text-primary transition-colors group-hover:bg-primary-soft">
+              <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-card text-primary transition-colors group-hover:bg-primary-soft">
                 <component :is="pain.icon" :size="20" />
               </div>
               <div>
@@ -371,7 +501,7 @@
             </ul>
           </div>
           <div class="reveal relative order-1 lg:order-2" style="transition-delay: 120ms;">
-            <div class="aspect-square rounded-[40px] border border-subtle bg-space-panel/50 p-8 shadow-glass backdrop-blur-xl">
+            <div class="aspect-square rounded-[40px] border border-subtle bg-card p-8 shadow-glass backdrop-blur-xl">
               <div class="mb-6 flex items-center justify-between">
                 <span class="text-xs font-bold uppercase tracking-wider text-text-muted">学习画像采集</span>
                 <span class="text-xs font-medium text-primary">3/6</span>
@@ -382,7 +512,7 @@
               <div class="rounded-2xl border border-subtle bg-card p-5">
                 <p class="text-sm font-medium text-text-primary">以下哪种数据结构最适合实现 LRU 缓存？</p>
                 <div class="mt-4 space-y-2">
-                  <div v-for="opt in ['数组 + 排序', '哈希表 + 双向链表', '单调栈', '二叉搜索树']" :key="opt" class="rounded-xl border border-subtle bg-space-surface/50 px-4 py-3 text-sm text-text-secondary transition-colors hover:border-primary/20 hover:text-text-primary">
+                  <div v-for="opt in ['数组 + 排序', '哈希表 + 双向链表', '单调栈', '二叉搜索树']" :key="opt" class="rounded-xl border border-subtle bg-card px-4 py-3 text-sm text-text-secondary transition-colors hover:border-primary/20 hover:text-text-primary">
                     {{ opt }}
                   </div>
                 </div>
@@ -394,9 +524,9 @@
         <!-- Feature 2 -->
         <div class="feature-section mb-32 grid items-center gap-12 lg:grid-cols-2">
           <div class="reveal relative">
-            <div class="aspect-square rounded-[40px] border border-subtle bg-space-panel/50 p-8 shadow-glass backdrop-blur-xl">
+            <div class="aspect-square rounded-[40px] border border-subtle bg-card p-8 shadow-glass backdrop-blur-xl">
               <div class="space-y-4">
-                <div v-for="(step, idx) in knowledgeNodes" :key="step" class="flex items-center gap-4 rounded-2xl border border-subtle bg-card p-4 transition-all duration-300 hover:translate-x-2" :class="idx < 2 ? 'border-success/20 bg-success-soft/30' : ''">
+                <div v-for="(step, idx) in knowledgeNodes" :key="step" class="flex items-center gap-4 rounded-2xl border border-subtle bg-card p-4 transition-all duration-300 hover:translate-x-2" :class="idx < 2 ? 'border-success/20' : ''">
                   <span class="flex h-10 w-10 items-center justify-center rounded-full font-mono text-sm" :class="idx < 2 ? 'bg-success text-success-text' : 'bg-card text-primary'">0{{ idx + 1 }}</span>
                   <span class="text-lg font-medium">{{ step }}</span>
                   <IconCheck v-if="idx < 2" class="ml-auto text-success" :size="18" />
@@ -442,13 +572,13 @@
             </p>
           </div>
           <div class="reveal relative order-1 lg:order-2" style="transition-delay: 120ms;">
-            <div class="aspect-square rounded-[40px] border border-subtle bg-space-panel/50 p-8 shadow-glass backdrop-blur-xl">
+            <div class="aspect-square rounded-[40px] border border-subtle bg-card p-8 shadow-glass backdrop-blur-xl">
               <div class="flex h-full flex-col justify-end space-y-4">
                 <div class="rounded-2xl border-l-4 border-primary bg-card p-4">
                   <p class="text-xs font-bold uppercase tracking-wider text-primary">辅导智能体</p>
                   <p class="mt-1 text-sm text-text-secondary">这道题可以用单调栈来优化时间复杂度，让我为你展开思路…</p>
                 </div>
-                <div class="self-end rounded-2xl border-r-4 border-secondary bg-secondary-soft p-4 text-right">
+                <div class="self-end rounded-2xl border-r-4 border-secondary bg-card p-4 text-right">
                   <p class="text-xs font-bold uppercase tracking-wider text-secondary">我</p>
                   <p class="mt-1 text-sm text-text-secondary">为什么不用哈希表直接查找？</p>
                 </div>
@@ -464,21 +594,8 @@
         <!-- Feature 4 -->
         <div class="feature-section grid items-center gap-12 lg:grid-cols-2">
           <div class="reveal relative">
-            <div
-              ref="radarFeatureFrame"
-              class="aspect-square rounded-[40px] border border-subtle bg-space-panel/50 p-6 shadow-glass backdrop-blur-xl"
-            >
-              <LazyRadarCanvas
-                v-if="showRadarFeature"
-                class="h-full w-full"
-                :values="[0.85, 0.72, 0.68, 0.9, 0.55]"
-                :high-contrast="true"
-              />
-              <div
-                v-else
-                aria-hidden="true"
-                class="h-full w-full rounded-[28px] border border-subtle/60 bg-[radial-gradient(circle_at_center,_rgba(140,165,255,0.14),_transparent_55%),linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0))]"
-              />
+            <div class="aspect-square rounded-[40px] border border-subtle bg-card p-6 shadow-glass backdrop-blur-xl">
+              <RadarCanvas class="h-full w-full" :values="[0.85, 0.72, 0.68, 0.9, 0.55]" :high-contrast="true" />
             </div>
           </div>
           <div class="reveal" style="transition-delay: 120ms;">
@@ -519,7 +636,7 @@
             :class="card.span || ''"
             :style="{ transitionDelay: `${idx * 80}ms` }"
           >
-            <div class="mb-4 flex h-11 w-11 items-center justify-center rounded-2xl bg-space-surface transition-colors duration-300 group-hover:bg-card-hover">
+            <div class="mb-4 flex h-11 w-11 items-center justify-center rounded-2xl bg-card transition-colors duration-300 group-hover:bg-card-hover">
               <component :is="card.icon" :size="22" class="text-primary" />
             </div>
             <h3 class="text-lg font-bold tracking-tight">{{ card.title }}</h3>
@@ -547,16 +664,16 @@
           </h2>
         </div>
 
-        <div class="reveal overflow-hidden rounded-[32px] border border-subtle bg-space-panel/60 shadow-glass backdrop-blur-xl" style="transition-delay: 150ms;">
+        <div class="reveal overflow-hidden rounded-[32px] border border-subtle bg-card shadow-glass backdrop-blur-xl" style="transition-delay: 150ms;">
           <!-- Table header -->
           <div class="grid grid-cols-3 border-b border-subtle">
             <div class="p-6">
               <span class="text-xs font-bold uppercase tracking-[0.14em] text-text-muted">对比维度</span>
             </div>
-            <div class="p-6 text-center border-x border-subtle bg-card/30">
+            <div class="p-6 text-center border-x border-subtle bg-card">
               <span class="text-xs font-bold uppercase tracking-[0.14em] text-text-muted">传统刷题平台</span>
             </div>
-            <div class="p-6 text-center bg-primary-soft/20">
+            <div class="p-6 text-center bg-card">
               <span class="text-xs font-bold uppercase tracking-[0.14em] text-primary">EduAgent</span>
             </div>
           </div>
@@ -565,7 +682,7 @@
             v-for="(row, idx) in comparisonRows"
             :key="row.dimension"
             class="grid grid-cols-3 transition-colors duration-200"
-            :class="idx % 2 === 0 ? 'bg-transparent' : 'bg-card/20'"
+            :class="idx % 2 === 0 ? 'bg-card' : 'bg-card-hover'"
           >
             <div class="flex items-center p-5">
               <span class="text-sm font-semibold text-text-primary">{{ row.dimension }}</span>
@@ -573,7 +690,7 @@
             <div class="flex items-center gap-2 p-5 text-center border-x border-subtle">
               <span class="text-sm font-light text-text-muted">{{ row.traditional }}</span>
             </div>
-            <div class="flex items-center gap-2 p-5 text-center bg-primary-soft/10">
+            <div class="flex items-center gap-2 p-5 text-center bg-card">
               <IconCheck :size="14" class="text-success shrink-0" />
               <span class="text-sm font-medium text-primary">{{ row.eduagent }}</span>
             </div>
@@ -622,7 +739,7 @@
               <div v-if="idx < workflowSteps.length - 1" class="flex h-8 w-0.5 rounded-full bg-gradient-to-b md:hidden" :class="`from-${step.accent} to-${workflowSteps[idx + 1].accent}`" />
 
               <!-- Card -->
-              <div class="w-full rounded-[28px] border border-subtle bg-space-panel/60 p-6 shadow-glass backdrop-blur-xl transition-all duration-500 group-hover:-translate-y-1 group-hover:border-primary/20 group-hover:shadow-card">
+              <div class="w-full rounded-[28px] border border-subtle bg-card p-6 shadow-glass backdrop-blur-xl transition-all duration-500 group-hover:-translate-y-1 group-hover:border-primary/20 group-hover:shadow-card">
                 <div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl" :class="`bg-${step.accent}-soft text-${step.accent}`">
                   <component :is="step.icon" :size="24" />
                 </div>
@@ -663,7 +780,7 @@
         </div>
 
         <!-- Demo stage -->
-        <div ref="demoStage" class="reveal relative mx-auto aspect-[16/9] w-full max-w-5xl overflow-hidden rounded-[40px] border border-subtle bg-space-panel/70 shadow-2xl backdrop-blur-xl" style="transition-delay: 200ms;">
+        <div ref="demoStage" class="reveal relative mx-auto aspect-[16/9] w-full max-w-5xl overflow-hidden rounded-[40px] border border-subtle bg-card shadow-2xl backdrop-blur-xl" style="transition-delay: 200ms;">
           <div class="absolute inset-0 p-6 md:p-12">
             <!-- ── 学习者节点 ── -->
             <div class="demo-node demo-node--student absolute left-[6%] top-1/2 -translate-y-1/2">
@@ -677,7 +794,7 @@
                 </div>
                 <span class="text-xs font-medium text-text-secondary">学习者</span>
                 <!-- 提问气泡 -->
-                <div class="demo-speech absolute -right-20 top-0 rounded-2xl rounded-bl-md border border-primary/20 bg-primary-soft/80 px-3 py-2 text-[10px] leading-relaxed text-primary backdrop-blur-sm whitespace-nowrap">
+                <div class="demo-speech absolute -right-20 top-0 rounded-2xl rounded-bl-md border border-primary/20 bg-card px-3 py-2 text-[10px] leading-relaxed text-primary backdrop-blur-sm whitespace-nowrap">
                   什么是动态规划？
                 </div>
               </div>
@@ -686,7 +803,7 @@
             <!-- ── 智能体集群 (中心列) ── -->
             <div class="demo-node demo-node--agent absolute left-[48%] top-[12%] -translate-x-1/2">
               <div class="flex flex-col items-center gap-3">
-                <div class="flex h-14 w-14 items-center justify-center rounded-2xl border border-primary/30 bg-primary-soft md:h-16 md:w-16 relative">
+                <div class="flex h-14 w-14 items-center justify-center rounded-2xl border border-primary/30 bg-card md:h-16 md:w-16 relative">
                   <div class="demo-ring demo-ring--primary" />
                   <IconDoc :size="24" class="relative z-10 text-primary md:w-[26px]" />
                 </div>
@@ -697,7 +814,7 @@
 
             <div class="demo-node demo-node--agent absolute left-[48%] top-[44%] -translate-x-1/2 -translate-y-1/2">
               <div class="flex flex-col items-center gap-3">
-                <div class="flex h-[72px] w-[72px] items-center justify-center rounded-2xl border border-secondary/30 bg-secondary-soft md:h-20 md:w-20 relative">
+                <div class="flex h-[72px] w-[72px] items-center justify-center rounded-2xl border border-secondary/30 bg-card md:h-20 md:w-20 relative">
                   <div class="demo-ring demo-ring--secondary" />
                   <IconChat :size="28" class="relative z-10 text-secondary md:w-[30px]" />
                 </div>
@@ -708,7 +825,7 @@
 
             <div class="demo-node demo-node--agent absolute left-[48%] bottom-[12%] -translate-x-1/2">
               <div class="flex flex-col items-center gap-3">
-                <div class="flex h-14 w-14 items-center justify-center rounded-2xl border border-tertiary/30 bg-tertiary-soft md:h-16 md:w-16 relative">
+                <div class="flex h-14 w-14 items-center justify-center rounded-2xl border border-tertiary/30 bg-card md:h-16 md:w-16 relative">
                   <div class="demo-ring demo-ring--tertiary" />
                   <IconQuiz :size="24" class="relative z-10 text-tertiary md:w-[26px]" />
                 </div>
@@ -721,21 +838,21 @@
             <div class="demo-node demo-node--output absolute right-[5%] top-1/2 -translate-y-1/2">
               <div class="flex flex-col items-center gap-3">
                 <div class="demo-canvas-grid grid w-[130px] gap-2 md:w-[150px]">
-                  <div class="demo-canvas-card demo-canvas-card--1 h-14 rounded-xl border border-primary/20 bg-primary-soft p-2 md:h-16">
-                    <div class="flex h-full items-center gap-2 rounded-lg bg-card/50 px-2">
+                  <div class="demo-canvas-card demo-canvas-card--1 h-14 rounded-xl border border-primary/20 bg-card p-2 md:h-16">
+                    <div class="flex h-full items-center gap-2 rounded-lg bg-card px-2">
                       <div class="h-2 w-2 rounded-full bg-primary" />
                       <div class="h-2 flex-1 rounded bg-primary/20" />
                     </div>
                   </div>
                   <div class="grid grid-cols-2 gap-2">
-                    <div class="demo-canvas-card demo-canvas-card--2 h-12 rounded-xl border border-info/20 bg-info-soft p-2 md:h-14">
-                      <div class="flex h-full items-center gap-1.5 rounded-lg bg-card/50 px-1.5">
+                    <div class="demo-canvas-card demo-canvas-card--2 h-12 rounded-xl border border-info/20 bg-card p-2 md:h-14">
+                      <div class="flex h-full items-center gap-1.5 rounded-lg bg-card px-1.5">
                         <div class="h-1.5 w-1.5 rounded-full bg-info" />
                         <div class="h-1.5 w-full rounded bg-info/20" />
                       </div>
                     </div>
-                    <div class="demo-canvas-card demo-canvas-card--3 h-12 rounded-xl border border-secondary/20 bg-secondary-soft p-2 md:h-14">
-                      <div class="flex h-full items-center gap-1.5 rounded-lg bg-card/50 px-1.5">
+                    <div class="demo-canvas-card demo-canvas-card--3 h-12 rounded-xl border border-secondary/20 bg-card p-2 md:h-14">
+                      <div class="flex h-full items-center gap-1.5 rounded-lg bg-card px-1.5">
                         <div class="h-1.5 w-1.5 rounded-full bg-secondary" />
                         <div class="h-1.5 w-full rounded bg-secondary/20" />
                       </div>
@@ -809,7 +926,7 @@
         <!-- Demo steps -->
         <div ref="demoSteps" class="mt-12 grid grid-cols-1 gap-6 md:grid-cols-3">
           <div v-for="(step, idx) in demoStepsList" :key="step.title" class="reveal rounded-2xl border border-subtle bg-card p-6 text-center transition-all duration-300 hover:-translate-y-1 hover:border-primary/20" :style="{ transitionDelay: `${300 + idx * 100}ms` }">
-            <div class="mx-auto mb-4 flex h-10 w-10 items-center justify-center rounded-full border border-subtle bg-space-surface text-sm font-bold text-primary">
+            <div class="mx-auto mb-4 flex h-10 w-10 items-center justify-center rounded-full border border-subtle bg-card text-sm font-bold text-primary">
               {{ idx + 1 }}
             </div>
             <h4 class="text-base font-bold">{{ step.title }}</h4>
@@ -863,7 +980,7 @@
           </div>
         </div>
 
-        <div class="reveal mt-8 rounded-[32px] border border-subtle bg-space-panel/50 p-8 shadow-glass backdrop-blur-xl" style="transition-delay: 150ms;">
+        <div class="reveal mt-8 rounded-[32px] border border-subtle bg-card p-8 shadow-glass backdrop-blur-xl" style="transition-delay: 150ms;">
           <div class="grid items-center gap-8 lg:grid-cols-2">
             <div>
               <h3 class="text-2xl font-bold tracking-tight">后端技术栈</h3>
@@ -1076,7 +1193,7 @@
 </template>
 
 <script setup>
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import IconCheck from "./icons/IconCheck.vue";
 import IconChat from "./icons/IconChat.vue";
 import IconDoc from "./icons/IconDoc.vue";
@@ -1085,35 +1202,15 @@ import IconQuiz from "./icons/IconQuiz.vue";
 import IconRadar from "./icons/IconRadar.vue";
 import IconSettings from "./icons/IconSettings.vue";
 import IconTree from "./icons/IconTree.vue";
-
-const LazyRadarCanvas = defineAsyncComponent(() => import("./RadarCanvas.vue"));
+import RadarCanvas from "./RadarCanvas.vue";
 
 const emit = defineEmits(["enter"]);
-
-const props = defineProps({
-  landingStats: {
-    type: Array,
-    default: () => [
-      { value: 6, suffix: "", label: "知识模块", isNumeric: true },
-      { value: 47, suffix: "+", label: "递进式知识节点", isNumeric: true },
-      { value: 5, suffix: "", label: "能力评估维度", isNumeric: true },
-      { value: 3, suffix: "", label: "专业智能体协同", isNumeric: true },
-    ],
-  },
-});
-
-const stats = computed(() => props.landingStats);
 
 const navScrolled = ref(false);
 const mobileMenuOpen = ref(false);
 const scrollProgress = ref(0);
 const openFaq = ref(null);
-const displayedStats = ref([]);
-
-// 根据 stats prop 动态初始化 displayedStats
-watch(() => props.landingStats, (newStats) => {
-  displayedStats.value = (newStats || []).map(() => 0);
-}, { immediate: true });
+const displayedStats = ref([0, 0, 0, 0]);
 const statsAnimated = ref(false);
 
 // Template refs for immediate hero reveal
@@ -1123,8 +1220,6 @@ const heroSubhead = ref(null);
 const heroCtas = ref(null);
 const heroPills = ref(null);
 const heroVisual = ref(null);
-const radarFeatureFrame = ref(null);
-const showRadarFeature = ref(false);
 
 const menuItems = [
   { href: "#curriculum", label: "知识体系" },
@@ -1184,6 +1279,13 @@ const demoStepsList = [
   { title: "提出疑问", desc: "在学习托盘中输入你的问题或困惑。" },
   { title: "智能体协作", desc: "多个专业智能体并行生成解释、示例与测验。" },
   { title: "资源装配", desc: "结果自动汇聚到资源画布，形成完整学习单元。" },
+];
+
+const stats = [
+  { value: 6, suffix: "", label: "知识模块", isNumeric: true },
+  { value: 47, suffix: "+", label: "递进式知识节点", isNumeric: true },
+  { value: 5, suffix: "", label: "能力评估维度", isNumeric: true },
+  { value: 3, suffix: "", label: "专业智能体协同", isNumeric: true },
 ];
 
 const testimonials = [
@@ -1275,14 +1377,12 @@ function setupObserver() {
 
 let observer = null;
 let scrollListener = null;
-let radarObserver = null;
 
 onMounted(() => {
   nextTick(() => {
     observer = setupObserver();
     scrollListener = () => handleScroll();
     window.addEventListener("scroll", scrollListener, { passive: true });
-    setupRadarObserver();
 
     // Trigger hero reveals immediately with stagger
     setTimeout(() => {
@@ -1295,43 +1395,30 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (observer) observer.disconnect();
-  if (radarObserver) radarObserver.disconnect();
   if (scrollListener) window.removeEventListener("scroll", scrollListener);
 });
-
-function setupRadarObserver() {
-  if (showRadarFeature.value || typeof window === "undefined") {
-    return;
-  }
-
-  if (!(radarFeatureFrame.value instanceof HTMLElement) || typeof IntersectionObserver === "undefined") {
-    showRadarFeature.value = true;
-    return;
-  }
-
-  radarObserver = new IntersectionObserver(
-    (entries) => {
-      const [entry] = entries;
-      if (!entry?.isIntersecting) {
-        return;
-      }
-
-      showRadarFeature.value = true;
-      radarObserver?.disconnect();
-      radarObserver = null;
-    },
-    {
-      rootMargin: "160px 0px",
-      threshold: 0.2,
-    },
-  );
-
-  radarObserver.observe(radarFeatureFrame.value);
-}
 </script>
 
 <style scoped>
 .landing-root {
+  --space-bg: #fff8e8;
+  --space-surface: #fffaf0;
+  --space-panel: rgba(255, 255, 255, 0.92);
+  --space-line: rgba(78, 59, 31, 0.1);
+  --space-elevated: rgba(255, 255, 255, 0.98);
+  --text-primary: #172033;
+  --text-secondary: #5b5142;
+  --text-muted: #7a6f5f;
+  --border-subtle: rgba(78, 59, 31, 0.12);
+  --border-hover: rgba(78, 59, 31, 0.2);
+  --border-strong: rgba(78, 59, 31, 0.28);
+  --card-bg: #ffffff;
+  --card-bg-hover: #fffdf8;
+  --input-bg: #ffffff;
+  --shadow-glass: 0 24px 60px rgba(78, 59, 31, 0.12);
+  --shadow-card: 0 12px 34px rgba(78, 59, 31, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  background: #fff8e8;
+  color: var(--text-primary);
   scroll-behavior: smooth;
 }
 

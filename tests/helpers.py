@@ -54,6 +54,9 @@ class FakeRuntime:
         self.sessions.get(user_id, {}).pop(course_id, None)
         return self.get_session(user_id, course_id)
 
+    def get_llm(self):
+        return None
+
     def generate_resource_content(self, node_id, card_type, difficulty):
         return f"## {node_id} {card_type}\n\ncontent"
 

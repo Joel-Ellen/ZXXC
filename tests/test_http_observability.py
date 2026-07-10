@@ -3,10 +3,13 @@ import re
 import sys
 import types
 import uuid
+import io
+import json
+import logging
 
 from starlette.testclient import TestClient
 
-from src.observability import reset_metrics
+from src.observability import bind_context, log_event, reset_metrics
 
 
 def _install_import_stubs() -> None:
@@ -78,6 +81,26 @@ def test_request_id_header_round_trip_and_metrics_endpoint(monkeypatch):
         and counter["labels"].get("status_family") == "2xx"
         for counter in payload["counters"]
     )
+
+
+def test_structured_log_event_includes_request_context():
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logger = logging.getLogger("eduagent")
+    logger.addHandler(handler)
+    try:
+        with bind_context(request_id="req-log-123", user_id="u-log", operation="prelaunch"):
+            log_event("prelaunch.structured_log_check", nested={"ok": True})
+    finally:
+        logger.removeHandler(handler)
+
+    payload = json.loads(stream.getvalue().strip().splitlines()[-1])
+    assert payload["event"] == "prelaunch.structured_log_check"
+    assert payload["request_id"] == "req-log-123"
+    assert payload["user_id"] == "u-log"
+    assert payload["operation"] == "prelaunch"
+    assert payload["nested"] == {"ok": True}
 
 
 def test_auth_register_login_and_me_accept_user_records():
