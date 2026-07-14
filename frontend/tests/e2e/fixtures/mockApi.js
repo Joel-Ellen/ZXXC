@@ -201,6 +201,53 @@ export async function installMockApi(page, options = {}) {
       return json(route, mockUser);
     }
 
+    if (method === "GET" && pathname === "/api/user/profile") {
+      return json(route, {
+        ...mockUser,
+        university: "测试大学",
+        major: "计算机科学",
+        grade: "大二",
+        weekly_study_hours: 6,
+        learning_goal: "完成数据结构课程",
+        preferred_resource_style: "textual",
+        preferred_pace: "steady",
+        preferred_practice_intensity: "balanced",
+        email_verified: true,
+        email_verified_at: "2026-07-13T08:00:00Z",
+      });
+    }
+
+    if (method === "GET" && pathname === "/api/user/settings") {
+      return json(route, {
+        preferences: {
+          theme: "light",
+          high_contrast: false,
+          reduce_motion: false,
+          font_size: 16,
+        },
+        privacy: {
+          analytics_enabled: false,
+          personalization_enabled: true,
+          profile_visibility: "private",
+        },
+        email_verified: true,
+        email_verified_at: "2026-07-13T08:00:00Z",
+      });
+    }
+
+    if (method === "GET" && pathname === "/api/auth/sessions") {
+      return json(route, {
+        current_session_id: "e2e-device",
+        sessions: [{
+          session_id: "e2e-device",
+          current: true,
+          device_name: "Chromium",
+          created_at: "2026-07-13T08:00:00Z",
+          last_seen_at: "2026-07-13T09:00:00Z",
+        }],
+      });
+    }
+
     if (method === "POST" && pathname === "/api/ops/client-events") {
       state.clientEvents.push(requestBody(request));
       return json(route, { status: "accepted" }, 202);

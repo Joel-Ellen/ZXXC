@@ -253,7 +253,7 @@
                 <div class="min-w-0">
                   <div class="flex flex-wrap items-center gap-2">
                     <strong class="text-sm text-text-primary">{{ sessionName(session) }}</strong>
-                    <span v-if="isCurrentSession(session)" class="rounded-full bg-success-soft px-2 py-1 text-xs font-semibold text-success">当前设备</span>
+                    <span v-if="isCurrentSession(session)" class="rounded-full bg-success-soft px-2 py-1 text-xs font-semibold text-success-dark">当前设备</span>
                   </div>
                   <p class="mt-1 text-sm leading-5 text-text-secondary">{{ sessionDetails(session) }}</p>
                   <p class="mt-1 text-xs text-text-muted">最近活动：{{ formatDate(session.last_seen_at || session.last_active_at || session.updated_at || session.created_at) }}</p>
