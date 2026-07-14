@@ -149,6 +149,24 @@ def test_image_build_defaults_to_official_package_registries() -> None:
     assert "PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}" in compose
 
 
+def test_frontend_public_assets_are_present_in_the_docker_build_context() -> None:
+    dockerfile = _read("Dockerfile")
+    dockerignore = _read(".dockerignore")
+    ignore_rules = {
+        line.strip()
+        for line in dockerignore.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    public_dir = ROOT / "frontend" / "public"
+
+    assert public_dir.is_dir()
+    assert any(path.is_file() for path in public_dir.rglob("*"))
+    assert "COPY frontend/public/ ./public/" in dockerfile
+    assert "frontend/public/" not in ignore_rules
+    assert "!frontend/public/" in ignore_rules
+    assert "!frontend/public/**" in ignore_rules
+
+
 def test_container_healthcheck_uses_readiness_and_liveness_is_retained() -> None:
     dockerfile = _read("Dockerfile")
     health_routes = _read("src/routes/new_api_routes.py")

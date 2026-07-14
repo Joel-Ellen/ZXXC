@@ -55,8 +55,12 @@ logs/
 
 # 测试 & 开发工具
 tests/
-frontend/public/
 node_modules/
+
+# Vite public assets are production build inputs. These negations must remain
+# after the generic image ignores above so Docker receives the real assets.
+!frontend/public/
+!frontend/public/**
 
 # Docker 相关
 Dockerfile*
