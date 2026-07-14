@@ -1,199 +1,210 @@
 <template>
-  <section class="relative z-10 min-h-screen px-4 py-8 sm:px-6" aria-labelledby="course-selection-heading">
-    <div class="mx-auto w-full max-w-6xl">
-      <header class="flex flex-col gap-4 border-b border-subtle pb-6 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 id="course-selection-heading" class="text-2xl font-black text-text-primary">选择课程</h1>
-          <p class="mt-2 max-w-2xl text-sm leading-6 text-text-secondary">每门课程保留独立的学习路径、节点进度和练习记录。</p>
-        </div>
-        <button type="button" class="course-touch workspace-shell-btn focus-ring px-5 text-sm font-semibold" @click="emit(returnToWorkspace ? 'back' : 'go-home')">
-          {{ returnToWorkspace ? "返回学习" : "返回首页" }}
-        </button>
-      </header>
-
-      <section class="mt-6 rounded-lg border border-subtle bg-space-panel p-4" aria-label="课程筛选">
-        <div class="grid gap-4 sm:grid-cols-[minmax(0,1fr)_14rem]">
-          <label>
-            <span class="mb-2 block text-xs font-semibold text-text-secondary">搜索课程</span>
-            <input
-              v-model="searchQuery"
-              type="search"
-              class="course-touch workspace-shell-input focus-ring w-full rounded-lg px-3 text-sm text-text-primary placeholder:text-text-muted"
-              placeholder="名称、介绍或标签"
-              autocomplete="off"
-            />
-          </label>
-          <label>
-            <span class="mb-2 block text-xs font-semibold text-text-secondary">课程分类</span>
-            <select v-model="category" class="course-touch workspace-shell-input focus-ring w-full rounded-lg px-3 text-sm text-text-primary">
-              <option value="all">全部分类</option>
-              <option v-for="item in categories" :key="item" :value="item">{{ item }}</option>
-            </select>
-          </label>
-        </div>
-      </section>
-
-      <div v-if="error" class="mt-6 rounded-lg border border-error/30 bg-error-soft px-5 py-8 text-center" role="alert">
-        <h2 class="text-lg font-bold text-text-primary">课程加载失败</h2>
-        <p class="mt-2 text-sm text-text-secondary">{{ error }}</p>
-        <button type="button" class="course-touch btn-primary focus-ring mt-5 px-5 text-sm font-semibold" @click="emit('retry')">重新加载</button>
+  <div class="course-selection-view relative z-10 flex flex-col items-center justify-center px-4 py-8 sm:px-6 sm:py-12 lg:py-16 animate-fadeIn">
+    <div class="w-full max-w-4xl">
+      <!-- Header -->
+      <div class="mb-8 text-center sm:mb-12">
+        <p class="mb-4 text-xs font-bold uppercase tracking-[0.2em] text-primary">课程选择</p>
+        <h1 class="text-3xl font-black tracking-tight sm:text-5xl">
+          选择你的<br class="hidden sm:block" />
+          <span class="gradient-text">学习起点。</span>
+        </h1>
+        <p class="mx-auto mt-4 max-w-xl text-base font-light leading-relaxed text-text-secondary">
+          每门课程拥有独立的学习画像、知识路径与能力雷达。选择后可通过冷启动测评获得个性化学习规划。
+        </p>
       </div>
 
-      <div v-else-if="loading && !courses.length" class="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-3" aria-label="正在加载课程">
-        <div v-for="index in 6" :key="index" class="animate-pulse rounded-lg border border-subtle bg-space-panel p-5">
-          <div class="h-5 w-2/3 rounded bg-space-elevated" />
-          <div class="mt-4 h-4 w-full rounded bg-space-elevated" />
-          <div class="mt-2 h-4 w-4/5 rounded bg-space-elevated" />
-          <div class="mt-6 h-11 w-full rounded bg-space-elevated" />
-        </div>
-      </div>
-
-      <div v-else-if="!filteredCourses.length" class="mt-6 rounded-lg border border-subtle bg-space-panel px-5 py-12 text-center">
-        <h2 class="text-lg font-bold text-text-primary">没有匹配的课程</h2>
-        <p class="mt-2 text-sm text-text-secondary">调整关键词或分类后再试。</p>
-        <button v-if="hasFilters" type="button" class="course-touch workspace-shell-btn focus-ring mt-5 px-5 text-sm font-semibold" @click="clearFilters">查看全部课程</button>
-      </div>
-
-      <div v-else class="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-3" :aria-busy="String(loading)">
-        <article v-for="course in filteredCourses" :key="course.course_id" class="flex min-w-0 flex-col rounded-lg border border-subtle bg-space-panel p-5">
-          <div class="flex items-start gap-3">
-            <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-space-elevated text-xl" aria-hidden="true">{{ course.icon || "📘" }}</span>
-            <div class="min-w-0 flex-1">
-              <div class="flex min-w-0 flex-wrap items-center gap-2">
-                <h2 class="truncate text-base font-bold text-text-primary">{{ course.title_cn }}</h2>
-                <span v-if="isEnrolled(course.course_id)" class="workspace-shell-chip workspace-shell-chip--success px-2.5 py-1 text-[11px] font-semibold">已加入</span>
-              </div>
-              <p class="mt-1 text-xs text-text-muted">{{ course.category || "未分类" }}</p>
-            </div>
-          </div>
-
-          <p class="mt-4 line-clamp-3 text-sm leading-6 text-text-secondary">{{ course.description_cn || "暂无课程介绍。" }}</p>
-
-          <dl class="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs text-text-muted">
-            <div><dt class="inline">节点 </dt><dd class="inline font-semibold text-text-secondary">{{ course.node_count || 0 }}</dd></div>
-            <div><dt class="inline">预计 </dt><dd class="inline font-semibold text-text-secondary">{{ course.estimated_hours || 0 }}h</dd></div>
-          </dl>
-
-          <div v-if="course.tags?.length" class="mt-4 flex flex-wrap gap-1.5">
-            <span v-for="tag in course.tags.slice(0, 4)" :key="tag" class="workspace-shell-chip px-2.5 py-1 text-[11px] text-text-secondary">{{ tag }}</span>
-          </div>
-
-          <div v-if="isEnrolled(course.course_id)" class="mt-5">
-            <div class="mb-2 flex items-center justify-between text-xs text-text-muted">
-              <span>学习进度</span>
-              <span>{{ enrollmentProgress(course.course_id) }}%</span>
-            </div>
-            <div class="h-1.5 overflow-hidden rounded-full bg-space-elevated">
-              <div class="h-full rounded-full bg-primary" :style="{ width: `${enrollmentProgress(course.course_id)}%` }" />
-            </div>
-          </div>
-
-          <div
-            v-if="pendingCourse?.course_id === course.course_id"
-            class="mt-5 rounded-lg border border-primary/25 bg-primary-soft p-3"
-            role="group"
-            aria-label="确认课程选择"
+      <!-- Search bar -->
+      <div class="reveal mb-8">
+        <div class="relative mx-auto max-w-lg">
+          <svg
+            width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" class="absolute left-4 top-1/2 -translate-y-1/2 text-text-muted"
           >
-            <p class="text-sm font-semibold text-text-primary">{{ confirmationTitle }}</p>
-            <p class="mt-1 text-xs leading-5 text-text-secondary">当前课程的学习位置会保留，可随时切回。</p>
-            <div class="mt-3 flex flex-wrap gap-2">
-              <button type="button" class="course-touch btn-primary focus-ring px-4 text-sm font-semibold" :disabled="loading" @click="confirmSelection">确认</button>
-              <button type="button" class="course-touch workspace-shell-btn focus-ring px-4 text-sm font-semibold" :disabled="loading" @click="pendingCourse = null">取消</button>
+            <circle cx="11" cy="11" r="8" />
+            <path d="m21 21-4.35-4.35" />
+          </svg>
+          <input
+            v-model="searchQuery"
+            type="text"
+            placeholder="搜索课程名称、标签..."
+            class="w-full rounded-2xl border border-subtle bg-card py-3.5 pl-11 pr-4 text-sm font-light text-text-primary placeholder:text-text-muted outline-none transition-all duration-200 focus:border-primary/40 focus:bg-card-hover focus:shadow-card"
+            @input="onSearchInput"
+          />
+        </div>
+      </div>
+
+      <!-- Loading state -->
+      <div v-if="loading" class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        <div v-for="i in 3" :key="i" class="animate-pulse rounded-[28px] border border-subtle bg-card p-6">
+          <div class="mb-4 flex items-center justify-between">
+            <div class="h-11 w-11 rounded-2xl bg-space-surface" />
+            <div class="h-4 w-16 rounded-full bg-space-surface" />
+          </div>
+          <div class="h-5 w-2/3 rounded bg-space-surface" />
+          <div class="mt-3 h-4 w-full rounded bg-space-surface" />
+          <div class="mt-2 h-4 w-4/5 rounded bg-space-surface" />
+          <div class="mt-4 flex gap-1.5">
+            <div class="h-6 w-12 rounded-full bg-space-surface" />
+            <div class="h-6 w-16 rounded-full bg-space-surface" />
+            <div class="h-6 w-10 rounded-full bg-space-surface" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Empty state -->
+      <div v-else-if="!filteredCourses.length" class="py-20 text-center">
+        <div class="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-card border border-subtle">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-text-muted">
+            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+          </svg>
+        </div>
+        <p class="text-base font-medium text-text-secondary">未找到匹配课程</p>
+        <p class="mt-1 text-sm text-text-muted">试试其他关键词</p>
+      </div>
+
+      <!-- Course grid -->
+      <div v-else class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        <button
+          v-for="(course, idx) in filteredCourses"
+          :key="course.course_id"
+          type="button"
+          class="reveal group relative flex min-h-[17rem] flex-col overflow-hidden rounded-2xl border border-subtle bg-card p-5 text-left transition-all duration-500 hover:-translate-y-1 hover:border-primary/30 hover:shadow-card sm:p-6"
+          :style="{ transitionDelay: `${idx * 80}ms` }"
+          :disabled="enrolling === course.course_id"
+          @click="selectCourse(course)"
+        >
+          <!-- Corner glow -->
+          <div class="absolute -right-8 -bottom-8 h-32 w-32 rounded-full bg-primary/5 blur-2xl opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
+
+          <!-- Header row -->
+          <div class="relative mb-4 flex items-center justify-between">
+            <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-space-surface text-2xl transition-colors duration-300 group-hover:bg-card-hover">
+              {{ course.icon || "📚" }}
             </div>
+            <span class="rounded-full border border-subtle bg-space-surface/50 px-2.5 py-1 text-[10px] font-mono font-bold uppercase tracking-[0.1em] text-text-muted">
+              {{ course.node_count || "?" }} 节点
+            </span>
           </div>
 
-          <div class="mt-auto pt-5">
-            <button
-              type="button"
-              class="course-touch btn-primary focus-ring w-full px-4 text-sm font-semibold"
-              :disabled="loading"
-              @click="requestSelection(course)"
-            >
-              {{ isEnrolled(course.course_id) ? "选择此课程" : "加入此课程" }}
-            </button>
+          <!-- Title -->
+          <h3 class="relative text-lg font-bold tracking-tight">{{ course.title_cn }}</h3>
+          <p class="relative mt-2 line-clamp-2 text-sm font-light leading-relaxed text-text-secondary">
+            {{ course.description_cn }}
+          </p>
+
+          <!-- Difficulty stars -->
+          <div class="relative mt-3 flex items-center gap-1">
+            <span
+              v-for="s in 5"
+              :key="s"
+              class="text-xs"
+              :class="s <= Math.ceil(course.difficulty * 5) ? 'text-warning' : 'text-text-muted/30'"
+            >★</span>
+            <span class="ml-2 text-[11px] font-medium text-text-muted">
+              {{ course.estimated_hours }}h
+            </span>
           </div>
-        </article>
+
+          <!-- Tags -->
+          <div class="relative mt-4 flex flex-wrap gap-1.5">
+            <span
+              v-for="tag in course.tags?.slice(0, 4)"
+              :key="tag"
+              class="rounded-full border border-subtle bg-space-surface/50 px-2.5 py-1 text-[10px] font-medium text-text-muted transition-colors group-hover:border-hover group-hover:text-text-secondary"
+            >{{ tag }}</span>
+          </div>
+
+          <!-- Enrolled badge -->
+          <div v-if="isEnrolled(course.course_id)" class="relative mt-4 rounded-xl border border-success/20 bg-success-soft px-3 py-2 text-center text-[11px] font-semibold text-success">
+            已注册 · {{ course.progress ? Math.round(course.progress * 100) : 0 }}% 完成
+          </div>
+
+          <!-- Selecting indicator -->
+          <div v-if="enrolling === course.course_id" class="relative mt-4 flex items-center justify-center gap-2 text-xs text-primary">
+            <span class="h-3 w-3 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+            正在初始化...
+          </div>
+        </button>
+      </div>
+
+      <!-- Back to home -->
+      <div class="mt-12 text-center">
+        <button
+          type="button"
+          class="text-xs text-text-muted underline underline-offset-4 transition-colors hover:text-primary"
+          @click="$emit('go-home')"
+        >
+          返回首页
+        </button>
       </div>
     </div>
-  </section>
+  </div>
 </template>
 
 <script setup>
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 
 const props = defineProps({
   courses: { type: Array, default: () => [] },
   enrolled: { type: Array, default: () => [] },
-  activeCourse: { type: Object, default: null },
   loading: { type: Boolean, default: false },
-  error: { type: String, default: "" },
-  returnToWorkspace: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(["select", "back", "go-home", "retry"]);
+const emit = defineEmits(["select", "go-home"]);
+
 const searchQuery = ref("");
-const category = ref("all");
-const pendingCourse = ref(null);
+const enrolling = ref(null);
+const debouncedSearch = ref("");
 
-const categories = computed(() => [...new Set(
-  props.courses.map((course) => course.category).filter(Boolean),
-)].sort((left, right) => left.localeCompare(right, "zh-CN")));
-
-const hasFilters = computed(() => Boolean(searchQuery.value.trim()) || category.value !== "all");
+let debounceTimer = null;
+function onSearchInput() {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(() => {
+    debouncedSearch.value = searchQuery.value.trim();
+  }, 200);
+}
 
 const filteredCourses = computed(() => {
-  const query = searchQuery.value.trim().toLocaleLowerCase("zh-CN");
-  return props.courses.filter((course) => {
-    if (category.value !== "all" && course.category !== category.value) return false;
-    if (!query) return true;
-    return [course.title_cn, course.title, course.description_cn, course.category, ...(course.tags || [])]
-      .join(" ")
-      .toLocaleLowerCase("zh-CN")
-      .includes(query);
-  });
+  const q = debouncedSearch.value.toLowerCase();
+  if (!q) return props.courses;
+  return props.courses.filter(c =>
+    c.title_cn?.toLowerCase().includes(q) ||
+    c.title?.toLowerCase().includes(q) ||
+    (c.tags || []).some(t => t.toLowerCase().includes(q))
+  );
 });
 
-const confirmationTitle = computed(() => isEnrolled(pendingCourse.value?.course_id)
-  ? `切换到「${pendingCourse.value?.title_cn}」？`
-  : `加入并切换到「${pendingCourse.value?.title_cn}」？`
-);
-
-function clearFilters() {
-  searchQuery.value = "";
-  category.value = "all";
-}
-
-function enrollmentFor(courseId) {
-  return props.enrolled.find((course) => course.course_id === courseId) || null;
-}
-
 function isEnrolled(courseId) {
-  return Boolean(enrollmentFor(courseId));
+  return props.enrolled.some(c => c.course_id === courseId);
 }
 
-function enrollmentProgress(courseId) {
-  const value = Number(enrollmentFor(courseId)?.progress) || 0;
-  const progress = value > 1 && value <= 100 ? value / 100 : value;
-  return Math.round(Math.min(1, Math.max(0, progress)) * 100);
-}
-
-function requestSelection(course) {
-  if (course.course_id === props.activeCourse?.course_id || !props.enrolled.length) {
+async function selectCourse(course) {
+  enrolling.value = course.course_id;
+  try {
     emit("select", course.course_id);
-    return;
+  } finally {
+    // enrolling cleared by parent re-render
   }
-  pendingCourse.value = course;
 }
 
-function confirmSelection() {
-  if (!pendingCourse.value) return;
-  emit("select", pendingCourse.value.course_id);
-  pendingCourse.value = null;
-}
+// Clear enrolling state when courses/loading change
+watch([() => props.courses, () => props.loading], () => {
+  enrolling.value = null;
+});
 </script>
 
 <style scoped>
-.course-touch {
-  min-height: 44px;
+.course-selection-view {
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding-top: max(2rem, env(safe-area-inset-top, 0px));
+  padding-bottom: max(2rem, env(safe-area-inset-bottom, 0px));
+}
+
+@media (pointer: coarse) {
+  .course-selection-view button,
+  .course-selection-view input {
+    min-height: 2.75rem;
+  }
 }
 </style>

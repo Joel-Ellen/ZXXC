@@ -1306,7 +1306,8 @@ const faqs = [
 ];
 
 function enterApp() {
-  router.push({ name: "app-workspace" });
+  mobileMenuOpen.value = false;
+  router.push("/app");
 }
 
 function scrollToTop() {

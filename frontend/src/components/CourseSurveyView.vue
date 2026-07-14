@@ -1,17 +1,17 @@
 <template>
-  <section class="relative z-10 flex min-h-screen items-center justify-center px-4 py-8 sm:px-6">
+  <section class="course-survey-view relative z-10 flex items-center justify-center px-4 py-6 sm:px-6 sm:py-8">
     <div class="mx-auto w-full max-w-2xl">
 
       <!-- Header -->
-      <header class="mb-6 flex items-center justify-between">
-        <div class="flex items-center gap-3">
+      <header class="mb-6 flex min-w-0 items-start justify-between gap-3 sm:items-center">
+        <div class="flex min-w-0 items-center gap-3">
           <div class="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-soft text-primary">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
               <circle cx="12" cy="7" r="4"/>
             </svg>
           </div>
-          <div>
+          <div class="min-w-0">
             <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">智能画像构建</p>
             <h1 class="text-[18px] font-black tracking-tight text-text-primary">
               {{ course?.title_cn || "课程" }} · 个性化入课
@@ -36,8 +36,7 @@
       </div>
 
       <!-- Chat conversation area -->
-      <div class="survey-chat-area mb-5 space-y-4 rounded-[24px] border border-subtle bg-space-panel p-5"
-           style="min-height: 340px; max-height: 520px; overflow-y: auto">
+      <div class="survey-chat-area mb-5 space-y-4 rounded-2xl border border-subtle bg-space-panel p-4 sm:p-5">
 
         <!-- Answered steps (history) -->
         <template v-for="(step, idx) in answeredSteps" :key="step.id">
@@ -119,10 +118,8 @@
 
         <!-- Text input -->
         <div v-else class="space-y-3">
-          <label for="course-survey-answer" class="sr-only">{{ currentStep.label }}</label>
           <input
             v-if="currentStep.inputType !== 'textarea'"
-            id="course-survey-answer"
             :value="draftAnswerFor(currentStep.id)"
             :type="currentStep.inputType || 'text'"
             :placeholder="currentStep.placeholder || '请输入…'"
@@ -132,7 +129,6 @@
           />
           <textarea
             v-else
-            id="course-survey-answer"
             :value="draftAnswerFor(currentStep.id)"
             :placeholder="currentStep.placeholder || '请输入…'"
             rows="3"
@@ -289,6 +285,20 @@ function formatAnswer(step) {
 </script>
 
 <style scoped>
+.course-survey-view {
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding-top: max(1.5rem, env(safe-area-inset-top, 0px));
+  padding-bottom: max(1.5rem, env(safe-area-inset-bottom, 0px));
+}
+
+.survey-chat-area {
+  min-height: clamp(16rem, 42dvh, 21.25rem);
+  max-height: min(32.5rem, 56dvh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .survey-bubble {
   border-radius: 1.125rem;
   padding: 0.75rem 1rem;
@@ -328,5 +338,16 @@ function formatAnswer(step) {
   background: var(--color-primary-soft);
   color: var(--color-primary-dark);
   font-weight: 600;
+}
+
+@media (max-height: 700px) {
+  .course-survey-view {
+    align-items: flex-start;
+  }
+
+  .survey-chat-area {
+    min-height: 12rem;
+    max-height: 42dvh;
+  }
 }
 </style>

@@ -1,10 +1,10 @@
 <template>
-  <div class="min-h-screen text-text-primary font-sans relative">
+  <div class="app-workspace-view text-text-primary font-sans relative">
     <AuroraBackground :reduce-motion="false" />
 
     <div
       v-if="bootMode === 'loading'"
-      class="relative z-10 flex h-screen items-center justify-center animate-fadeIn"
+      class="app-workspace-loading relative z-10 flex items-center justify-center animate-fadeIn"
     >
       <div class="text-center animate-fadeIn">
         <div class="relative mx-auto mb-6 h-20 w-20">
@@ -22,8 +22,7 @@
 
     <AuthView
       v-else-if="bootMode === 'login'"
-      :submit-login="onLogin"
-      :submit-register="onRegister"
+      @login-success="onLoginSuccess"
       @go-home="goHome"
     />
 
@@ -32,14 +31,23 @@
       :courses="availableCourses"
       :enrolled="enrolledCourses"
       :loading="isBusy"
-      :return-to-workspace="courseSelectionReturnMode !== null"
       @select="onCourseSelect"
-      @back="returnToWorkspace"
       @go-home="goHome"
     />
 
+    <ColdStartAssessmentView
+      v-else-if="bootMode === 'probe'"
+      :user="currentUser"
+      :active-course="activeCourse"
+      :probe="probe"
+      :collected="probeCollected"
+      :total="probeTotal"
+      :submitting="isSubmittingProbe"
+      @submit="submitProbe"
+    />
+
     <PremiumWorkspace
-      v-else-if="bootMode === 'probe' || bootMode === 'ready'"
+      v-else-if="bootMode === 'ready'"
       :boot-mode="bootMode"
       :user="currentUser"
       :current-node="currentNode"
@@ -71,28 +79,29 @@
       @submit-probe="submitProbe"
       @logout="handleLogout"
       @go-home="goHome"
-      @browse-courses="openCourseSelection"
       @switch-course="onSwitchCourse"
       @refresh-resources="() => refreshNodeResources(currentNode, true)"
       @generate-card="onGenerateCard"
+      @restart-probe="restartProbe"
     />
   </div>
 </template>
 
 <script setup>
-import { defineAsyncComponent, onMounted, ref } from "vue";
+import { defineAsyncComponent, onMounted } from "vue";
 import { useRouter } from "vue-router";
 import AuroraBackground from "../components/AuroraBackground.vue";
 import { useEduAgent } from "../composables/useEduAgent";
 
 const AuthView = defineAsyncComponent(() => import("../components/AuthView.vue"));
+const ColdStartAssessmentView = defineAsyncComponent(() => import("../components/ColdStartAssessmentView.vue"));
 const CourseSelectionView = defineAsyncComponent(() => import("../components/CourseSelectionView.vue"));
 const PremiumWorkspace = defineAsyncComponent(() => import("../components/PremiumWorkspace.vue"));
 
 const router = useRouter();
-const courseSelectionReturnMode = ref(null);
 
 const {
+  isLoggedIn,
   bootMode,
   isSubmittingProbe,
   isBusy,
@@ -116,8 +125,6 @@ const {
   activeCourse,
   availableCourses,
   enrolledCourses,
-  handleLogin,
-  handleRegister,
   handleLogout,
   bootstrap,
   submitProbe,
@@ -130,54 +137,25 @@ const {
   parseQuiz,
   handleEnrollCourse,
   handleSwitchCourse,
+  restartProbe,
 } = useEduAgent();
 
 onMounted(() => {
   bootstrap();
 });
 
-async function onLogin(userId, password, captchaToken, captchaAnswer) {
-  await handleLogin(userId, password, captchaToken, captchaAnswer);
-  await bootstrap();
-}
-
-async function onRegister(userId, email, password, captchaToken, captchaAnswer) {
-  await handleRegister(userId, email, password, captchaToken, captchaAnswer);
+async function onLoginSuccess(result) {
+  currentUser.value = result.user;
+  isLoggedIn.value = true;
   await bootstrap();
 }
 
 function goHome() {
-  courseSelectionReturnMode.value = null;
   router.push("/");
 }
 
-function openCourseSelection() {
-  courseSelectionReturnMode.value = bootMode.value;
-  bootMode.value = "course_selection";
-}
-
-function returnToWorkspace() {
-  const returnMode = courseSelectionReturnMode.value;
-  courseSelectionReturnMode.value = null;
-  bootMode.value = returnMode === "probe" ? "probe" : "ready";
-}
-
-async function onCourseSelect(courseId) {
-  const isEnrolled = enrolledCourses.value.some((course) => course.course_id === courseId);
-
-  if (isEnrolled) {
-    if (activeCourse.value?.course_id === courseId) {
-      returnToWorkspace();
-      return;
-    }
-    await handleSwitchCourse(courseId);
-  } else {
-    await handleEnrollCourse(courseId);
-  }
-
-  if (bootMode.value !== "course_selection") {
-    courseSelectionReturnMode.value = null;
-  }
+function onCourseSelect(courseId) {
+  handleEnrollCourse(courseId);
 }
 
 async function onSendTutorMessage(payload) {
@@ -192,9 +170,25 @@ function onSwitchCourse(courseId) {
   handleSwitchCourse(courseId);
 }
 
-async function onGenerateCard({ nodeId, cardType = "", force = false } = {}) {
+async function onGenerateCard({ nodeId, force = false } = {}) {
   const targetNode = nodeId || currentNode.value;
   if (!targetNode) return;
-  await refreshNodeResources(targetNode, { force, cardType });
+  await refreshNodeResources(targetNode, force);
 }
 </script>
+
+<style scoped>
+.app-workspace-view,
+.app-workspace-loading {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.app-workspace-loading {
+  padding:
+    env(safe-area-inset-top, 0px)
+    env(safe-area-inset-right, 0px)
+    env(safe-area-inset-bottom, 0px)
+    env(safe-area-inset-left, 0px);
+}
+</style>

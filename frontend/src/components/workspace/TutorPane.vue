@@ -7,20 +7,9 @@
     tabindex="-1"
     aria-label="辅导区"
   >
-    <div v-if="feedbackItems.length || lastDiagnostic" class="tutor-pane__feedback aurora-scroll">
-      <AgentFeedbackPanel
-        :feedback-items="feedbackItems"
-        :last-diagnostic="lastDiagnostic"
-        :current-node-title="currentNodeTitle"
-      />
-    </div>
-
     <div class="tutor-pane__chat">
       <ChatArea
-        ref="chatAreaRef"
         :messages="messages"
-        :session-id="sessionId"
-        :node-id="currentNode"
         :boot-mode="bootMode"
         :probe="probe"
         :probe-collected="probeCollected"
@@ -38,16 +27,11 @@
 
 <script setup>
 import { ref } from "vue";
-import AgentFeedbackPanel from "../AgentFeedbackPanel.vue";
 import ChatArea from "../ChatArea.vue";
 
 defineProps({
   panelId: { type: String, default: "workspace-coach-panel" },
-  feedbackItems: { type: Array, default: () => [] },
-  lastDiagnostic: { type: Object, default: null },
   currentNodeTitle: { type: String, default: "" },
-  currentNode: { type: String, default: "" },
-  sessionId: { type: String, default: "" },
   messages: { type: Array, default: () => [] },
   bootMode: { type: String, default: "loading" },
   probe: { type: Object, default: null },
@@ -61,7 +45,6 @@ defineProps({
 defineEmits(["send", "submit-probe"]);
 
 const paneRef = ref(null);
-const chatAreaRef = ref(null);
 
 function focus() {
   paneRef.value?.focus({ preventScroll: true });
@@ -71,11 +54,7 @@ function getElement() {
   return paneRef.value;
 }
 
-function flushLearningAssets() {
-  return chatAreaRef.value?.flushLearningAssets?.() ?? Promise.resolve();
-}
-
-defineExpose({ focus, getElement, flushLearningAssets });
+defineExpose({ focus, getElement });
 </script>
 
 <style scoped>
@@ -89,25 +68,11 @@ defineExpose({ focus, getElement, flushLearningAssets });
   outline: none;
 }
 
-.tutor-pane__feedback {
-  max-height: min(10rem, 22vh);
-  overflow-y: auto;
-  border-bottom: 1px solid var(--border-subtle);
-  padding: 0.8rem;
-}
-
 .tutor-pane__chat {
   display: flex;
   min-height: 0;
   flex: 1;
   overflow: hidden;
-}
-
-/* A probe is the active task. Keeping the feedback rail visible at desktop
-   widths can consume the entire chat flex area and leave the options under
-   the composer. */
-.tutor-pane.is-probe .tutor-pane__feedback {
-  display: none;
 }
 
 @media (max-width: 767px) {
@@ -125,9 +90,11 @@ defineExpose({ focus, getElement, flushLearningAssets });
   }
 }
 
-@media (min-width: 1280px) {
+@media (min-width: 1100px) {
   .tutor-pane {
-    background: var(--space-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    background: var(--space-panel);
   }
 }
 </style>

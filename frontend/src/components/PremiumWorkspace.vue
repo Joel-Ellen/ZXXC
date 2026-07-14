@@ -1,40 +1,50 @@
 <template>
   <WorkspaceShell
     :path-nodes="pathNodes"
-    :current-node="currentNode"
+    :active-panel="sidebarPanel"
+    :drawer-open="drawerOpen"
+    panel-id="workspace-sidebar-drawer"
     :high-contrast="highContrast"
     :reduce-motion="reduceMotion"
     :font-size="fontSize"
     :busy="isWorkspaceBusy"
-    @select-node="onSelectNode"
+    @select-panel="onSidebarSelect"
     @workspace-wheel="forwardWorkspaceWheel"
   >
     <template #header>
       <SessionHeader
+        :user="user"
         :active-course="activeCourse"
         :enrolled-courses="enrolledCourses"
+        :boot-mode="bootMode"
         :node-title="nodeTitle"
         :current-node="currentNode"
         :path-nodes="pathNodes"
+        :cards="cards"
         :overall-progress="overallProgress"
         :mastered-count="masteredCount"
         :info-message="infoMessage"
-        :tutor-collapsed="tutorCollapsed"
+        :is-busy="isBusy"
+        :is-loading-node="isLoadingNode"
+        :navigation="workspaceNavItems"
         @switch-course="onSwitchCourse"
         @browse-courses="handleBrowseCourses"
-        @toggle-tutor="toggleTutor"
-        @navigate="(key) => $emit('navigate', key)"
+        @go-home="$emit('go-home')"
+        @logout="$emit('logout')"
+        @navigate="handleNav"
       />
     </template>
 
-    <div class="workspace-pane-layout relative min-h-0 flex-1" :class="{ 'has-collapsed-tutor': tutorCollapsed }">
+    <div
+      class="workspace-pane-layout relative min-h-0 flex-1"
+      :class="{ 'is-tutor-collapsed': isTutorCollapsed }"
+    >
       <LearningPane
         ref="learnPanelRef"
         class="workspace-pane-layout__pane workspace-pane-layout__learning"
         :class="{ 'is-active-mobile': effectiveMobilePane === 'learn' }"
         panel-id="workspace-learn-panel"
         :cards="cards"
-        :session-id="sessionId"
         :current-node="currentNode"
         :node-title="nodeTitle"
         :path-nodes="pathNodes"
@@ -42,9 +52,6 @@
         :overall-progress="overallProgress"
         :mastered-count="masteredCount"
         :last-diagnostic="lastDiagnostic"
-        :focus-card-type="focusCardType"
-        :review-item-id="reviewItemId"
-        :review-phase="reviewPhase"
         :filter-type="activeResourceCategory"
         :get-card-label="getCardLabel"
         :get-agent-label="getAgentLabel"
@@ -53,28 +60,15 @@
         @select-node="(id) => onSelectNode(id)"
         @refresh="$emit('refresh-resources')"
         @generate-card="(payload) => $emit('generate-card', payload)"
-        @content-viewed="(payload) => $emit('content-viewed', payload)"
-        @hint-requested="(payload) => $emit('hint-requested', payload)"
-        @answer-selected="(payload) => $emit('answer-selected', payload)"
-        @code-run="(payload) => $emit('code-run', payload)"
-        @code-submitted="(payload) => $emit('code-submitted', payload)"
-        @open-review="$emit('open-review')"
-        @prepare-review-retest="(itemId) => $emit('prepare-review-retest', itemId)"
       />
 
       <TutorPane
         ref="coachPanelRef"
         class="workspace-pane-layout__pane workspace-pane-layout__tutor"
-        :class="{
-          'is-active-mobile': effectiveMobilePane === 'coach',
-          'is-collapsed-desktop': tutorCollapsed,
-        }"
+        :class="{ 'is-active-mobile': effectiveMobilePane === 'coach' }"
+        :aria-hidden="isTutorCollapsed ? 'true' : undefined"
         panel-id="workspace-coach-panel"
-        :feedback-items="agentFeedback"
-        :last-diagnostic="lastDiagnostic"
         :current-node-title="nodeTitle"
-        :current-node="currentNode"
-        :session-id="sessionId"
         :messages="messages"
         :boot-mode="bootMode"
         :probe="probe"
@@ -87,17 +81,13 @@
         @submit-probe="(values) => $emit('submit-probe', values)"
       />
 
-      <nav
-        v-if="bootMode !== 'probe'"
-        class="mobile-dock sticky bottom-0 z-20 border-t border-subtle xl:hidden"
-        aria-label="学习工作区切换"
-      >
+      <nav class="mobile-dock sticky bottom-0 z-20 border-t border-subtle bg-space-panel/88 px-3 py-2 backdrop-blur-xl" aria-label="工作台切换">
         <div class="mobile-dock__actions">
           <button
             v-for="item in dockActions"
             :key="item.key"
             type="button"
-            class="focus-ring mobile-dock__action"
+            class="focus-ring min-h-11 min-w-0 rounded-xl border px-2 py-2 text-[11px] font-semibold transition-all duration-200"
             :class="mobileActionClass(item.key)"
             :aria-controls="navTargetId(item.key)"
             :aria-expanded="navExpandedState(item.key)"
@@ -114,11 +104,23 @@
     <template #drawer>
       <SidebarDrawer
         :open="drawerOpen"
+        :active-panel="sidebarPanel"
         panel-id="workspace-sidebar-drawer"
         :nodes="pathNodes"
         :current-node="currentNode"
+        :radar-values="capabilityRadar"
+        :feedback-items="agentFeedback"
+        :last-diagnostic="lastDiagnostic"
+        :current-node-title="nodeTitle"
+        :high-contrast="highContrast"
+        :reduce-motion="reduceMotion"
+        :font-size="fontSize"
         @select-node="(id) => onSelectNode(id)"
-        @close="closeDrawer"
+        @switch-panel="onDrawerPanelSwitch"
+        @toggle-contrast="highContrast = !highContrast"
+        @toggle-motion="reduceMotion = !reduceMotion"
+        @set-font-size="(size) => fontSize = size"
+        @close="drawerOpen = false"
       />
     </template>
 
@@ -126,12 +128,12 @@
       <transition name="fade">
         <div
           v-if="isBusy || isLoadingNode"
-          class="pointer-events-auto absolute inset-0 z-30 flex items-center justify-center bg-space-bg"
+          class="pointer-events-auto absolute inset-0 z-30 flex items-center justify-center bg-space-bg/28 backdrop-blur-[2px]"
           role="status"
           aria-live="polite"
           aria-atomic="true"
         >
-          <div class="rounded-lg border border-subtle bg-space-panel px-6 py-5">
+          <div class="rounded-[24px] border border-subtle bg-space-panel/95 px-6 py-5 shadow-2xl backdrop-blur-xl">
             <div class="flex items-center gap-4">
               <div class="relative h-10 w-10">
                 <div class="absolute inset-0 rounded-full border border-primary/20 animate-spin-slow" />
@@ -150,7 +152,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import SidebarDrawer from "./SidebarDrawer.vue";
 import LearningPane from "./workspace/LearningPane.vue";
 import SessionHeader from "./workspace/SessionHeader.vue";
@@ -165,13 +167,13 @@ const DRAWER_PANEL_ID = "workspace-sidebar-drawer";
 const props = defineProps({
   bootMode: { type: String, default: "loading" },
   user: { type: Object, default: null },
-  sessionId: { type: String, default: "" },
   currentNode: { type: String, default: "" },
   cards: { type: Array, default: () => [] },
   pathNodes: { type: Array, default: () => [] },
   nodeTitle: { type: String, default: "" },
   messages: { type: Array, default: () => [] },
   agentFeedback: { type: Array, default: () => [] },
+  capabilityRadar: { type: Array, default: () => [0.5, 0.5, 0.5, 0.5, 0.5] },
   overallProgress: { type: Number, default: 0 },
   masteredCount: { type: Number, default: 0 },
   statuses: { type: Array, default: () => [] },
@@ -183,15 +185,11 @@ const props = defineProps({
   probeCollected: { type: Number, default: 0 },
   probeTotal: { type: Number, default: 6 },
   lastDiagnostic: { type: Object, default: null },
-  focusCardType: { type: String, default: "" },
-  reviewItemId: { type: String, default: "" },
-  reviewPhase: { type: String, default: "" },
   getCardLabel: { type: Function, required: true },
   getAgentLabel: { type: Function, required: true },
   parseQuiz: { type: Function, required: true },
   activeCourse: { type: Object, default: null },
   enrolledCourses: { type: Array, default: () => [] },
-  learningView: { type: String, default: "learn" },
 });
 
 const emit = defineEmits([
@@ -200,22 +198,16 @@ const emit = defineEmits([
   "send-tutor",
   "submit-probe",
   "logout",
-  "browse-courses",
+  "go-home",
   "switch-course",
   "refresh-resources",
   "generate-card",
-  "content-viewed",
-  "hint-requested",
-  "answer-selected",
-  "code-run",
-  "code-submitted",
-  "open-review",
-  "prepare-review-retest",
-  "navigate",
+  "restart-probe",
 ]);
 
 const drawerOpen = ref(false);
-const activeResourceCategory = ref("all"); // which content type is active
+const sidebarPanel = ref("concept");
+const activeResourceCategory = ref("concept"); // which content type is active
 const learnPanelRef = ref(null);
 const coachPanelRef = ref(null);
 
@@ -223,16 +215,46 @@ const highContrast = ref(false);
 const reduceMotion = ref(false);
 const fontSize = ref(16);
 const mobilePane = ref("learn");
-const mobileTab = ref("learn");
 const tutorCollapsed = ref(false);
+const isDesktopViewport = ref(false);
+let desktopMediaQuery = null;
 const isWorkspaceBusy = computed(() => props.isBusy || props.isLoadingNode);
+const isTutorCollapsed = computed(() => (
+  isDesktopViewport.value && tutorCollapsed.value && props.bootMode !== "probe"
+));
+
+const workspaceNav = [
+  { key: "learn", label: "学习区" },
+  { key: "coach", label: "辅导区" },
+  { key: "path", label: "路径" },
+  { key: "assessment", label: "诊断" },
+  { key: "feedback", label: "反馈" },
+  { key: "settings", label: "设置" },
+  { key: "probe", label: "测试" },
+];
 
 const dockActions = [
-  { key: "learn", label: "内容" },
-  { key: "coach", label: "导师" },
+  { key: "learn", label: "学习" },
+  { key: "coach", label: "辅导" },
   { key: "path", label: "路径" },
-  { key: "notes", label: "笔记" },
+  { key: "assessment", label: "诊断" },
+  { key: "feedback", label: "反馈" },
+  { key: "settings", label: "设置" },
+  { key: "probe", label: "测试" },
 ];
+
+const workspaceNavItems = computed(() =>
+  workspaceNav.map((item) => ({
+    ...item,
+    label: item.key === "coach" && isDesktopViewport.value
+      ? (isTutorCollapsed.value ? "展开辅导" : "收起辅导")
+      : item.label,
+    active: isNavActive(item.key),
+    expanded: navExpandedState(item.key),
+    hasPopup: isDrawerAction(item.key),
+    targetId: navTargetId(item.key),
+  })),
+);
 
 const coachPrompts = computed(() => {
   const nodeLabel = props.nodeTitle || "当前知识点";
@@ -247,14 +269,6 @@ const coachPrompts = computed(() => {
 const effectiveMobilePane = computed(() => (
   props.bootMode === "probe" ? "coach" : mobilePane.value
 ));
-
-const FOCUS_CARD_CATEGORY = {
-  concept_map: "concept",
-  code_snippet: "code",
-  interactive_exercise: "practice",
-  video_summary: "video",
-  diagnostic_quiz: "quiz",
-};
 
 const loadingTitle = computed(() => (
   props.isLoadingNode ? "正在装配当前节点的学习资源" : "正在同步工作台状态"
@@ -271,81 +285,14 @@ watch(
   (mode) => {
     if (mode === "probe") {
       mobilePane.value = "coach";
-      mobileTab.value = "coach";
-      drawerOpen.value = false;
-      return;
     }
-
-    syncLearningView(props.learningView);
   },
   { immediate: true },
 );
 
 watch(
-  () => props.learningView,
-  (view) => {
-    if (props.bootMode !== "probe") syncLearningView(view);
-  },
-  { immediate: true },
-);
-
-function syncLearningView(view) {
-  if (view === "coach") {
-    mobilePane.value = "coach";
-    mobileTab.value = "coach";
-    drawerOpen.value = false;
-    void focusWorkspaceRegion("coach");
-  } else if (view === "path") {
-    mobilePane.value = "learn";
-    mobileTab.value = "path";
-    drawerOpen.value = true;
-  } else if (view === "notes") {
-    mobilePane.value = "learn";
-    mobileTab.value = "notes";
-    drawerOpen.value = false;
-    void nextTick(showNotes);
-  } else {
-    mobilePane.value = "learn";
-    mobileTab.value = "learn";
-    drawerOpen.value = false;
-    void focusWorkspaceRegion("learn");
-  }
-}
-
-watch(
-  [
-    () => props.learningView,
-    () => props.cards.length,
-    () => props.isLoadingNode,
-  ],
-  ([view, cardCount, loading]) => {
-    if (view === "notes" && cardCount > 0 && !loading) {
-      void nextTick(showNotes);
-    }
-  },
-  { flush: "post" },
-);
-
-// A review route can change its required card while the learner is already
-// filtering the canvas. Keep the visible category aligned with that route so
-// a fresh retest cannot remain hidden behind the prior practice card.
-watch(
-  () => props.focusCardType,
-  (cardType) => {
-    const category = FOCUS_CARD_CATEGORY[cardType];
-    if (!category) {
-      return;
-    }
-    activeResourceCategory.value = category;
-    mobilePane.value = "learn";
-    mobileTab.value = "learn";
-  },
-  { immediate: true },
-);
-
-watch(
-  [highContrast, reduceMotion, fontSize],
-  ([nextContrast, nextMotion, nextFont]) => {
+  [highContrast, reduceMotion, fontSize, tutorCollapsed],
+  ([nextContrast, nextMotion, nextFont, nextTutorCollapsed]) => {
     if (typeof window === "undefined") {
       return;
     }
@@ -354,6 +301,7 @@ watch(
       highContrast: nextContrast,
       reduceMotion: nextMotion,
       fontSize: nextFont,
+      tutorCollapsed: nextTutorCollapsed,
     }));
   },
 );
@@ -362,6 +310,10 @@ onMounted(() => {
   if (typeof window === "undefined") {
     return;
   }
+
+  desktopMediaQuery = window.matchMedia("(min-width: 1100px)");
+  updateDesktopViewport(desktopMediaQuery);
+  desktopMediaQuery.addEventListener?.("change", updateDesktopViewport);
 
   try {
     const raw = window.localStorage.getItem(PREFERENCES_KEY);
@@ -373,24 +325,59 @@ onMounted(() => {
     highContrast.value = Boolean(saved.highContrast);
     reduceMotion.value = Boolean(saved.reduceMotion);
     fontSize.value = typeof saved.fontSize === "number" ? saved.fontSize : 16;
+    tutorCollapsed.value = Boolean(saved.tutorCollapsed);
   } catch {
     highContrast.value = false;
     reduceMotion.value = false;
     fontSize.value = 16;
+    tutorCollapsed.value = false;
   }
 });
+
+onBeforeUnmount(() => {
+  desktopMediaQuery?.removeEventListener?.("change", updateDesktopViewport);
+});
+
+function updateDesktopViewport(event) {
+  isDesktopViewport.value = Boolean(event.matches);
+}
+
+function onSidebarSelect(panelKey) {
+  if (panelKey === "probe") {
+    emit("restart-probe");
+    return;
+  }
+
+  // Content category keys → update filter, close drawer
+  const CONTENT_KEYS = new Set(["concept", "code", "practice", "video", "quiz", "all"]);
+  if (CONTENT_KEYS.has(panelKey)) {
+    activeResourceCategory.value = panelKey;
+    sidebarPanel.value = panelKey;
+    drawerOpen.value = false;
+    return;
+  }
+  // Drawer keys (tree, radar, settings)
+  if (sidebarPanel.value === panelKey && drawerOpen.value) {
+    drawerOpen.value = false;
+  } else {
+    sidebarPanel.value = panelKey;
+    drawerOpen.value = true;
+  }
+}
+
+function openPanel(panelKey) {
+  sidebarPanel.value = panelKey;
+  drawerOpen.value = true;
+}
+
+function onDrawerPanelSwitch(panelKey) {
+  openPanel(panelKey);
+}
 
 function onSelectNode(nodeId) {
   emit("select-node", nodeId);
   drawerOpen.value = false;
-}
-
-function closeDrawer() {
-  drawerOpen.value = false;
-  if (mobileTab.value === "path") {
-    mobileTab.value = "learn";
-    emit("navigate", "learn");
-  }
+  mobilePane.value = "learn";
 }
 
 function onSwitchCourse(courseId) {
@@ -398,20 +385,15 @@ function onSwitchCourse(courseId) {
 }
 
 function handleBrowseCourses() {
-  emit("browse-courses");
+  emit("go-home");
 }
 
 function handleCoachSend(message) {
   mobilePane.value = "coach";
-  mobileTab.value = "coach";
-  emit("navigate", "coach");
   emit("send-tutor", message);
 }
 
 async function handleNav(key) {
-  emit("navigate", key);
-  mobileTab.value = key;
-
   if (key === "learn") {
     mobilePane.value = "learn";
     drawerOpen.value = false;
@@ -420,6 +402,21 @@ async function handleNav(key) {
   }
 
   if (key === "coach") {
+    if (isDesktopViewport.value) {
+      if (props.bootMode === "probe") {
+        tutorCollapsed.value = false;
+        await focusWorkspaceRegion("coach");
+        return;
+      }
+
+      tutorCollapsed.value = !tutorCollapsed.value;
+      drawerOpen.value = false;
+      if (!tutorCollapsed.value) {
+        await focusWorkspaceRegion("coach");
+      }
+      return;
+    }
+
     mobilePane.value = "coach";
     drawerOpen.value = false;
     await focusWorkspaceRegion("coach");
@@ -427,29 +424,73 @@ async function handleNav(key) {
   }
 
   if (key === "path") {
-    mobilePane.value = "learn";
-    drawerOpen.value = true;
+    openPanel("tree");
     return;
   }
 
-  if (key === "notes") {
-    mobilePane.value = "learn";
-    drawerOpen.value = false;
-    await nextTick();
-    showNotes();
+  if (key === "assessment") {
+    openPanel("radar");
     return;
+  }
+
+  if (key === "feedback") {
+    openPanel("feedback");
+    return;
+  }
+
+  if (key === "settings") {
+    openPanel("settings");
+    return;
+  }
+
+  if (key === "probe") {
+    emit("restart-probe");
   }
 }
 
 function isDrawerAction(key) {
-  return key === "path";
+  return key === "path" || key === "assessment" || key === "feedback" || key === "settings";
 }
 
 function isNavActive(key) {
-  return mobileTab.value === key;
+  if (isDesktopViewport.value) {
+    if (key === "learn") {
+      return true;
+    }
+
+    if (key === "coach") {
+      return !isTutorCollapsed.value;
+    }
+  }
+
+  if (key === "learn" || key === "coach") {
+    return effectiveMobilePane.value === key;
+  }
+
+  if (key === "path") {
+    return drawerOpen.value && sidebarPanel.value === "tree";
+  }
+
+  if (key === "assessment") {
+    return drawerOpen.value && sidebarPanel.value === "radar";
+  }
+
+  if (key === "feedback") {
+    return drawerOpen.value && sidebarPanel.value === "feedback";
+  }
+
+  if (key === "settings") {
+    return drawerOpen.value && sidebarPanel.value === "settings";
+  }
+
+  return false;
 }
 
 function navTargetId(key) {
+  if (key === "probe") {
+    return undefined;
+  }
+
   if (key === "learn") {
     return LEARN_PANEL_ID;
   }
@@ -458,29 +499,23 @@ function navTargetId(key) {
     return COACH_PANEL_ID;
   }
 
-  if (key === "path") {
-    return DRAWER_PANEL_ID;
-  }
-
-  return undefined;
+  return DRAWER_PANEL_ID;
 }
 
 function navExpandedState(key) {
-  return isDrawerAction(key) ? String(drawerOpen.value) : undefined;
-}
-
-function toggleTutor() {
-  tutorCollapsed.value = !tutorCollapsed.value;
-}
-
-function showNotes() {
-  if (typeof learnPanelRef.value?.scrollToAnnotations === "function") {
-    learnPanelRef.value.scrollToAnnotations();
+  if (key === "coach" && isDesktopViewport.value) {
+    return String(!isTutorCollapsed.value);
   }
+
+  if (!isDrawerAction(key)) {
+    return undefined;
+  }
+
+  return String(isNavActive(key));
 }
 
 async function focusWorkspaceRegion(key) {
-  if (typeof window === "undefined" || window.matchMedia("(min-width: 1280px)").matches) {
+  if (typeof window === "undefined" || !window.matchMedia("(min-width: 1100px)").matches) {
     return;
   }
 
@@ -498,7 +533,9 @@ async function focusWorkspaceRegion(key) {
 }
 
 function mobileActionClass(key) {
-  return isNavActive(key) ? "is-active" : "";
+  return isNavActive(key)
+    ? "border-primary/25 bg-primary-soft text-primary"
+    : "border-subtle bg-card text-text-muted";
 }
 
 function forwardWorkspaceWheel(event) {
@@ -535,7 +572,7 @@ function findPrimaryScrollTarget(paneElement, paneKey) {
     return paneElement.querySelector("[data-chat-scroll='true']");
   }
 
-  return paneElement.querySelector(".resource-canvas > .aurora-scroll")
+  return paneElement.querySelector(".resource-canvas")
     ?? paneElement.querySelector(".aurora-scroll");
 }
 
@@ -551,19 +588,12 @@ function resolvePaneElement(target) {
 
   return null;
 }
-
-function flushLearningAssets() {
-  return coachPanelRef.value?.flushLearningAssets?.() ?? Promise.resolve();
-}
-
-defineExpose({ flushLearningAssets });
 </script>
 
 <style scoped>
 .workspace-pane-layout {
   display: flex;
   flex-direction: column;
-  background: var(--space-bg);
   overflow: hidden;
 }
 
@@ -579,48 +609,22 @@ defineExpose({ flushLearningAssets });
 .mobile-dock {
   z-index: 40;
   background: var(--space-panel);
-  padding: 0.5rem 0.65rem calc(env(safe-area-inset-bottom, 0px) + 0.5rem);
+  box-shadow: 0 -10px 24px rgba(15, 23, 42, 0.08);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.75rem);
 }
 
 .mobile-dock__actions {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.35rem;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.4rem;
 }
 
-.mobile-dock__action {
-  min-height: 2.75rem;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 0.74rem;
-  font-weight: 650;
-  line-height: 1;
-  padding: 0.5rem 0.25rem;
-  white-space: nowrap;
-}
-
-.mobile-dock__action.is-active {
-  border-color: color-mix(in srgb, var(--color-primary) 25%, var(--border-subtle));
-  background: var(--color-primary-soft);
-  color: var(--color-primary-dark);
-}
-
-.mobile-dock__action:active {
-  transform: translateY(1px);
-}
-
-@media (min-width: 1280px) {
+@media (min-width: 1100px) {
   .workspace-pane-layout {
     display: grid;
-    grid-template-columns: minmax(0, 5fr) minmax(0, 3fr);
-    gap: 0;
-    padding: 0;
-  }
-
-  .workspace-pane-layout.has-collapsed-tutor {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(19rem, 20.5rem);
+    gap: 0.5rem;
+    padding: 0 1rem 1rem;
   }
 
   .workspace-pane-layout__pane,
@@ -630,16 +634,26 @@ defineExpose({ flushLearningAssets });
     min-height: 0;
   }
 
-  .workspace-pane-layout__learning {
-    border-right: 1px solid var(--border-subtle);
+  .workspace-pane-layout.is-tutor-collapsed {
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .workspace-pane-layout__tutor.is-collapsed-desktop {
+  .workspace-pane-layout.is-tutor-collapsed .workspace-pane-layout__tutor {
     display: none;
   }
 
   .mobile-dock {
     display: none;
+  }
+}
+
+@media (max-width: 359px) {
+  .mobile-dock {
+    padding-inline: 0.4rem;
+  }
+
+  .mobile-dock__actions {
+    gap: 0.25rem;
   }
 }
 
