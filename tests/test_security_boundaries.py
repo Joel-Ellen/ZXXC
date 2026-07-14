@@ -77,6 +77,51 @@ def test_production_auth_storage_failure_returns_503_without_json_fallback(monke
     assert response.headers["cache-control"] == "no-store"
 
 
+def test_production_auth_uses_shared_captcha_storage(monkeypatch):
+    class UserRepo:
+        def count(self):
+            return 1
+
+    class SharedRedis:
+        def set(self, *_args, **_kwargs):
+            return True
+
+        def getdel(self, _key):
+            return None
+
+    shared_redis = SharedRedis()
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("JWT_SECRET_KEY", VALID_PRODUCTION_SECRET)
+    monkeypatch.setattr(server, "_db_available", True)
+    monkeypatch.setattr(server, "_user_repo", None)
+    monkeypatch.setattr(server, "_auth_captcha", None)
+    monkeypatch.setattr(server, "_auth_backend_durable", False)
+    monkeypatch.setattr(server, "_get_user_repo", lambda: UserRepo())
+    monkeypatch.setattr(server, "get_redis", lambda: shared_redis)
+    monkeypatch.setattr(server, "redis_backend_status", lambda: "redis")
+
+    _store, captcha = server._get_auth()
+
+    assert captcha.uses_shared_backend is True
+
+
+def test_shared_captcha_failure_returns_retryable_503(monkeypatch):
+    from src.auth.captcha import CaptchaGenerator
+
+    class BrokenRedis:
+        def set(self, *_args, **_kwargs):
+            raise ConnectionError("redis unavailable")
+
+    captcha = CaptchaGenerator(redis_client=BrokenRedis(), require_shared=True)
+    monkeypatch.setattr(server, "_get_auth", lambda: (object(), captcha))
+
+    response = TestClient(server.app).get("/api/auth/captcha-json")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "AUTH_STORAGE_UNAVAILABLE"
+    assert response.headers["retry-after"] == "5"
+
+
 def _headers(user_id: str) -> dict[str, str]:
     token = SecurityManager.create_token_pair(user_id, "STUDENT")["access_token"]
     return {"Authorization": f"Bearer {token}"}

@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from src.auth.security import (
     SecurityManager, FAKE_HASH, JWT_SECRET_KEY, ALGORITHM, ARGON2_AVAILABLE,
 )
-from src.auth.captcha import CaptchaGenerator, CaptchaRecord
+from src.auth.captcha import CaptchaBackendUnavailable, CaptchaGenerator, CaptchaRecord
 from src.auth.models import UserStore, UserRecord, PresetAccounts
 from src.auth.graph_guard import LangGraphImmutableContextGuard
 from src.state.agent_state import AgentState
@@ -51,6 +51,22 @@ def store(tmp_path) -> UserStore:
 @pytest.fixture
 def captcha() -> CaptchaGenerator:
     return CaptchaGenerator()
+
+
+class SharedCaptchaRedis:
+    def __init__(self) -> None:
+        self.values: dict[str, bytes] = {}
+
+    def set(self, key, value, *, ex, nx):
+        assert ex == CaptchaGenerator.EXPIRE_SECONDS
+        assert nx is True
+        if key in self.values:
+            return False
+        self.values[key] = str(value).encode("utf-8")
+        return True
+
+    def getdel(self, key):
+        return self.values.pop(key, None)
 
 
 # ============================================================================
@@ -235,6 +251,34 @@ class TestCaptchaGenerator:
             if record:
                 exprs.add(record.expression)
         assert len(exprs) >= 3  # 10 次中至少有 3 种不同表达式
+
+    def test_shared_backend_verifies_across_instances_once(self) -> None:
+        redis = SharedCaptchaRedis()
+        issuer = CaptchaGenerator(redis_client=redis, require_shared=True)
+        verifier = CaptchaGenerator(redis_client=redis, require_shared=True)
+
+        _svg, token = issuer.generate()
+        key = issuer._redis_key(token)
+        answer = redis.values[key].decode("utf-8")
+
+        assert issuer.uses_shared_backend is True
+        assert verifier.verify(token, answer) is True
+        assert issuer.verify(token, answer) is False
+
+    def test_required_shared_backend_fails_closed(self) -> None:
+        with pytest.raises(CaptchaBackendUnavailable, match="required"):
+            CaptchaGenerator(require_shared=True)
+
+    def test_shared_backend_errors_are_not_downgraded_to_memory(self) -> None:
+        class BrokenRedis:
+            def set(self, *_args, **_kwargs):
+                raise ConnectionError("redis unavailable")
+
+        captcha = CaptchaGenerator(redis_client=BrokenRedis(), require_shared=True)
+
+        with pytest.raises(CaptchaBackendUnavailable, match="unavailable"):
+            captcha.generate()
+        assert captcha._records == {}
 
 
 # ============================================================================

@@ -76,6 +76,7 @@ from src.observability import (
 )
 from src.release_controls import RolloutDecision, operational_switch, rollout_decision
 from src.auth.rate_limiter import KeyedConcurrencyLimiter, RateLimitBackendUnavailable, RateLimiter
+from src.auth.captcha import CaptchaBackendUnavailable
 from sse_starlette.sse import EventSourceResponse
 
 
@@ -409,7 +410,9 @@ def _get_auth():
     if _auth_captcha is not None:
         if is_production() and not _auth_backend_durable:
             raise AuthBackendUnavailable("AUTH_STORAGE_UNAVAILABLE")
-        return _user_repo, _auth_captcha
+        if not is_production() or bool(getattr(_auth_captcha, "uses_shared_backend", False)):
+            return _user_repo, _auth_captcha
+        _auth_captcha = None
     if is_production() and not _auth_backend_durable:
         # Never promote a cached development UserStore to a durable backend
         # merely because the process environment changed.
@@ -451,7 +454,15 @@ def _get_auth():
                 role = getattr(u, "role", "")
                 email = getattr(u, "email", "")
             print(f"  - {user_id} ({role}): {email}")
-        _auth_captcha = CaptchaGenerator()
+        captcha_redis = None
+        if is_production():
+            captcha_redis = get_redis()
+            if captcha_redis is None or redis_backend_status() != "redis":
+                raise AuthBackendUnavailable("AUTH_STORAGE_UNAVAILABLE")
+        _auth_captcha = CaptchaGenerator(
+            redis_client=captcha_redis,
+            require_shared=is_production(),
+        )
     return _user_repo, _auth_captcha
 
 
@@ -5918,9 +5929,23 @@ async def _auth_backend_unavailable_response(
     )
 
 
+async def _captcha_backend_unavailable_response(
+    request: Request,
+    exc: CaptchaBackendUnavailable,
+) -> JSONResponse:
+    return JSONResponse(
+        {"status": "auth_storage_unavailable", "detail": "AUTH_STORAGE_UNAVAILABLE"},
+        status_code=503,
+        headers={"Cache-Control": "no-store", "Retry-After": "5"},
+    )
+
+
 app = Starlette(
     debug=not is_production(),
-    exception_handlers={AuthBackendUnavailable: _auth_backend_unavailable_response},
+    exception_handlers={
+        AuthBackendUnavailable: _auth_backend_unavailable_response,
+        CaptchaBackendUnavailable: _captcha_backend_unavailable_response,
+    },
     routes=[
         # Official session API - main frontend flow.
         Route("/api/sessions", api_create_session, methods=["POST"]),

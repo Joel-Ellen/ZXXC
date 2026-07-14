@@ -298,6 +298,84 @@ def test_release_image_is_manual_digest_scanned_and_keyless_signed() -> None:
     assert ".docker/config.json" not in workflow
 
 
+def test_core_ci_actions_are_pinned_to_immutable_revisions() -> None:
+    workflow = _read(".github/workflows/ci.yml")
+    uses = re.findall(r"^\s*uses:\s+[^@\s]+@([^\s#]+)", workflow, flags=re.MULTILINE)
+
+    assert uses
+    assert all(re.fullmatch(r"[0-9a-f]{40}", revision) for revision in uses)
+    assert "actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd" in workflow
+    assert "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1" in workflow
+    assert "actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444" in workflow
+    assert "actions/checkout@v4" not in workflow
+    assert "actions/setup-node@v4" not in workflow
+
+
+def test_staging_verification_is_manual_read_only_and_bounded() -> None:
+    workflow = _read(".github/workflows/staging-verify.yml")
+    trigger_start = workflow.index("on:\n")
+    trigger_end = workflow.index("\npermissions:", trigger_start)
+    triggers = workflow[trigger_start:trigger_end]
+
+    assert "workflow_dispatch:" in triggers
+    assert "push:" not in triggers
+    assert "pull_request:" not in triggers
+    for required_input in (
+        "confirm_staging:",
+        "expected_sha:",
+        "mode:",
+        "frontend_session_samples:",
+    ):
+        assert required_input in triggers
+    for mode in ("preflight", "preflight-load", "gates"):
+        assert f"          - {mode}\n" in triggers
+
+    assert '[[ "$CONFIRM_STAGING" != "VERIFY-STAGING" ]]' in workflow
+    assert '[[ "$EXPECTED_SHA" != "$GITHUB_SHA" ]]' in workflow
+    assert 'refs/heads/${DEFAULT_BRANCH}' in workflow
+    assert "permissions:\n  contents: read\n" in workflow
+    assert workflow.count("permissions:") == 1
+    assert "id-token: write" not in workflow
+    assert "packages: write" not in workflow
+
+    secret_refs = re.findall(r"secrets\.([A-Z0-9_]+)", workflow)
+    assert set(secret_refs) == {
+        "EDUAGENT_STAGING_ACCESS_TOKEN",
+        "EDUAGENT_STAGING_OPS_TOKEN",
+    }
+    assert "EDUAGENT_SMOKE_ACCESS_TOKEN: ${{ secrets.EDUAGENT_STAGING_ACCESS_TOKEN }}" in workflow
+    assert "EDUAGENT_SMOKE_OPS_TOKEN: ${{ secrets.EDUAGENT_STAGING_OPS_TOKEN }}" in workflow
+    assert "environment:\n      name: staging\n" in workflow
+    assert "url: ${{ vars.EDUAGENT_STAGING_BASE_URL }}" in workflow
+    assert "from scripts.release_smoke import load_target_is_allowed, normalize_base_url" in workflow
+    assert "if not load_target_is_allowed(normalized):" in workflow
+    assert workflow.count("STAGING_BASE_URL: ${{ steps.target.outputs.base_url }}") == 1
+    assert workflow.count("EDUAGENT_SMOKE_BASE_URL: ${{ steps.target.outputs.base_url }}") == 1
+    assert workflow.count("${{ vars.EDUAGENT_STAGING_BASE_URL }}") == 2
+    assert "inputs.staging_base_url" not in workflow
+
+    assert "python scripts/release_smoke.py preflight" in workflow
+    assert "python scripts/release_smoke.py gates" in workflow
+    assert "python scripts/release_smoke.py load" in workflow
+    assert workflow.count("EDUAGENT_SMOKE_ALLOW_LOAD=true") == 1
+    assert "EDUAGENT_SMOKE_LOAD_PATH=/api/ready" in workflow
+    assert "EDUAGENT_SMOKE_LOAD_REQUESTS=100" in workflow
+    assert "EDUAGENT_SMOKE_LOAD_CONCURRENCY=5" in workflow
+    assert "EDUAGENT_SMOKE_LOAD_HOST_ALLOWLIST" not in workflow
+    assert "curl " not in workflow
+
+    uses = re.findall(r"^\s*uses:\s+[^@\s]+@([^\s#]+)", workflow, flags=re.MULTILINE)
+    assert uses
+    assert all(re.fullmatch(r"[0-9a-f]{40}", revision) for revision in uses)
+    assert workflow.count("if: always()") == 2
+    assert "path: staging-evidence/" in workflow
+    assert "if-no-files-found: error" in workflow
+    assert "printenv" not in workflow
+    assert "set -x" not in workflow
+    assert "tee " not in workflow
+    assert ".docker/config.json" not in workflow
+
+
 def test_generated_release_archives_are_not_source_controlled() -> None:
     gitignore = _read(".gitignore")
     dockerignore = _read(".dockerignore")

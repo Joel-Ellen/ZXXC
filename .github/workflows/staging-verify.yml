@@ -1,0 +1,200 @@
+name: Staging Verify
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_staging:
+        description: Type VERIFY-STAGING to confirm read-only staging checks
+        required: true
+        type: string
+      expected_sha:
+        description: Full 40-character commit SHA selected for this run
+        required: true
+        type: string
+      mode:
+        description: Verification mode
+        required: true
+        default: preflight
+        type: choice
+        options:
+          - preflight
+          - preflight-load
+          - gates
+      frontend_session_samples:
+        description: Trusted frontend session count for the same release window
+        required: true
+        default: "200"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-verify-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Read-only staging verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: staging
+      url: ${{ vars.EDUAGENT_STAGING_BASE_URL }}
+
+    steps:
+      - name: Require explicit staging confirmation
+        shell: bash
+        env:
+          CONFIRM_STAGING: ${{ inputs.confirm_staging }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          FRONTEND_SESSION_SAMPLES: ${{ inputs.frontend_session_samples }}
+        run: |
+          set -euo pipefail
+          if [[ "$CONFIRM_STAGING" != "VERIFY-STAGING" ]]; then
+            echo "Staging confirmation must be exactly VERIFY-STAGING." >&2
+            exit 1
+          fi
+          if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || [[ "$EXPECTED_SHA" != "$GITHUB_SHA" ]]; then
+            echo "expected_sha must exactly match the selected workflow commit." >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_REF" != "refs/heads/${DEFAULT_BRANCH}" ]]; then
+            echo "Staging verification is restricted to the repository default branch." >&2
+            exit 1
+          fi
+          if [[ ! "$FRONTEND_SESSION_SAMPLES" =~ ^[1-9][0-9]{0,9}$ ]] || (( FRONTEND_SESSION_SAMPLES > 1000000000 )); then
+            echo "frontend_session_samples must be an integer from 1 through 1000000000." >&2
+            exit 1
+          fi
+
+      - name: Check out the confirmed commit
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Validate and normalize the staging target
+        id: target
+        shell: bash
+        env:
+          CONFIGURED_STAGING_BASE_URL: ${{ vars.EDUAGENT_STAGING_BASE_URL }}
+        run: |
+          set -euo pipefail
+          normalized_base_url="$(python - <<'PY'
+          import os
+          import sys
+
+          from scripts.release_smoke import load_target_is_allowed, normalize_base_url
+
+          try:
+              normalized = normalize_base_url(os.environ.get("CONFIGURED_STAGING_BASE_URL", ""))
+              if not load_target_is_allowed(normalized):
+                  raise ValueError("configured target hostname is not an approved staging host")
+          except Exception as error:
+              print(f"Invalid staging target: {error}", file=sys.stderr)
+              raise SystemExit(2)
+          print(normalized)
+          PY
+          )"
+          echo "base_url=${normalized_base_url}" >> "$GITHUB_OUTPUT"
+
+      - name: Record non-sensitive verification context
+        shell: bash
+        env:
+          STAGING_BASE_URL: ${{ steps.target.outputs.base_url }}
+          MODE: ${{ inputs.mode }}
+          FRONTEND_SESSION_SAMPLES: ${{ inputs.frontend_session_samples }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p staging-evidence
+          jq -n \
+            --arg command "$MODE" \
+            --arg base_url "$STAGING_BASE_URL" \
+            --arg commit "$GITHUB_SHA" \
+            --arg source_ref "$GITHUB_REF" \
+            --arg frontend_session_samples "$FRONTEND_SESSION_SAMPLES" \
+            --arg run_url "$RUN_URL" \
+            '{command: $command, base_url: $base_url, commit: $commit, source_ref: $source_ref, frontend_session_samples: ($frontend_session_samples | tonumber), run_url: $run_url}' \
+            > staging-evidence/context.json
+
+      - name: Run bounded read-only staging verification
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          EDUAGENT_SMOKE_BASE_URL: ${{ steps.target.outputs.base_url }}
+          EDUAGENT_SMOKE_FRONTEND_SESSIONS: ${{ inputs.frontend_session_samples }}
+          EDUAGENT_SMOKE_MIN_SAMPLES: "200"
+          EDUAGENT_SMOKE_TIMEOUT_SECONDS: "10"
+          EDUAGENT_SMOKE_ACCESS_TOKEN: ${{ secrets.EDUAGENT_STAGING_ACCESS_TOKEN }}
+          EDUAGENT_SMOKE_OPS_TOKEN: ${{ secrets.EDUAGENT_STAGING_OPS_TOKEN }}
+        run: |
+          set -euo pipefail
+          umask 077
+          if [[ -z "$EDUAGENT_SMOKE_ACCESS_TOKEN" ]]; then
+            echo "Repository secret EDUAGENT_STAGING_ACCESS_TOKEN is required." >&2
+            exit 1
+          fi
+          if [[ -z "$EDUAGENT_SMOKE_OPS_TOKEN" ]]; then
+            echo "Repository secret EDUAGENT_STAGING_OPS_TOKEN is required." >&2
+            exit 1
+          fi
+
+          case "$MODE" in
+            preflight)
+              python scripts/release_smoke.py preflight \
+                > staging-evidence/preflight.json \
+                2> staging-evidence/preflight-error.json
+              ;;
+            preflight-load)
+              python scripts/release_smoke.py preflight \
+                > staging-evidence/preflight.json \
+                2> staging-evidence/preflight-error.json
+              EDUAGENT_SMOKE_ALLOW_LOAD=true \
+              EDUAGENT_SMOKE_LOAD_PATH=/api/ready \
+              EDUAGENT_SMOKE_LOAD_REQUESTS=100 \
+              EDUAGENT_SMOKE_LOAD_CONCURRENCY=5 \
+                python scripts/release_smoke.py load \
+                  > staging-evidence/load.json \
+                  2> staging-evidence/load-error.json
+              ;;
+            gates)
+              python scripts/release_smoke.py gates \
+                > staging-evidence/gates.json \
+                2> staging-evidence/gates-error.json
+              ;;
+            *)
+              echo "Unsupported staging verification mode." >&2
+              exit 2
+              ;;
+          esac
+
+      - name: Finalize staging evidence
+        if: always()
+        shell: bash
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p staging-evidence
+          jq -n --arg job_status "$JOB_STATUS" '{job_status: $job_status}' > staging-evidence/job.json
+          find staging-evidence -type f ! -name SHA256SUMS -print | sort | while IFS= read -r file; do
+            sha256sum "$file"
+          done > staging-evidence/SHA256SUMS
+
+      - name: Upload non-sensitive staging evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: staging-verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: staging-evidence/
+          if-no-files-found: error
+          retention-days: 30
