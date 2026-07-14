@@ -9,7 +9,7 @@
         <div class="min-w-0">
           <p class="resource-canvas__eyebrow">当前学习节点</p>
           <div class="resource-canvas__title-line">
-            <h2>{{ nodeTitle || "等待装配" }}</h2>
+            <h1 class="resource-canvas__title">{{ nodeTitle || "等待装配" }}</h1>
             <span class="workspace-shell-chip workspace-shell-chip--accent shrink-0 px-3 py-1 text-[11px] font-semibold">
               {{ learningTone }}
             </span>
@@ -19,21 +19,21 @@
         <div class="resource-canvas__actions">
           <button
             type="button"
-            class="workspace-shell-btn focus-ring px-3 py-2 text-[11px] font-semibold"
+            class="workspace-shell-btn focus-ring min-h-11 px-3 py-2 text-[11px] font-semibold"
             @click="isExpanded = !isExpanded"
           >
             {{ isExpanded ? "紧凑视图" : "展开矩阵" }}
           </button>
           <button
             type="button"
-            class="workspace-shell-btn workspace-shell-btn--secondary focus-ring px-3 py-2 text-[11px] font-semibold"
+            class="workspace-shell-btn workspace-shell-btn--secondary focus-ring min-h-11 px-3 py-2 text-[11px] font-semibold"
             @click="focusMode = !focusMode"
           >
             {{ focusMode ? "退出聚焦" : "聚焦模式" }}
           </button>
           <button
             type="button"
-            class="workspace-shell-btn workspace-shell-btn--accent focus-ring px-3 py-2 text-[11px] font-semibold"
+            class="workspace-shell-btn workspace-shell-btn--accent focus-ring min-h-11 px-3 py-2 text-[11px] font-semibold"
             :disabled="!currentNode || loading"
             @click="$emit('refresh')"
           >
@@ -68,7 +68,7 @@
           :key="node.id"
           :ref="(element) => setNodeButtonRef(node.id, element)"
           type="button"
-          class="workspace-shell-chip focus-ring shrink-0 px-3.5 py-1.5 text-[11px] font-medium tracking-[0.06em] transition-all duration-200 active:scale-95"
+          class="course-path-panel__node workspace-shell-chip focus-ring min-h-11 shrink-0 px-3.5 py-1.5 text-[11px] font-medium tracking-[0.06em] transition-all duration-200 active:scale-95"
           :class="nodeChipClass(node)"
           :aria-current="selectedNodeId === node.id ? 'step' : undefined"
           @click="selectNode(node.id)"
@@ -76,6 +76,22 @@
           {{ node.title }}
         </button>
         </div>
+      </div>
+
+      <div class="flex min-w-0 gap-2 overflow-x-auto" role="tablist" aria-label="学习任务顺序">
+        <button
+          v-for="slot in cardTypeSlots"
+          :key="slot.type"
+          type="button"
+          role="tab"
+          class="workspace-shell-btn focus-ring min-h-11 shrink-0 px-3 py-2 text-[11px] font-semibold"
+          :class="slot.card?.resource_id === activeCardId ? 'workspace-shell-btn--accent' : ''"
+          :aria-selected="String(slot.card?.resource_id === activeCardId)"
+          :disabled="!slot.card || loading"
+          @click="slot.card && activateCard(slot.card.resource_id)"
+        >
+          {{ taskStageLabel(slot.type) }}
+        </button>
       </div>
     </header>
 
@@ -118,30 +134,31 @@
 
           <!-- Case 1: card exists and not minimized -->
           <div
-            v-if="slot.card && !minimizedIds.includes(slot.card.resource_id)"
-            draggable="true"
+            v-if="slot.card"
+            :data-resource-id="slot.card.resource_id"
+            :data-resource-type="resourceType(slot.card)"
             class="animate-cardIn h-full card-depth transition-all duration-300"
             :style="{ animationDelay: `${index * 55}ms` }"
-            :class="[getGridSpanClass(slot.type), slot.card.resource_id === activeCardId ? 'md:-translate-y-1.5' : '']"
-            @dragstart="onDragStart(slot.card.resource_id)"
-            @dragover.prevent
-            @drop="onDrop(slot.card.resource_id)"
+            :class="[getGridSpanClass(slot.type), slot.card.resource_id === activeCardId ? 'is-active md:-translate-y-1.5' : '']"
+            @mouseup="captureSelectedText(slot.card)"
           >
-            <template v-for="card of [slot.card]" :key="slot.type">
+            <template v-for="card of [slot.card]" :key="card.resource_id">
             <ResourceCard
               class="h-full"
               :agent-name="agentLabel(resourceType(card))"
               :title="cardLabel(resourceType(card))"
               :progress-text="loading ? '栅格同步' : '资源就绪'"
-              :progress="loading ? progressHint(resourceType(card)) : 100"
+              :progress="null"
               :is-ready="!loading"
               :is-active="card.resource_id === activeCardId"
               :is-expanded="isCardHydrated(card.resource_id)"
-              :activatable="!loading"
+              :is-bookmarked="isBookmarked(card)"
+              :activatable="false"
+              :show-pin="false"
+              :show-minimize="false"
               :color="cardColor(resourceType(card))"
               @activate="activateCard(card.resource_id)"
-              @pin="pinCard(card.resource_id)"
-              @minimize="minimizeCard(card.resource_id)"
+              @bookmark="toggleBookmark(card)"
             >
               <template #content>
               <div v-if="!isCardHydrated(card.resource_id)" class="space-y-4">
@@ -274,6 +291,18 @@
                       <li v-for="(item, index) in codeExperiments(card)" :key="`${card.resource_id}-experiment-${index}`">{{ item }}</li>
                     </ul>
                   </div>
+
+                  <CodePracticePanel
+                    v-if="hasPracticeBinding(card)"
+                    :session-id="sessionId"
+                    :node-id="currentNode"
+                    :resource-id="resourceId(card)"
+                    :problem-id="practiceProblemId(card)"
+                    :starter-code="practiceStarterCode(card)"
+                    :language="codeLanguage(card)"
+                    @code-run="emit('code-run', $event)"
+                    @code-submitted="emit('code-submitted', $event)"
+                  />
                 </div>
 
                 <div v-else-if="resourceType(card) === 'interactive_exercise'" class="space-y-4">
@@ -303,6 +332,47 @@
                     </ul>
                   </div>
 
+                  <fieldset
+                    v-if="reviewPracticeQuestion(card)"
+                    class="workspace-shell-card p-4"
+                    :disabled="reviewPracticeSubmitting"
+                  >
+                    <legend class="px-1 text-sm font-bold text-text-primary">定向练习题</legend>
+                    <p :id="reviewPracticePromptId(card)" class="mt-2 text-sm leading-7 text-text-secondary">
+                      {{ reviewPracticeQuestion(card).prompt }}
+                    </p>
+                    <div class="mt-4 grid gap-2" role="radiogroup" :aria-labelledby="reviewPracticePromptId(card)">
+                      <label
+                        v-for="(option, optionIndex) in reviewPracticeQuestion(card).options"
+                        :key="`${reviewPracticeQuestion(card).id}-${optionIndex}`"
+                        :for="reviewPracticeOptionId(card, optionIndex)"
+                        class="focus-within:ring-primary flex min-h-11 cursor-pointer items-center gap-3 border border-subtle px-3 py-2 text-sm leading-6 text-text-secondary focus-within:ring-2"
+                        :class="reviewPracticeAnswerIndex === optionIndex ? 'border-primary/40 bg-primary-soft text-text-primary' : 'bg-transparent hover:border-primary/25 hover:bg-card-hover'"
+                      >
+                        <input
+                          :id="reviewPracticeOptionId(card, optionIndex)"
+                          :name="reviewPracticeInputName(card)"
+                          type="radio"
+                          :value="optionIndex"
+                          :checked="reviewPracticeAnswerIndex === optionIndex"
+                          @change="selectReviewPracticeAnswer(card, optionIndex)"
+                        >
+                        <span>{{ option }}</span>
+                      </label>
+                    </div>
+                    <p v-if="reviewPracticeError" class="mt-3 text-sm leading-6 text-error" role="alert">
+                      {{ reviewPracticeError }}
+                    </p>
+                    <button
+                      type="button"
+                      class="workspace-shell-btn workspace-shell-btn--accent focus-ring mt-4 min-h-11 px-4 py-2 text-sm font-semibold"
+                      :disabled="reviewPracticeAnswerIndex === null || reviewPracticeSubmitting"
+                      @click="submitReviewPractice(card)"
+                    >
+                      {{ reviewPracticeSubmitting ? '验证练习中...' : reviewPracticeEventId ? '重试生成复测' : '提交练习并生成复测' }}
+                    </button>
+                  </fieldset>
+
                   <div v-if="exerciseHints(card).length" class="workspace-shell-card rounded-[20px] p-4">
                     <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">提示</p>
                     <ul class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
@@ -320,6 +390,18 @@
                       <p class="mt-3 text-sm leading-7 text-text-secondary">{{ exerciseSolutionOutline(card) }}</p>
                     </div>
                   </div>
+
+                  <CodePracticePanel
+                    v-if="hasPracticeBinding(card)"
+                    :session-id="sessionId"
+                    :node-id="currentNode"
+                    :resource-id="resourceId(card)"
+                    :problem-id="practiceProblemId(card)"
+                    :starter-code="practiceStarterCode(card)"
+                    :language="exerciseLanguage(card)"
+                    @code-run="emit('code-run', $event)"
+                    @code-submitted="emit('code-submitted', $event)"
+                  />
                 </div>
 
                 <div v-else-if="resourceType(card) === 'video_summary'" class="space-y-4">
@@ -388,14 +470,30 @@
                         v-for="(option, optionIndex) in question.options"
                         :key="`${question.id}-${optionIndex}`"
                         type="button"
-                        class="focus-ring w-full rounded-[14px] border px-3 py-2.5 text-left text-sm font-light transition-all duration-200 active:scale-[0.99]"
+                        class="focus-ring min-h-11 w-full rounded-[14px] border px-3 py-2.5 text-left text-sm font-light transition-all duration-200 active:scale-[0.99]"
                         :class="answerClass(question.id, optionIndex)"
-                        @click="setAnswer(question.id, optionIndex)"
+                        :disabled="questionSubmitted(question.id) || questionSubmissionPending(question.id) || quizSubmitted || quizSubmitting"
+                        @click="setAnswer(card, question.id, optionIndex)"
                       >
                         {{ option }}
                       </button>
                     </div>
-                    <div v-if="submittedScore !== null && question.explanation" class="mt-3 workspace-shell-card-soft rounded-[16px] px-4 py-3">
+                    <div class="mt-3 flex justify-end">
+                      <p v-if="questionSubmitted(question.id)" class="mr-auto self-center text-[11px] font-medium text-success">Answer saved</p>
+                      <p v-else-if="questionSubmissionPending(question.id)" class="mr-auto self-center text-[11px] font-medium text-text-muted">Saving answer</p>
+                      <button
+                        type="button"
+                        class="workspace-shell-btn focus-ring min-h-11 px-3 py-2 text-[11px] font-semibold"
+                        :disabled="!canSubmitQuestion(question)"
+                        @click="submitQuestionAnswer(card, question)"
+                      >
+                        {{ questionSubmitted(question.id) ? 'Saved' : questionSubmissionPending(question.id) ? 'Saving...' : 'Submit answer' }}
+                      </button>
+                    </div>
+                    <p v-if="questionSubmissionErrors[question.id]" class="mt-2 text-xs text-error" role="alert">
+                      {{ questionSubmissionErrors[question.id] }}
+                    </p>
+                    <div v-if="quizSubmitted && question.explanation" class="mt-3 workspace-shell-card-soft rounded-[16px] px-4 py-3">
                       <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">题目解释</p>
                       <p class="mt-2 text-sm leading-6 text-text-secondary">{{ question.explanation }}</p>
                     </div>
@@ -407,15 +505,19 @@
                     </div>
                     <button
                       type="button"
-                      class="focus-ring btn-capsule"
-                      :disabled="!allAnswered || loading"
-                      @click="submitQuizScore"
+                      class="focus-ring btn-capsule min-h-11"
+                      :disabled="!canSubmitQuiz"
+                      @click="submitQuizAnswers"
                     >
-                      提交诊断
+                      {{ quizSubmitLabel }}
                     </button>
                   </div>
 
-                  <div v-if="quizAfterGuidance(card) && submittedScore !== null" class="workspace-shell-card rounded-[20px] p-4">
+                  <p v-if="quizSubmissionError" class="text-sm text-error" role="alert">
+                    {{ quizSubmissionError }}
+                  </p>
+
+                  <div v-if="quizAfterGuidance(card) && quizSubmitted && !quizSubmissionError" class="workspace-shell-card rounded-[20px] p-4">
                     <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">提交后建议</p>
                     <p class="mt-3 text-sm leading-7 text-text-secondary">{{ quizAfterGuidance(card) }}</p>
                   </div>
@@ -424,6 +526,16 @@
                 <MarkdownContent
                   v-else
                   :content="bodyMarkdown(card)"
+                />
+
+                <ResourceAnnotations
+                  :annotations="annotationsFor(card)"
+                  :can-highlight="Boolean(card.resource_id && currentNode)"
+                  :selected-text="selectedTextFor(card)"
+                  :is-bookmarked="isBookmarked(card)"
+                  @save-note="saveNoteAnnotation(card, $event)"
+                  @save-highlight="saveHighlightAnnotation(card, $event)"
+                  @remove="removeAnnotation"
                 />
               </div>
             </template>
@@ -465,31 +577,22 @@
 
     </div>
 
-    <footer v-if="minimizedCards.length" class="pt-5">
-      <div class="flex flex-wrap items-center gap-2">
-        <span class="text-[11px] font-black uppercase tracking-[0.12em] text-text-muted">已最小化</span>
-        <button
-          v-for="card in minimizedCards"
-          :key="card.resource_id"
-          type="button"
-          class="workspace-shell-btn focus-ring px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.10em]"
-          @click="restoreCard(card.resource_id)"
-        >
-          {{ cardLabel(resourceType(card)) }}
-        </button>
-      </div>
-    </footer>
   </section>
 </template>
 
 <script setup>
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, defineAsyncComponent, nextTick, ref, watch } from "vue";
 import MarkdownContent from "./MarkdownContent.vue";
+import ResourceAnnotations from "./ResourceAnnotations.vue";
 import ResourceCard from "./ResourceCard.vue";
+import { useLearningAssetsStore } from "../stores/learningAssets";
 import { extractCodePreview, extractTextPreview } from "../utils/markdownPreview.js";
+
+const CodePracticePanel = defineAsyncComponent(() => import("./CodePracticePanel.vue"));
 
 const props = defineProps({
   cards: { type: Array, default: () => [] },
+  sessionId: { type: String, default: "" },
   currentNode: { type: String, default: "" },
   nodeTitle: { type: String, default: "" },
   pathNodes: { type: Array, default: () => [] },
@@ -497,27 +600,56 @@ const props = defineProps({
   overallProgress: { type: Number, default: 0 },
   masteredCount: { type: Number, default: 0 },
   lastDiagnostic: { type: Object, default: null },
+  focusCardType: { type: String, default: "" },
+  reviewItemId: { type: String, default: "" },
+  reviewPhase: { type: String, default: "" },
   filterType: { type: String, default: "all" },
   getCardLabel: { type: Function, required: true },
   getAgentLabel: { type: Function, required: true },
   buildQuiz: { type: Function, required: true },
 });
 
-const emit = defineEmits(["submit-quiz", "select-node", "refresh", "generate-card"]);
+const emit = defineEmits([
+  "submit-quiz",
+  "select-node",
+  "refresh",
+  "generate-card",
+  "answer-selected",
+  "content-viewed",
+  "hint-requested",
+  "code-run",
+  "code-submitted",
+  "open-review",
+  "prepare-review-retest",
+]);
 
 const orderedIds = ref([]);
-const minimizedIds = ref([]);
 const activeCardId = ref("");
-const dragId = ref("");
 const focusMode = ref(false);
 const isExpanded = ref(false);
 const answers = ref({});
 const hydratedCardIds = ref([]);
-const submittedScore = ref(null);
 const scrollViewport = ref(null);
 const nodeScroller = ref(null);
 const nodeButtonRefs = new Map();
 const selectedNodeId = ref(props.currentNode);
+const selectedTextByResource = ref({});
+const learningAssets = useLearningAssetsStore();
+const quizSubmitting = ref(false);
+const quizSubmitted = ref(false);
+const quizSubmissionError = ref("");
+const quizStartedAt = ref(0);
+const submittedQuestionIds = ref([]);
+const submittingQuestionIds = ref([]);
+const questionSubmissionErrors = ref({});
+const quizAttemptsByResource = ref({});
+const quizUsedHintByResource = ref({});
+const reviewPracticeAnswerIndex = ref(null);
+const reviewPracticeAttemptNumber = ref(1);
+const reviewPracticeSubmitting = ref(false);
+const reviewPracticeError = ref("");
+const reviewPracticeEventId = ref("");
+const reviewPracticeStartedAt = ref(0);
 
 watch(
   [() => props.currentNode, () => props.loading, () => props.pathNodes.length],
@@ -561,25 +693,53 @@ const cardsByType = computed(() => {
  */
 const cardTypeSlots = computed(() => {
   const filtered = props.filterType && props.filterType !== "all"
-    ? CARD_TYPES.filter((m) => m.sidebarKey === props.filterType)
-    : CARD_TYPES;
-  return filtered.map((meta) => ({
+    ? CARD_TYPES.filter((meta) => meta.sidebarKey === props.filterType)
+    : CARD_TYPES.filter((meta) => Boolean(cardsByType.value[meta.type]));
+  const visibleTypes = filtered.length ? filtered : CARD_TYPES.slice(0, 1);
+  return visibleTypes.map((meta) => ({
     ...meta,
     card: cardsByType.value[meta.type] ?? null,
   }));
 });
 
+const cardsIdentityKey = computed(() => [
+  props.sessionId,
+  props.currentNode,
+  ...props.cards.map((card) => card.resource_id || card.id || "").filter(Boolean),
+].join("|"));
+
 watch(
-  () => props.cards,
-  (cards) => {
+  cardsIdentityKey,
+  () => {
+    const cards = props.cards;
     const nextIds = cards.map((card) => card.resource_id);
     orderedIds.value = nextIds;
-    minimizedIds.value = [];
-    activeCardId.value = nextIds[0] ?? "";
     hydratedCardIds.value = [];
     focusMode.value = false;
     answers.value = {};
-    submittedScore.value = null;
+    submittedQuestionIds.value = [];
+    submittingQuestionIds.value = [];
+    questionSubmissionErrors.value = {};
+    quizSubmitting.value = false;
+    quizSubmitted.value = false;
+    quizSubmissionError.value = "";
+    quizStartedAt.value = 0;
+    quizAttemptsByResource.value = {};
+    quizUsedHintByResource.value = {};
+    reviewPracticeAnswerIndex.value = null;
+    reviewPracticeAttemptNumber.value = 1;
+    reviewPracticeSubmitting.value = false;
+    reviewPracticeError.value = "";
+    reviewPracticeEventId.value = "";
+    reviewPracticeStartedAt.value = 0;
+
+    const savedCardId = restoreCanvasState(nextIds);
+    activeCardId.value = savedCardId || nextIds[0] || "";
+    hydrateCard(activeCardId.value);
+
+    const nextQuiz = cards.find((card) => resourceType(card) === "diagnostic_quiz");
+    restoreQuizProgress(resourceId(nextQuiz));
+    restoreReviewPracticeProgress();
   },
   { immediate: true },
 );
@@ -608,18 +768,6 @@ const sortedCards = computed(() => {
     .filter(Boolean);
 
   return [...ordered, ...extras];
-});
-
-const minimizedCards = computed(() =>
-  sortedCards.value.filter((card) => minimizedIds.value.includes(card.resource_id)),
-);
-
-const visibleCards = computed(() => {
-  const base = sortedCards.value.filter((card) => !minimizedIds.value.includes(card.resource_id));
-  if (focusMode.value && activeCardId.value) {
-    return base.filter((card) => card.resource_id === activeCardId.value);
-  }
-  return base;
 });
 
 const quizCard = computed(() =>
@@ -653,6 +801,22 @@ const quizQuestions = computed(() => {
 const allAnswered = computed(
   () => quizQuestions.value.length > 0 && quizQuestions.value.every((question) => answers.value[question.id] !== undefined),
 );
+const allQuestionsSubmitted = computed(
+  () => quizQuestions.value.length > 0 && quizQuestions.value.every((question) => questionSubmitted(question.id)),
+);
+const canSubmitQuiz = computed(() => (
+  allQuestionsSubmitted.value
+  && !props.loading
+  && !quizSubmitting.value
+  && (!quizSubmitted.value || Boolean(quizSubmissionError.value))
+));
+const quizSubmitLabel = computed(() => {
+  if (quizSubmitting.value) return "提交中...";
+  if (quizSubmissionError.value) return "重新提交诊断";
+  if (quizSubmitted.value) return "诊断已提交";
+  if (allAnswered.value && !allQuestionsSubmitted.value) return "Submit each answer";
+  return "提交诊断";
+});
 
 const currentNodeMeta = computed(() =>
   props.pathNodes.find((node) => node.id === props.currentNode),
@@ -667,7 +831,6 @@ const activeCardTitle = computed(() => {
   return activeCard ? cardLabel(resourceType(activeCard)) : "当前内容";
 });
 
-const availableTypes = computed(() => new Set(props.cards.map((card) => resourceType(card))));
 const nextPendingNode = computed(() =>
   props.pathNodes.find((node) => (node.mastery ?? 0) < 0.65 && node.id !== props.currentNode) ?? null,
 );
@@ -678,29 +841,6 @@ const learningTone = computed(() => {
   if (currentMastery.value >= 65) return "节点达标";
   return "继续学习";
 });
-
-const learningStages = computed(() => [
-  {
-    label: "目标",
-    detail: currentNodeMeta.value ? "定位当前知识点" : "等待路径",
-    active: Boolean(currentNodeMeta.value),
-  },
-  {
-    label: "资源",
-    detail: props.loading ? "生成中" : `${props.cards.length} 份材料`,
-    active: props.loading || props.cards.length > 0,
-  },
-  {
-    label: "练习",
-    detail: availableTypes.value.has("interactive_exercise") ? "可训练" : "待生成",
-    active: availableTypes.value.has("interactive_exercise"),
-  },
-  {
-    label: "诊断",
-    detail: availableTypes.value.has("diagnostic_quiz") ? "可提交" : "待评估",
-    active: availableTypes.value.has("diagnostic_quiz"),
-  },
-]);
 
 const diagnosticStatusText = computed(() => {
   if (props.lastDiagnostic) {
@@ -713,15 +853,19 @@ const diagnosticStatusText = computed(() => {
     return `上次诊断得分 ${scorePercent}% · 掌握度 ${beforePercent}% -> ${afterPercent}% · 继续停留当前节点`;
   }
 
-  if (submittedScore.value !== null) {
-    return `上次诊断得分 ${Math.round(submittedScore.value * 100)}%`;
-  }
+  if (quizSubmitting.value) return "诊断结果正在等待服务端确认。";
+  if (quizSubmissionError.value) return "诊断尚未确认，请使用原答案重试。";
+  if (quizSubmitted.value) return "服务端已确认本次诊断。";
 
   return "请先回答所有题目，再提交诊断得分。";
 });
 
 function resourceType(card) {
   return card?.resource_type || card?.card_type || card?.type || "";
+}
+
+function resourceId(card) {
+  return card?.resource_id || card?.id || "";
 }
 
 function bodyMarkdown(card) {
@@ -804,6 +948,40 @@ function codeLanguage(card) {
   return cardMetadata(card).language || "python";
 }
 
+function practiceProblemId(card) {
+  const metadata = cardMetadata(card);
+  return metadata.practice?.problem_id
+    || metadata.practice?.id
+    || metadata.practice_problem_id
+    || metadata.problem_id
+    || "";
+}
+
+function practiceStarterCode(card) {
+  const metadata = cardMetadata(card);
+  return metadata.practice?.starter_code
+    || metadata.starter_code
+    || metadata.code_template
+    || metadata.template
+    || "";
+}
+
+function exerciseLanguage(card) {
+  const metadata = cardMetadata(card);
+  return metadata.practice?.language || metadata.language || "python";
+}
+
+function hasPracticeBinding(card) {
+  if (resourceType(card) === "code_snippet") return true;
+  const metadata = cardMetadata(card);
+  return Boolean(
+    metadata.practice?.problem_id
+    || metadata.practice?.id
+    || metadata.practice_problem_id
+    || metadata.problem_id,
+  );
+}
+
 function fullCode(card) {
   return cardMetadata(card).code || extractCodePreview(bodyMarkdown(card), 40);
 }
@@ -854,6 +1032,144 @@ function exerciseCheckpoints(card) {
 
 function exerciseHints(card) {
   return Array.isArray(cardMetadata(card).hints) ? cardMetadata(card).hints : [];
+}
+
+function exerciseQuestions(card) {
+  const questions = cardMetadata(card).questions;
+  if (!Array.isArray(questions)) return [];
+  return questions.filter((question) => (
+    question
+    && String(question.id || "").trim()
+    && String(question.prompt || "").trim()
+    && Array.isArray(question.options)
+    && question.options.length >= 2
+  ));
+}
+
+function reviewPracticeQuestion(card) {
+  if (!props.reviewItemId || props.reviewPhase !== "material_review") return null;
+  return exerciseQuestions(card)[0] || null;
+}
+
+function reviewPracticeCard() {
+  return props.cards.find((card) => (
+    resourceType(card) === "interactive_exercise" && reviewPracticeQuestion(card)
+  )) || null;
+}
+
+function reviewPracticeProgressKey(card = reviewPracticeCard()) {
+  const itemId = String(props.reviewItemId || "").trim();
+  const cardId = resourceId(card);
+  if (!props.currentNode || !itemId || !cardId) return "";
+  return `review-practice:${props.currentNode}:${itemId}:${cardId}`;
+}
+
+function persistReviewPracticeProgress(card = reviewPracticeCard()) {
+  const question = reviewPracticeQuestion(card);
+  const key = reviewPracticeProgressKey(card);
+  if (!question || !key) return;
+  learningAssets.write("quiz_progress", key, {
+    kind: "review_practice",
+    node_id: props.currentNode,
+    resource_id: resourceId(card),
+    review_item_id: props.reviewItemId,
+    question_id: String(question.id),
+    selected_option_index: reviewPracticeAnswerIndex.value,
+    attempt_number: reviewPracticeAttemptNumber.value,
+    practice_event_id: reviewPracticeEventId.value,
+    error: reviewPracticeError.value,
+  });
+}
+
+function restoreReviewPracticeProgress() {
+  const card = reviewPracticeCard();
+  const question = reviewPracticeQuestion(card);
+  const key = reviewPracticeProgressKey(card);
+  const progress = key ? learningAssets.read("quiz_progress", key, null) : null;
+  if (!card || !question || !progress || progress.kind !== "review_practice") return;
+  const selected = Number(progress.selected_option_index);
+  reviewPracticeAnswerIndex.value = Number.isInteger(selected)
+    && selected >= 0
+    && selected < question.options.length
+    ? selected
+    : null;
+  reviewPracticeAttemptNumber.value = Math.max(1, Number(progress.attempt_number) || 1);
+  reviewPracticeEventId.value = String(progress.practice_event_id || "");
+  reviewPracticeError.value = String(progress.error || "");
+}
+
+function reviewPracticeDomToken(card) {
+  return `${props.reviewItemId}-${resourceId(card)}`.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function reviewPracticePromptId(card) {
+  return `review-practice-prompt-${reviewPracticeDomToken(card)}`;
+}
+
+function reviewPracticeInputName(card) {
+  return `review-practice-${reviewPracticeDomToken(card)}`;
+}
+
+function reviewPracticeOptionId(card, optionIndex) {
+  return `${reviewPracticeInputName(card)}-option-${optionIndex}`;
+}
+
+function selectReviewPracticeAnswer(card, optionIndex) {
+  const question = reviewPracticeQuestion(card);
+  if (!question || reviewPracticeSubmitting.value || !Number.isInteger(optionIndex)) return;
+  if (!reviewPracticeStartedAt.value) reviewPracticeStartedAt.value = Date.now();
+  if (reviewPracticeAnswerIndex.value !== optionIndex) reviewPracticeEventId.value = "";
+  reviewPracticeAnswerIndex.value = optionIndex;
+  reviewPracticeError.value = "";
+  persistReviewPracticeProgress(card);
+  emit("answer-selected", {
+    resourceId: resourceId(card),
+    questionId: String(question.id),
+    selectedOptionIndex: optionIndex,
+    attemptNumber: reviewPracticeAttemptNumber.value,
+    usedHint: false,
+    result: { selected_option_index: optionIndex, practice_kind: "targeted_practice" },
+  });
+}
+
+function submitReviewPractice(card) {
+  const question = reviewPracticeQuestion(card);
+  const selectedOptionIndex = reviewPracticeAnswerIndex.value;
+  const cardId = resourceId(card);
+  if (!question || !cardId || !Number.isInteger(selectedOptionIndex) || reviewPracticeSubmitting.value) return;
+  if (!reviewPracticeStartedAt.value) reviewPracticeStartedAt.value = Date.now();
+  reviewPracticeSubmitting.value = true;
+  reviewPracticeError.value = "";
+  emit("prepare-review-retest", {
+    reviewItemId: props.reviewItemId,
+    resourceId: cardId,
+    questionId: String(question.id),
+    selectedOptionIndex,
+    durationMs: Math.max(0, Date.now() - reviewPracticeStartedAt.value),
+    attemptNumber: reviewPracticeAttemptNumber.value,
+    usedHint: false,
+    practiceEventId: reviewPracticeEventId.value,
+    onPracticeRecorded: (eventId) => {
+      reviewPracticeEventId.value = String(eventId || "");
+      persistReviewPracticeProgress(card);
+    },
+    onIncorrect: () => {
+      reviewPracticeSubmitting.value = false;
+      reviewPracticeAttemptNumber.value += 1;
+      reviewPracticeEventId.value = "";
+      reviewPracticeError.value = "答案尚未通过验证。请重新选择。";
+      persistReviewPracticeProgress(card);
+    },
+    onFailure: (error) => {
+      reviewPracticeSubmitting.value = false;
+      reviewPracticeError.value = String(error?.response?.data?.detail || error?.message || "练习提交失败，请原位重试。");
+      persistReviewPracticeProgress(card);
+    },
+    onPrepared: () => {
+      const key = reviewPracticeProgressKey(card);
+      if (key) learningAssets.remove("quiz_progress", key);
+    },
+  });
 }
 
 function exerciseExpectedOutcome(card) {
@@ -918,6 +1234,16 @@ function cardLabel(cardType) {
   return props.getCardLabel(cardType);
 }
 
+function taskStageLabel(cardType) {
+  return {
+    concept_map: "讲解",
+    code_snippet: "示例",
+    interactive_exercise: "练习",
+    diagnostic_quiz: "反馈",
+    video_summary: "补充",
+  }[cardType] || cardLabel(cardType);
+}
+
 function agentLabel(cardType) {
   return props.getAgentLabel(cardType);
 }
@@ -931,16 +1257,6 @@ function cardColor(cardType) {
     case "diagnostic_quiz": return "warning";
     default: return "primary";
   }
-}
-
-function progressHint(cardType) {
-  if (cardType === "diagnostic_quiz") {
-    return 72;
-  }
-  if (cardType === "code_snippet") {
-    return 58;
-  }
-  return 84;
 }
 
 function getGridSpanClass(cardType) {
@@ -1019,6 +1335,28 @@ function hydrateCard(cardId) {
   hydratedCardIds.value = [...hydratedCardIds.value, cardId];
 }
 
+function canvasStateKey(nodeId = props.currentNode) {
+  return nodeId ? `canvas:${nodeId}` : "";
+}
+
+function restoreCanvasState(allowedCardIds) {
+  const key = canvasStateKey();
+  const saved = key ? learningAssets.read("card_state", key, null) : null;
+  const savedCardId = String(saved?.card_id || saved?.resource_id || "");
+  return new Set(allowedCardIds).has(savedCardId) ? savedCardId : "";
+}
+
+function persistCanvasState(cardId) {
+  const key = canvasStateKey();
+  if (!key || !cardId) return;
+  learningAssets.write("card_state", key, {
+    node_id: props.currentNode,
+    resource_id: cardId,
+    card_id: cardId,
+    expanded: true,
+  });
+}
+
 function activateCard(cardId) {
   if (!cardId) {
     return;
@@ -1037,6 +1375,7 @@ function setActiveCard(cardId, shouldHydrate = false) {
   if (shouldHydrate) {
     hydrateCard(cardId);
   }
+  persistCanvasState(cardId);
 }
 
 function textPreview(content) {
@@ -1063,48 +1402,239 @@ function previewLabel(cardType) {
   }
 }
 
-function pinCard(cardId) {
-  const next = orderedIds.value.filter((id) => id !== cardId);
-  orderedIds.value = [cardId, ...next];
-  setActiveCard(cardId);
+function bookmarkAssetKey(card) {
+  const cardId = String(card?.resource_id || card?.id || "");
+  return cardId && props.currentNode ? `${props.currentNode}:${cardId}` : "";
 }
 
-function minimizeCard(cardId) {
-  if (!minimizedIds.value.includes(cardId)) {
-    minimizedIds.value = [...minimizedIds.value, cardId];
-  }
-  if (activeCardId.value === cardId) {
-    const fallback = orderedIds.value.find((id) => !minimizedIds.value.includes(id) && id !== cardId);
-    activeCardId.value = fallback ?? "";
-  }
+function isBookmarked(card) {
+  const key = bookmarkAssetKey(card);
+  const bookmark = key ? learningAssets.read("bookmarks", key, null) : null;
+  return Boolean(bookmark && bookmark.favorite !== false);
 }
 
-function restoreCard(cardId) {
-  minimizedIds.value = minimizedIds.value.filter((id) => id !== cardId);
-  setActiveCard(cardId);
-}
-
-function onDragStart(cardId) {
-  dragId.value = cardId;
-}
-
-function onDrop(targetId) {
-  if (!dragId.value || dragId.value === targetId) {
+function toggleBookmark(card) {
+  const key = bookmarkAssetKey(card);
+  if (!key) return;
+  if (isBookmarked(card)) {
+    learningAssets.remove("bookmarks", key);
     return;
   }
-  const next = orderedIds.value.filter((id) => id !== dragId.value);
-  const targetIndex = next.indexOf(targetId);
-  next.splice(targetIndex, 0, dragId.value);
-  orderedIds.value = next;
-  setActiveCard(dragId.value);
-  dragId.value = "";
+  learningAssets.write("bookmarks", key, {
+    node_id: props.currentNode,
+    resource_id: String(card?.resource_id || card?.id || ""),
+    favorite: true,
+    created_at: new Date().toISOString(),
+  });
 }
 
-function setAnswer(questionId, optionIndex) {
-  answers.value = {
-    ...answers.value,
-    [questionId]: optionIndex,
+function annotationPrefix(card) {
+  const cardId = String(card?.resource_id || card?.id || "");
+  return cardId && props.currentNode ? `${props.currentNode}:${cardId}:` : "";
+}
+
+function annotationsFor(card) {
+  const prefix = annotationPrefix(card);
+  const annotations = learningAssets.read("annotations", null, {});
+  if (!prefix || !annotations || typeof annotations !== "object") return [];
+  return Object.entries(annotations)
+    .filter(([key]) => key.startsWith(prefix))
+    .map(([key, value]) => ({ ...value, key }));
+}
+
+function annotationKey(card) {
+  const prefix = annotationPrefix(card);
+  return prefix ? `${prefix}${Date.now()}:${Math.random().toString(36).slice(2, 8)}` : "";
+}
+
+function saveNoteAnnotation(card, content) {
+  const key = annotationKey(card);
+  if (!key || typeof content !== "string" || !content.trim()) return;
+  learningAssets.write("annotations", key, {
+    node_id: props.currentNode,
+    resource_id: String(card?.resource_id || card?.id || ""),
+    kind: "note",
+    content: content.trim(),
+    created_at: new Date().toISOString(),
+  });
+}
+
+function saveHighlightAnnotation(card, payload) {
+  const key = annotationKey(card);
+  const selectedText = String(payload?.selectedText || selectedTextFor(card)).trim();
+  if (!key || !selectedText) return;
+  learningAssets.write("annotations", key, {
+    node_id: props.currentNode,
+    resource_id: String(card?.resource_id || card?.id || ""),
+    kind: "highlight",
+    selected_text: selectedText,
+    color: String(payload?.color || "#F4C95D"),
+    created_at: new Date().toISOString(),
+  });
+}
+
+function removeAnnotation(key) {
+  if (key) learningAssets.remove("annotations", String(key));
+}
+
+function captureSelectedText(card) {
+  const cardId = String(card?.resource_id || card?.id || "");
+  const selectedText = typeof window === "undefined" ? "" : String(window.getSelection()?.toString() || "").trim();
+  if (!cardId || !selectedText) return;
+  selectedTextByResource.value = { ...selectedTextByResource.value, [cardId]: selectedText.slice(0, 8_000) };
+}
+
+function selectedTextFor(card) {
+  return selectedTextByResource.value[String(card?.resource_id || card?.id || "")] || "";
+}
+
+function quizProgressKey(resourceIdValue, nodeId = props.currentNode) {
+  return resourceIdValue && nodeId ? `quiz:${nodeId}:${resourceIdValue}` : "";
+}
+
+function quizAttemptNumber(resourceIdValue) {
+  return Math.max(1, Number(quizAttemptsByResource.value[resourceIdValue]) || 1);
+}
+
+function captureQuizProgress(resourceIdValue) {
+  return {
+    sessionId: String(props.sessionId || ""),
+    nodeId: String(props.currentNode || ""),
+    resourceId: String(resourceIdValue || ""),
+    attemptNumber: quizAttemptNumber(resourceIdValue),
+    answers: { ...answers.value },
+    submittedQuestionIds: [...submittedQuestionIds.value],
+    usedHint: Boolean(quizUsedHintByResource.value[resourceIdValue]),
   };
+}
+
+function persistQuizProgressSnapshot(progress) {
+  const key = quizProgressKey(progress?.resourceId, progress?.nodeId);
+  if (!key || !progress?.sessionId) return;
+  learningAssets.write("quiz_progress", key, {
+    node_id: progress.nodeId,
+    resource_id: progress.resourceId,
+    attempt_number: Math.max(1, Number(progress.attemptNumber) || 1),
+    answers: { ...progress.answers },
+    submitted_question_ids: [...new Set(progress.submittedQuestionIds)],
+    used_hint: Boolean(progress.usedHint),
+  });
+}
+
+function persistQuizProgress(resourceIdValue) {
+  persistQuizProgressSnapshot(captureQuizProgress(resourceIdValue));
+}
+
+function restoreQuizProgress(resourceIdValue) {
+  const key = quizProgressKey(resourceIdValue);
+  const progress = key ? learningAssets.read("quiz_progress", key, null) : null;
+  if (!resourceIdValue || !progress || typeof progress !== "object") return;
+  answers.value = progress.answers && typeof progress.answers === "object"
+    ? { ...progress.answers }
+    : {};
+  submittedQuestionIds.value = Array.isArray(progress.submitted_question_ids)
+    ? [...new Set(progress.submitted_question_ids.map(String))]
+    : [];
+  quizAttemptsByResource.value = {
+    ...quizAttemptsByResource.value,
+    [resourceIdValue]: Math.max(1, Number(progress.attempt_number) || 1),
+  };
+  quizUsedHintByResource.value = {
+    ...quizUsedHintByResource.value,
+    [resourceIdValue]: Boolean(progress.used_hint),
+  };
+}
+
+function isCurrentQuizProgress(progress) {
+  return Boolean(
+    progress
+    && progress.sessionId === String(props.sessionId || "")
+    && progress.nodeId === String(props.currentNode || "")
+    && progress.resourceId === resourceId(quizCard.value),
+  );
+}
+
+function questionSubmitted(questionId) {
+  return submittedQuestionIds.value.includes(String(questionId || ""));
+}
+
+function questionSubmissionPending(questionId) {
+  return submittingQuestionIds.value.includes(String(questionId || ""));
+}
+
+function canSubmitQuestion(question) {
+  return Boolean(
+    question?.id
+    && Number.isInteger(answers.value[question.id])
+    && !questionSubmitted(question.id)
+    && !questionSubmissionPending(question.id)
+    && !quizSubmitted.value
+    && !quizSubmitting.value
+    && !props.loading,
+  );
+}
+
+function setAnswer(card, questionId, optionIndex) {
+  const cardId = resourceId(card);
+  if (!cardId || quizSubmitting.value || quizSubmitted.value || questionSubmitted(questionId)) return;
+  if (!quizStartedAt.value) quizStartedAt.value = Date.now();
+  answers.value = { ...answers.value, [questionId]: optionIndex };
+  persistQuizProgress(cardId);
+  emit("answer-selected", {
+    resourceId: cardId,
+    questionId,
+    attemptNumber: quizAttemptNumber(cardId),
+    usedHint: Boolean(quizUsedHintByResource.value[cardId]),
+    result: { selected_option_index: optionIndex },
+  });
+}
+
+function submitQuestionAnswer(card, question) {
+  const cardId = resourceId(card);
+  const questionId = String(question?.id || "");
+  const selectedOptionIndex = answers.value[questionId];
+  if (!cardId || !canSubmitQuestion(question)) return;
+  const progress = captureQuizProgress(cardId);
+  const attemptNumber = progress.attemptNumber;
+  submittingQuestionIds.value = [...submittingQuestionIds.value, questionId];
+  questionSubmissionErrors.value = { ...questionSubmissionErrors.value, [questionId]: "" };
+
+  function settleSubmission(success, error) {
+    if (success) {
+      const completed = {
+        ...progress,
+        submittedQuestionIds: [...new Set([...progress.submittedQuestionIds, questionId])],
+      };
+      if (!isCurrentQuizProgress(progress)) {
+        persistQuizProgressSnapshot(completed);
+        return;
+      }
+      submittingQuestionIds.value = submittingQuestionIds.value.filter((id) => id !== questionId);
+      submittedQuestionIds.value = completed.submittedQuestionIds;
+      persistQuizProgress(cardId);
+      return;
+    }
+    if (!isCurrentQuizProgress(progress)) return;
+    submittingQuestionIds.value = submittingQuestionIds.value.filter((id) => id !== questionId);
+    questionSubmissionErrors.value = {
+      ...questionSubmissionErrors.value,
+      [questionId]: String(error?.response?.data?.detail || error?.message || "Unable to save this answer. Please retry."),
+    };
+  }
+
+  emit("submit-quiz", {
+    eventKind: "answer_submitted",
+    eventId: learningEventId("answer", progress, cardId, questionId, attemptNumber, selectedOptionIndex),
+    sessionId: progress.sessionId,
+    nodeId: progress.nodeId,
+    resourceId: cardId,
+    questionId,
+    selectedOptionIndex,
+    attemptNumber,
+    usedHint: progress.usedHint,
+    onRecorded: () => settleSubmission(true),
+    onFailure: (error) => settleSubmission(false, error),
+  });
 }
 
 function answerClass(questionId, optionIndex) {
@@ -1114,16 +1644,65 @@ function answerClass(questionId, optionIndex) {
     : "border-subtle bg-transparent text-text-secondary hover:border-secondary/25 hover:text-text-primary hover:bg-card-hover";
 }
 
-function submitQuizScore() {
-  let correct = 0;
-  quizQuestions.value.forEach((question) => {
-    if (answers.value[question.id] === question.answerIndex) {
-      correct += 1;
+function submitQuizAnswers() {
+  const resourceId = quizCard.value?.resource_id ?? quizCard.value?.id;
+  if (!resourceId || !canSubmitQuiz.value) return;
+
+  const progress = captureQuizProgress(String(resourceId));
+  const attemptNumber = progress.attemptNumber;
+  const isReview = Boolean(props.reviewItemId && props.reviewPhase === "retest");
+  const submittedAnswers = quizQuestions.value.map((question) => ({
+    questionId: question.id,
+    selectedOptionIndex: progress.answers[question.id],
+  }));
+  quizSubmitting.value = true;
+  quizSubmissionError.value = "";
+
+  function settleSubmission(success, error) {
+    if (!success) {
+      if (!isCurrentQuizProgress(progress)) return;
+      quizSubmitting.value = false;
+      // Keep the submitted snapshot locked. Retrying uses the same event id,
+      // so an acknowledged-but-lost response cannot become another attempt.
+      quizSubmitted.value = true;
+      quizSubmissionError.value = String(
+        error?.response?.data?.detail || error?.message || "提交诊断失败，请原位重试。",
+      );
+      return;
     }
+
+    const completed = { ...progress, attemptNumber: attemptNumber + 1 };
+    persistQuizProgressSnapshot(completed);
+    if (!isCurrentQuizProgress(progress)) return;
+    quizSubmitting.value = false;
+    quizSubmitted.value = true;
+    quizSubmissionError.value = "";
+    quizAttemptsByResource.value = {
+      ...quizAttemptsByResource.value,
+      [String(resourceId)]: attemptNumber + 1,
+    };
+  }
+
+  emit("submit-quiz", {
+    eventKind: "completion",
+    eventId: learningEventId(isReview ? "review" : "lesson", progress, resourceId, attemptNumber),
+    sessionId: progress.sessionId,
+    nodeId: progress.nodeId,
+    resourceId: String(resourceId),
+    durationMs: Math.max(0, Date.now() - (quizStartedAt.value || Date.now())),
+    attemptNumber,
+    usedHint: progress.usedHint,
+    isReview,
+    answers: submittedAnswers,
+    onRecorded: () => settleSubmission(true),
+    onFailure: (error) => settleSubmission(false, error),
   });
-  const score = quizQuestions.value.length ? correct / quizQuestions.value.length : 0;
-  submittedScore.value = score;
-  emit("submit-quiz", score);
+}
+
+function learningEventId(kind, progress, ...parts) {
+  return ["eduagent", kind, progress?.sessionId, progress?.nodeId, ...parts]
+    .map((part) => String(part ?? "").trim().replace(/\s+/g, "_"))
+    .join(":");
 }
 
 function forwardWheelToContent(event) {
@@ -1185,7 +1764,7 @@ function forwardWheelToContent(event) {
   margin-top: 0.3rem;
 }
 
-.resource-canvas__title-line h2 {
+.resource-canvas__title {
   min-width: 0;
   overflow: hidden;
   color: var(--text-primary);

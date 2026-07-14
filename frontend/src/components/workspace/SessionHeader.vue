@@ -22,12 +22,12 @@
             <p class="session-header__user">{{ userLabel }}</p>
           </section>
 
-          <section class="session-header__group" aria-label="当前节点">
+          <section class="session-header__group session-header__node" aria-label="当前节点">
             <div class="session-header__line">
               <p class="session-header__label">{{ stageLabel }}</p>
               <span class="session-header__pill">{{ currentNodeCaption }}</span>
             </div>
-            <h1 class="session-header__title">{{ nodeTitle || "等待生成学习路径" }}</h1>
+            <h1 class="session-header__title" aria-hidden="true">{{ nodeTitle || "等待生成学习路径" }}</h1>
             <p class="session-header__subtle">{{ activeCourse?.title_cn || "课程工作台" }}</p>
           </section>
 
@@ -37,10 +37,10 @@
             <p class="session-header__subtle">{{ nextStepDetail }}</p>
           </section>
 
-          <section class="session-header__group session-header__group--progress" aria-label="学习进度">
+          <section class="session-header__group session-header__group--progress session-header__progress" aria-label="学习进度">
             <div class="session-header__line">
               <p class="session-header__label">进度</p>
-              <span class="session-header__meter-value">{{ progressValue }}%</span>
+              <strong class="session-header__meter-value">{{ progressValue }}%</strong>
             </div>
             <div class="session-header__meter" aria-hidden="true">
               <span :style="{ width: `${progressValue}%` }" />
@@ -52,43 +52,23 @@
         </div>
 
         <div class="session-header__tools">
-          <nav
-            v-if="navigation.length"
-            class="session-header__nav"
-            aria-label="工作台主导航"
+          <button
+            type="button"
+            class="session-header__action session-header__action--desktop session-header__primary focus-ring"
+            :aria-expanded="String(!tutorCollapsed)"
+            aria-controls="workspace-coach-panel"
+            @click="$emit('toggle-tutor')"
           >
-            <button
-              v-for="item in navigation"
-              :key="item.key"
-              type="button"
-              class="session-header__nav-button focus-ring"
-              :class="{ 'is-active': item.active }"
-              :aria-controls="item.targetId"
-              :aria-expanded="item.expanded"
-              :aria-haspopup="item.hasPopup ? 'dialog' : undefined"
-              :aria-pressed="String(item.active)"
-              @click="$emit('navigate', item.key)"
-            >
-              {{ item.label }}
-            </button>
-          </nav>
-
-          <div class="session-header__account">
-            <button
-              type="button"
-              class="session-header__utility focus-ring"
-              @click="$emit('go-home')"
-            >
-              首页
-            </button>
-            <button
-              type="button"
-              class="session-header__utility session-header__utility--danger focus-ring"
-              @click="$emit('logout')"
-            >
-              退出
-            </button>
-          </div>
+            {{ tutorCollapsed ? "打开导师" : "收起导师" }}
+          </button>
+          <button
+            type="button"
+            class="session-header__action session-header__action--mobile session-header__mobile-primary focus-ring"
+            aria-controls="workspace-learn-panel"
+            @click="navigate('learn')"
+          >
+            继续学习
+          </button>
         </div>
 
         <p v-if="infoMessage" class="session-header__notice" role="status">
@@ -127,14 +107,13 @@ const props = defineProps({
   infoMessage: { type: String, default: "" },
   isBusy: { type: Boolean, default: false },
   isLoadingNode: { type: Boolean, default: false },
-  navigation: { type: Array, default: () => [] },
+  tutorCollapsed: { type: Boolean, default: false },
 });
 
-defineEmits([
+const emit = defineEmits([
   "switch-course",
   "browse-courses",
-  "go-home",
-  "logout",
+  "toggle-tutor",
   "navigate",
 ]);
 
@@ -214,6 +193,10 @@ const nextStepDetail = computed(() => {
     ? "当前节点接近达标，可以准备进入下一个薄弱点。"
     : "主线薄弱点已覆盖，适合做复盘和面试化练习。";
 });
+
+function navigate(key) {
+  emit("navigate", key);
+}
 </script>
 
 <style scoped>
@@ -234,12 +217,17 @@ const nextStepDetail = computed(() => {
   left: 0.75rem;
   pointer-events: auto;
   transform: translateY(calc(-100% - 0.5rem));
-  transition: transform var(--duration-slow) var(--ease-emphasized);
+  visibility: hidden;
+  transition:
+    transform var(--duration-slow) var(--ease-emphasized),
+    visibility 0s linear var(--duration-slow);
 }
 
 .session-header:hover .session-header__panel,
 .session-header:focus-within .session-header__panel {
   transform: translateY(0);
+  visibility: visible;
+  transition-delay: 0s;
 }
 
 .session-header__peek {
@@ -396,7 +384,7 @@ const nextStepDetail = computed(() => {
 }
 
 .session-header__group--course :deep(.course-switcher__trigger) {
-  min-height: 2.25rem;
+  min-height: 2.75rem;
   padding-block: 0.3rem;
 }
 
@@ -491,63 +479,26 @@ const nextStepDetail = computed(() => {
   gap: 0.4rem;
 }
 
-.session-header__nav {
-  display: none;
-  align-items: center;
-  gap: 0.25rem;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-pill);
-  background: var(--space-elevated);
-  padding: 0.3rem;
-}
-
-.session-header__nav-button,
-.session-header__utility {
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--text-muted);
+.session-header__action {
+  min-height: 2.75rem;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: var(--color-primary-text);
+  padding: 0.55rem 0.75rem;
   font-size: 0.72rem;
   font-weight: 800;
   line-height: 1;
-  transition:
-    background var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard);
+  white-space: nowrap;
+  transition: background var(--duration-fast) var(--ease-standard);
 }
 
-.session-header__nav-button {
-  border-radius: var(--radius-pill);
-  padding: 0.55rem 0.65rem;
+.session-header__action:hover {
+  background: var(--color-primary-dark);
 }
 
-.session-header__nav-button:hover,
-.session-header__nav-button.is-active {
-  background: var(--color-primary-soft);
-  color: var(--color-primary-dark);
-}
-
-.session-header__account {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-
-.session-header__utility {
-  min-height: 2.2rem;
-  border-color: var(--border-subtle);
-  border-radius: var(--radius-pill);
-  background: var(--space-elevated);
-  padding: 0.55rem 0.75rem;
-}
-
-.session-header__utility:hover {
-  border-color: color-mix(in srgb, var(--color-primary) 26%, var(--border-strong));
-  color: var(--text-primary);
-}
-
-.session-header__utility--danger:hover {
-  border-color: color-mix(in srgb, var(--color-error) 32%, var(--border-strong));
-  color: var(--color-error);
+.session-header__action--mobile {
+  display: none;
 }
 
 .session-header__notice {
@@ -591,12 +542,6 @@ const nextStepDetail = computed(() => {
   }
 }
 
-@media (min-width: 1100px) {
-  .session-header__nav {
-    display: flex;
-  }
-}
-
 @media (min-width: 1280px) {
   .session-header__brand {
     display: none;
@@ -621,6 +566,7 @@ const nextStepDetail = computed(() => {
     right: auto;
     left: auto;
     transform: none;
+    visibility: visible;
   }
 
   .session-header__peek {
@@ -691,9 +637,14 @@ const nextStepDetail = computed(() => {
     justify-content: flex-end;
   }
 
-  .session-header__account {
-    width: 100%;
-    justify-content: flex-end;
+  .session-header__action--desktop {
+    display: none;
+  }
+
+  .session-header__action--mobile {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
 }
 
