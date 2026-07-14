@@ -91,15 +91,17 @@ def test_failed_code_event_can_be_replayed_with_original_attribution() -> None:
     assert '@click="retryCodeSubmissionEvent"' in learn
 
 
-def test_learning_header_has_real_global_navigation_and_no_dead_drawer_contracts() -> None:
+def test_learning_header_is_task_focused_and_has_no_dead_drawer_contracts() -> None:
     header = _source("components/workspace/SessionHeader.vue")
     workspace = _source("components/PremiumWorkspace.vue")
     drawer = _source("components/SidebarDrawer.vue")
 
     for route_key in ("home", "courses", "progress", "review", "account", "settings"):
-        assert f'key: "{route_key}"' in header
-    assert 'emit("navigate", key)' in header
-    assert 'emit("logout")' in header
+        assert f'key: "{route_key}"' not in header
+    assert "<nav" not in header
+    assert 'aria-controls="workspace-coach-panel"' in header
+    assert "@click=\"$emit('toggle-tutor')\"" in header
+    assert "navigate('learn')" in header
     assert '@navigate="(key) => $emit(\'navigate\', key)"' in workspace
 
     for stale_contract in (

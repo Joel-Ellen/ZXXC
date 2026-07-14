@@ -276,7 +276,11 @@ def _interactive_exercise_metadata(
     options = list(distractors)
     options.insert(correct_index, correct_option)
     return {
-        "render_type": "targeted_practice",
+        # The resource contract uses the card type as its render type.  This
+        # is still a targeted-practice activity, but that belongs in a
+        # separate semantic field rather than replacing the UI component type.
+        "render_type": "interactive_exercise",
+        "practice_mode": "targeted_practice",
         "practice_revision": revision,
         "questions": [
             {
