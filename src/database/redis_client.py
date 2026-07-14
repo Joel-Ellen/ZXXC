@@ -105,12 +105,45 @@ def is_rotated(jti: str) -> bool:
     return False
 
 
-def store_refresh_token(user_id: str, jti: str) -> None:
+def store_refresh_token(user_id: str, jti: str, session_id: str = "", ttl: int = 604800) -> None:
     """存储用户当前合法的 Refresh Token JTI。"""
     r = get_redis()
     if r:
         try:
-            r.set(f"auth:refresh_token:{user_id}", jti)
+            bounded_ttl = max(1, int(ttl))
+            r.set(f"auth:refresh_token:{user_id}", jti, ex=bounded_ttl)
+            if session_id:
+                r.set(f"auth:refresh_token:{user_id}:{session_id}", jti, ex=bounded_ttl)
+                r.sadd(f"auth:refresh_sessions:{user_id}", session_id)
+                r.expire(f"auth:refresh_sessions:{user_id}", bounded_ttl)
+        except Exception:
+            pass
+
+
+def is_refresh_token_active(user_id: str, session_id: str, jti: str) -> bool:
+    """Check the Redis fast path for a device refresh token.
+
+    ``False`` is authoritative only when Redis is reachable. Callers retain a
+    persistent repository as the source of truth when this cache is absent.
+    """
+    r = get_redis()
+    if r and session_id:
+        try:
+            value = r.get(f"auth:refresh_token:{user_id}:{session_id}")
+            if isinstance(value, bytes):
+                value = value.decode("utf-8")
+            return value == jti
+        except Exception:
+            return False
+    return False
+
+
+def revoke_user_session(user_id: str, session_id: str) -> None:
+    r = get_redis()
+    if r:
+        try:
+            r.delete(f"auth:refresh_token:{user_id}:{session_id}")
+            r.srem(f"auth:refresh_sessions:{user_id}", session_id)
         except Exception:
             pass
 
@@ -120,6 +153,39 @@ def revoke_all_user_sessions(user_id: str) -> None:
     r = get_redis()
     if r:
         try:
-            r.delete(f"auth:refresh_token:{user_id}")
+            session_ids = r.smembers(f"auth:refresh_sessions:{user_id}") or set()
+            keys = [f"auth:refresh_token:{user_id}", f"auth:refresh_sessions:{user_id}"]
+            for session_id in session_ids:
+                if isinstance(session_id, bytes):
+                    session_id = session_id.decode("utf-8")
+                keys.append(f"auth:refresh_token:{user_id}:{session_id}")
+            r.delete(*keys)
         except Exception:
             pass
+
+
+def cache_action_token(token_hash: str, user_id: str, purpose: str, ttl: int) -> None:
+    """Cache only a one-way action-token digest for fast expiry checks."""
+    r = get_redis()
+    if r:
+        try:
+            r.setex(f"auth:action:{purpose}:{token_hash}", ttl, user_id)
+        except Exception:
+            pass
+
+
+def consume_cached_action_token(token_hash: str, purpose: str) -> Optional[str]:
+    r = get_redis()
+    if not r:
+        return None
+    key = f"auth:action:{purpose}:{token_hash}"
+    try:
+        pipe = r.pipeline()
+        pipe.get(key)
+        pipe.delete(key)
+        value, _ = pipe.execute()
+        if isinstance(value, bytes):
+            value = value.decode("utf-8")
+        return str(value) if value else None
+    except Exception:
+        return None

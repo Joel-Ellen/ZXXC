@@ -26,7 +26,7 @@ RADAR_DIM_NAMES = [
     "概念理解力",
     "代码工程力",
     "逻辑推理力",
-    "纠错韧性",
+    "错题抗挫力",
     "时间管理力",
 ]
 
@@ -62,7 +62,7 @@ class CapabilityRadar(BaseModel):
     @classmethod
     def from_list(cls, values: List[float]) -> "CapabilityRadar":
         if len(values) != 5:
-            raise ValueError(f"capability_radar must contain 5 values, got {len(values)}")
+            raise ValueError(f"能力雷达必须包含 5 个值，实际收到 {len(values)} 个")
         return cls(
             concept_understanding=values[0],
             code_engineering=values[1],
@@ -272,7 +272,7 @@ class AssessmentReporterNode:
             grade = "[D] 亟需加强"
 
         return (
-            "### 学习能力综合评估报告\n\n"
+            "### 学术能力综合评估报告\n\n"
             "#### 能力雷达分布\n"
             f"{chr(10).join(dim_lines)}\n\n"
             "#### 系统综合效能指数\n"

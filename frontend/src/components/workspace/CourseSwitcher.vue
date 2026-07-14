@@ -68,6 +68,33 @@
           />
         </button>
 
+        <div
+          v-if="pendingCourse"
+          class="course-switcher__confirmation"
+          role="group"
+          aria-label="确认切换课程"
+        >
+          <p>切换到「{{ pendingCourse.title_cn || "该课程" }}」？</p>
+          <span>当前课程的学习位置会保留。</span>
+          <div class="course-switcher__confirmation-actions">
+            <button
+              ref="confirmRef"
+              type="button"
+              class="course-switcher__confirm focus-ring"
+              @click="confirmCourseSwitch"
+            >
+              确认
+            </button>
+            <button
+              type="button"
+              class="course-switcher__cancel focus-ring"
+              @click="cancelCourseSwitch"
+            >
+              取消
+            </button>
+          </div>
+        </div>
+
         <div class="course-switcher__divider" />
 
         <button
@@ -107,11 +134,19 @@ const emit = defineEmits(["switch-course", "browse-courses"]);
 const menuOpen = ref(false);
 const triggerRef = ref(null);
 const menuRef = ref(null);
+const confirmRef = ref(null);
+const pendingCourseId = ref("");
 
 const hasCourseSurface = computed(() => Boolean(props.activeCourse) || props.enrolledCourses.length > 0);
 const activeCourseTitle = computed(() => props.activeCourse?.title_cn || "课程");
+const pendingCourse = computed(() => props.enrolledCourses.find((course) => (
+  course.course_id === pendingCourseId.value
+)) || null);
 watch(menuOpen, async (isOpen) => {
-  if (!isOpen) return;
+  if (!isOpen) {
+    pendingCourseId.value = "";
+    return;
+  }
   await nextTick();
   focusMenuItem("selected");
 });
@@ -220,8 +255,25 @@ function onMenuKeydown(event) {
 }
 
 function selectCourse(courseId) {
+  if (courseId === props.activeCourse?.course_id) {
+    closeMenu({ restoreFocus: true });
+    return;
+  }
+  pendingCourseId.value = courseId;
+  nextTick(() => confirmRef.value?.focus());
+}
+
+function confirmCourseSwitch() {
+  const courseId = pendingCourseId.value;
+  if (!courseId) return;
+  pendingCourseId.value = "";
   closeMenu({ restoreFocus: true });
   emit("switch-course", courseId);
+}
+
+function cancelCourseSwitch() {
+  pendingCourseId.value = "";
+  nextTick(() => focusMenuItem("selected"));
 }
 
 function browseCourses() {
@@ -230,8 +282,10 @@ function browseCourses() {
 }
 
 function formatProgress(progress) {
-  const value = Number.isFinite(progress) ? progress : 0;
-  return `${Math.round(value * 100)}%`;
+  const numeric = Number(progress);
+  const value = Number.isFinite(numeric) ? numeric : 0;
+  const ratio = value > 1 && value <= 100 ? value / 100 : value;
+  return `${Math.round(Math.min(1, Math.max(0, ratio)) * 100)}%`;
 }
 </script>
 
@@ -321,6 +375,7 @@ function formatProgress(progress) {
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   width: 100%;
+  min-height: 44px;
   gap: 0.7rem;
   border: 0;
   border-radius: var(--radius-md);
@@ -376,6 +431,55 @@ function formatProgress(progress) {
   height: 1px;
   margin: 0.3rem 0.45rem;
   background: var(--border-subtle);
+}
+
+.course-switcher__confirmation {
+  margin: 0.35rem 0.2rem;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 24%, var(--border-subtle));
+  border-radius: var(--radius-md);
+  background: var(--color-primary-soft);
+  padding: 0.7rem;
+}
+
+.course-switcher__confirmation p {
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+
+.course-switcher__confirmation > span {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+}
+
+.course-switcher__confirmation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.65rem;
+}
+
+.course-switcher__confirm,
+.course-switcher__cancel {
+  min-height: 44px;
+  border-radius: var(--radius-pill);
+  padding: 0.45rem 0.85rem;
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+
+.course-switcher__confirm {
+  border: 1px solid var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-primary-text);
+}
+
+.course-switcher__cancel {
+  border: 1px solid var(--border-subtle);
+  background: var(--space-panel);
+  color: var(--text-secondary);
 }
 
 .course-switcher__item--browse {

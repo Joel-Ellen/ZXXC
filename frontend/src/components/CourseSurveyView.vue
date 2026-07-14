@@ -119,8 +119,10 @@
 
         <!-- Text input -->
         <div v-else class="space-y-3">
+          <label for="course-survey-answer" class="sr-only">{{ currentStep.label }}</label>
           <input
             v-if="currentStep.inputType !== 'textarea'"
+            id="course-survey-answer"
             :value="draftAnswerFor(currentStep.id)"
             :type="currentStep.inputType || 'text'"
             :placeholder="currentStep.placeholder || '请输入…'"
@@ -130,6 +132,7 @@
           />
           <textarea
             v-else
+            id="course-survey-answer"
             :value="draftAnswerFor(currentStep.id)"
             :placeholder="currentStep.placeholder || '请输入…'"
             rows="3"

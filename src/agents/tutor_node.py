@@ -14,7 +14,9 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from .prompt_adapters import patch_tutor_node_class
+from src.api_models.tutor_request import TutorRequest
+
+from .prompt_adapters import patch_tutor_node_class, run_tutor_mode_with_llm
 
 
 class TutoringMode(str, Enum):
@@ -29,6 +31,10 @@ class TutorInput(BaseModel):
     agent_state: Any = Field(..., description="Current agent state snapshot")
     milvus_client: Any = Field(default=None, description="Optional Milvus client")
     llm_generator: Any = Field(default=None, description="Optional LLM generator")
+    request: Optional[TutorRequest] = Field(
+        default=None,
+        description="Normalized request context supplied by the application boundary",
+    )
 
 
 class TutorOutput(BaseModel):
@@ -110,13 +116,34 @@ class TutorAgentNode:
         milvus = inp.milvus_client or self._milvus
         llm = inp.llm_generator or self._llm
 
-        query = self._extract_query(state)
+        request = inp.request
+        query = request.question if request is not None else self._extract_query(state)
         current_node = self._extract_current_node(state)
         if not query:
             return TutorOutput(agent_state=state)
 
         reference_chunks = self._retrieve_parent_context(milvus, query, current_node)
-        text_response = self._generate_text_explanation(llm, query, reference_chunks)
+        mode = request.context_type if request is not None else TutoringMode.GENERAL.value
+        code_snippet = request.code_snippet if request is not None else ""
+        error_message = request.error_message if request is not None else ""
+        course_name = getattr(state, "course_id", "") or ""
+        student_context = self._student_context(state)
+        mode_response = run_tutor_mode_with_llm(
+            llm=llm,
+            mode=mode,
+            query=query,
+            course_name=course_name,
+            student_context=student_context,
+            code_snippet=code_snippet,
+            error_message=error_message,
+            temperature=self._mode_temperature(mode),
+        ) or {}
+        text_response = str(mode_response.get("text_explanation") or "")
+        if not text_response:
+            if mode == TutoringMode.CODE_DEBUG.value and (code_snippet or error_message):
+                text_response = self._code_debug_fallback(query, code_snippet, error_message)
+            else:
+                text_response = self._generate_text_explanation(llm, query, reference_chunks)
 
         raw_mermaid = self._generate_mermaid(llm, query, text_response)
         clean_mermaid = self._guard.validate_and_repair(raw_mermaid)
@@ -128,11 +155,19 @@ class TutorAgentNode:
             similarity=video_metadata[0].get("similarity", 0.0),
         )
 
+        mode_fields = {
+            field_name: value
+            for field_name, value in mode_response.items()
+            if field_name in TutorResponseCard.model_fields
+            and field_name not in {"text_explanation", "mermaid_src", "video_hydration", "query", "tutoring_mode"}
+        }
         response_card = TutorResponseCard(
             text_explanation=text_response,
             mermaid_src=clean_mermaid,
             video_hydration=video_card,
             query=query,
+            tutoring_mode=mode,
+            **mode_fields,
         )
         response_payload = response_card.model_dump()
         try:
@@ -158,6 +193,36 @@ class TutorAgentNode:
         return getattr(state, "current_node_id", None) or ""
 
     @staticmethod
+    def _student_context(state: Any) -> str:
+        current_node = getattr(state, "current_node_id", "") or ""
+        style = getattr(state, "recommended_resource_style", "") or ""
+        details = [item for item in (f"current_node={current_node}", f"resource_style={style}") if item.split("=", 1)[1]]
+        return "; ".join(details)
+
+    @staticmethod
+    def _mode_temperature(mode: str) -> float:
+        return {
+            TutoringMode.CONCEPT.value: 0.7,
+            TutoringMode.PROBLEM_SOLVING.value: 0.6,
+            TutoringMode.CODE_DEBUG.value: 0.4,
+            TutoringMode.EXAM_PREP.value: 0.6,
+        }.get(mode, 0.7)
+
+    @staticmethod
+    def _code_debug_fallback(query: str, code_snippet: str, error_message: str) -> str:
+        code_block = code_snippet or "(No code snippet was provided.)"
+        error_block = error_message or "(No runtime error message was provided.)"
+        return (
+            f"## Debugging: {query}\n\n"
+            "### Code under review\n"
+            f"```\n{code_block}\n```\n\n"
+            "### Reported error\n"
+            f"{error_block}\n\n"
+            "Start by matching the error location to the values and control flow around it, "
+            "then test the smallest input that reproduces the failure."
+        )
+
+    @staticmethod
     def _retrieve_parent_context(milvus: Any, query: str, current_node: str) -> List[str]:
         if milvus is None:
             return []
@@ -180,7 +245,7 @@ class TutorAgentNode:
             context = "\n\n".join(reference_chunks[:3])
             return f"## 关于“{query}”的相关讲解\n\n{context}"
 
-        return f"## 关于“{query}”的解答\n\n当前没有足够上下文，请尝试补充问题背景。"
+        return f"## 关于“{query}”的解答\n\n离线模式下当前没有足够上下文，请尝试补充问题背景。"
 
     def _generate_mermaid(self, llm: Any, query: str, text_explanation: str) -> str:
         if llm is not None and hasattr(llm, "generate_mermaid_graph"):

@@ -64,6 +64,10 @@ LangGraph 全局网络编排 — 多智能体协同系统主控图
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
+from pydantic import ValidationError
+
+from .api_models.learning_event import LearningEventRequest
+from .api_models.tutor_request import TutorRequest
 from .agents.assessment_node import AssessmentInput, AssessmentReporterNode
 from .agents.content_mesh_node import ContentMeshNode, MeshInput
 from .agents.evaluator_node import BehaviorVector, EvaluatorInput, EvaluatorNode
@@ -475,6 +479,143 @@ class ColdStartOrchestrator:
 _MASTERY_ADVANCE_THRESHOLD = 0.65
 
 
+def _quiz_questions_from_card(card: Any) -> list[dict[str, Any]]:
+    metadata = getattr(card, "metadata", None) or {}
+    if not isinstance(metadata, dict):
+        return []
+    structured_payload = metadata.get("structured_payload")
+    candidates = [structured_payload, metadata]
+    for candidate in candidates:
+        questions = candidate.get("questions") if isinstance(candidate, dict) else None
+        if isinstance(questions, list):
+            return [question for question in questions if isinstance(question, dict)]
+    return []
+
+
+def _verify_quiz_completion(
+    state: AgentState,
+    node_id: str,
+    event: LearningEventRequest,
+) -> tuple[bool, float, str, Dict[str, Any]]:
+    """Derive a score from a server-owned diagnostic card, never client scores."""
+    evidence = event.completion_evidence
+    if evidence is None:
+        return False, 0.0, "missing_completion_evidence", {}
+    if evidence.evidence_type != "diagnostic_quiz":
+        return False, 0.0, "unsupported_completion_evidence", {"evidence_type": evidence.evidence_type}
+    if not evidence.resource_id:
+        return False, 0.0, "missing_quiz_resource_id", {}
+
+    consumed_resource_ids = state.internal_state.get("consumed_completion_resource_ids", [])
+    if isinstance(consumed_resource_ids, list) and evidence.resource_id in consumed_resource_ids:
+        return False, 0.0, "completion_evidence_replayed", {"resource_id": evidence.resource_id}
+
+    card = next(
+        (
+            candidate
+            for candidate in state.generated_resources.get(node_id, [])
+            if getattr(candidate, "resource_id", "") == evidence.resource_id
+            and getattr(candidate, "card_type", "") == "diagnostic_quiz"
+        ),
+        None,
+    )
+    if card is None:
+        return False, 0.0, "diagnostic_quiz_not_found", {"resource_id": evidence.resource_id}
+
+    questions = _quiz_questions_from_card(card)
+    if not questions:
+        return False, 0.0, "diagnostic_quiz_has_no_server_answer_key", {"resource_id": evidence.resource_id}
+
+    answer_key: Dict[str, int] = {}
+    question_by_id: Dict[str, Dict[str, Any]] = {}
+    for question in questions:
+        question_id = str(question.get("id") or "").strip()
+        answer_index = question.get("answer_index")
+        if not question_id or isinstance(answer_index, bool) or not isinstance(answer_index, int) or answer_index < 0:
+            return False, 0.0, "diagnostic_quiz_has_invalid_answer_key", {"resource_id": evidence.resource_id}
+        if question_id in answer_key:
+            # Do not collapse malformed questions into one answerable item. That
+            # would let an incomplete submission look like a verified quiz.
+            return False, 0.0, "diagnostic_quiz_has_duplicate_question_id", {
+                "resource_id": evidence.resource_id,
+                "question_id": question_id,
+            }
+        answer_key[question_id] = answer_index
+        question_by_id[question_id] = question
+
+    submitted_answers: Dict[str, int] = {}
+    for answer in evidence.answers:
+        if not answer.question_id or answer.question_id not in answer_key:
+            return False, 0.0, "quiz_answer_does_not_match_server_question", {"question_id": answer.question_id}
+        if answer.question_id in submitted_answers:
+            return False, 0.0, "duplicate_quiz_answer", {"question_id": answer.question_id}
+        if answer.answer_index < 0:
+            return False, 0.0, "invalid_quiz_answer_index", {"question_id": answer.question_id}
+        submitted_answers[answer.question_id] = answer.answer_index
+
+    if set(submitted_answers) != set(answer_key):
+        return False, 0.0, "incomplete_quiz_answers", {
+            "expected_question_count": len(answer_key),
+            "received_question_count": len(submitted_answers),
+        }
+
+    def option_text(question: Dict[str, Any], index: int) -> str:
+        options = question.get("options")
+        if isinstance(options, list) and 0 <= index < len(options):
+            value = options[index]
+            return str(value).strip() if value is not None else ""
+        return f"Option {index + 1}" if index >= 0 else ""
+
+    question_results: list[Dict[str, Any]] = []
+    for question_id, expected_index in answer_key.items():
+        selected_index = submitted_answers[question_id]
+        question = question_by_id[question_id]
+        question_results.append({
+            "question_id": question_id,
+            "prompt": str(question.get("prompt") or "").strip(),
+            "skill_tag": str(question.get("skill_tag") or "").strip(),
+            "selected_index": selected_index,
+            "selected_answer": option_text(question, selected_index),
+            "correct_index": expected_index,
+            "correct_answer": option_text(question, expected_index),
+            "correct": selected_index == expected_index,
+            "explanation": str(question.get("explanation") or "").strip(),
+        })
+
+    correct_count = sum(1 for result in question_results if result["correct"])
+    correctness = correct_count / len(answer_key)
+    return True, correctness, "verified_diagnostic_quiz", {
+        "resource_id": evidence.resource_id,
+        "question_count": len(answer_key),
+        "correct_count": correct_count,
+        # These answer outcomes are created from the server-owned answer key
+        # after submission. They provide the immutable input for the review
+        # workflow and are never accepted from browser payloads.
+        "question_results": question_results,
+    }
+
+
+def _record_verified_completion(state: AgentState, details: Dict[str, Any]) -> None:
+    records = state.internal_state.setdefault("verified_completion_events", [])
+    if not isinstance(records, list):
+        records = []
+        state.internal_state["verified_completion_events"] = records
+    records.append(dict(details))
+    if len(records) > 20:
+        del records[:-20]
+
+    resource_id = str(details.get("resource_id") or "").strip()
+    if resource_id:
+        consumed_resource_ids = state.internal_state.setdefault("consumed_completion_resource_ids", [])
+        if not isinstance(consumed_resource_ids, list):
+            consumed_resource_ids = []
+            state.internal_state["consumed_completion_resource_ids"] = consumed_resource_ids
+        if resource_id not in consumed_resource_ids:
+            consumed_resource_ids.append(resource_id)
+        if len(consumed_resource_ids) > 500:
+            del consumed_resource_ids[:-500]
+
+
 @dataclass
 class LearningStepResult:
     """Structured result returned by run_official_learning_step.
@@ -492,8 +633,12 @@ class LearningStepResult:
     advanced_to_next_node: bool = False
     next_node_id: Optional[str] = None
     # Pass-through
-    interaction_type: str = "practice"
-    correctness: float = 0.75
+    interaction_type: str = "browse_node"
+    event_type: str = "browse_node"
+    correctness: float = 0.0
+    evidence_accepted: bool = False
+    mastery_updated: bool = False
+    mastery_update_reason: str = "browse_node"
 
 
 def run_official_learning_step(
@@ -538,10 +683,31 @@ def run_official_learning_step(
     _runtime = runtime if runtime is not None else _get_runtime()
     state: AgentState = session.agent_state
     payload = behavior or {}
-    interaction_type = payload.get("interaction_type", "practice")
+    raw_interaction_type = str(
+        payload.get(
+            "interaction_type",
+            payload.get(
+                "interactionType",
+                payload.get("event_type", payload.get("eventType", "browse_node")),
+            ),
+        )
+        or "browse_node"
+    )
+    event_parse_reason = ""
+    try:
+        event = LearningEventRequest.model_validate(payload)
+    except ValidationError:
+        # Preserve the requested event label for compatibility while denying evaluation.
+        event = LearningEventRequest.model_validate({"interaction_type": raw_interaction_type})
+        event_parse_reason = "invalid_completion_evidence"
+    interaction_type = raw_interaction_type
+    # Orchestration still has two execution paths.  The public event model is
+    # richer, so map it explicitly instead of treating a client score as a
+    # generic practice interaction.
+    event_type = event.operation_type
 
     # ── Resolve current node ──────────────────────────────────────────────
-    target_node = payload.get("current_node_id")
+    target_node = event.node_id or payload.get("current_node_id") or payload.get("currentNodeId")
     if target_node:
         state.current_node_id = target_node
     current_node = state.current_node_id or (
@@ -549,47 +715,63 @@ def run_official_learning_step(
     )
     previous_mastery = state.dynamic_profile.knowledge_mastery.get(current_node, 0.0)
 
-    correctness = float(payload.get("correctness", 0.75))
-    time_spent_ratio = float(payload.get("time_spent_ratio", 1.0))
-    code_pass_rate = float(payload.get("code_pass_rate", 0.70))
-    help_count = int(payload.get("help_count", 0))
-    tutor_query = payload.get("tutor_query") or user_input
+    tutor_query = payload.get("tutor_query") or payload.get("question") or payload.get("query") or user_input
+    tutor_request: Optional[TutorRequest] = None
+    if tutor_query:
+        try:
+            tutor_request = TutorRequest.model_validate({**payload, "question": tutor_query})
+        except ValidationError:
+            tutor_request = None
+
+    evidence_verified = False
+    correctness = 0.0
+    evidence_details: Dict[str, Any] = {}
+    mastery_update_reason = "browse_node"
+    if event_type == "complete_learning":
+        evidence_verified, correctness, mastery_update_reason, evidence_details = _verify_quiz_completion(
+            state,
+            current_node,
+            event,
+        )
+        if event_parse_reason:
+            evidence_verified = False
+            correctness = 0.0
+            mastery_update_reason = event_parse_reason
+            evidence_details = {}
+    elif event_type == "unsupported":
+        mastery_update_reason = "unsupported_learning_event"
 
     logs: List[Dict[str, Any]] = []
 
-    # ── Step 1 + 2: Evaluator → Profiler (skipped on load_node) ─────────
-    if interaction_type == "load_node":
+    # ── Step 1 + 2: Evaluator → Profiler (verified completion only) ─────
+    if not evidence_verified:
         logs.append({
             "agent": "Evaluator",
             "status": "skipped",
-            "reason": "interaction_type=load_node",
+            "reason": mastery_update_reason,
+            "mastery_updated": False,
         })
         logs.append({
             "agent": "Profiler",
             "status": "skipped",
-            "reason": "interaction_type=load_node",
+            "reason": mastery_update_reason,
+            "mastery_updated": False,
         })
     else:
         state.latest_behavior = LatestBehavior(
             node_id=current_node,
             correctness=correctness,
-            time_spent_ratio=time_spent_ratio,
             error_types=[],
             resource_feedback={},
-            help_request_count=help_count,
             tutor_query=tutor_query,
             accuracy_rate=correctness,
-            code_pass_rate=code_pass_rate,
-            duration_ratio=time_spent_ratio,
         )
         eval_output = _runtime.evaluator(
             EvaluatorInput(
                 agent_state=state,
                 raw_behavior=BehaviorVector(
                     answer_correctness=correctness,
-                    code_pass_rate=code_pass_rate,
-                    time_spent_ratio=time_spent_ratio,
-                    help_request_count=help_count,
+                    verified_quiz_score_only=True,
                     node_id=current_node,
                 ),
             )
@@ -616,6 +798,15 @@ def run_official_learning_step(
             )
         )
         state = prof_output.agent_state
+        _record_verified_completion(
+            state,
+            {
+                "event_type": event_type,
+                "node_id": current_node,
+                "correctness": correctness,
+                **evidence_details,
+            },
+        )
         logs.append({
             "agent": "Profiler",
             "selected_style": prof_output.style_result.selected_style,
@@ -644,18 +835,25 @@ def run_official_learning_step(
             *[node_id for node_id in state.active_path if node_id != current_node],
         ]
 
-    # ── Step 4: Tutor (optional, skipped on load_node) ───────────────────
-    if tutor_query and interaction_type != "load_node":
-        tutor_output = _runtime.tutor(TutorInput(agent_state=state))
+    # ── Step 4: Tutor (independent from mastery evaluation) ──────────────
+    if tutor_request is not None and event_type != "browse_node":
+        tutor_output = _runtime.tutor(TutorInput(agent_state=state, request=tutor_request))
         state = tutor_output.agent_state
         logs.append({
             "agent": "Tutor",
-            "query": tutor_query,
+            "query": tutor_request.question,
+            "context_type": tutor_request.context_type,
             "has_mermaid": bool(
                 state.tutor_response.get("mermaid_src", "")
                 if state.tutor_response
                 else False
             ),
+        })
+    elif tutor_query and event_type != "browse_node":
+        logs.append({
+            "agent": "Tutor",
+            "status": "skipped",
+            "reason": "invalid_tutor_request",
         })
 
     # ── Step 5: Content Mesh ─────────────────────────────────────────────
@@ -664,16 +862,27 @@ def run_official_learning_step(
         for card in state.generated_resources.get(current_node, [])
     }
     resources_complete = existing_types.issuperset(set(RESOURCE_CARD_ORDER))
-    if interaction_type == "load_node":
+    if event_type == "browse_node":
         logs.append({
             "agent": "ContentMesh",
             "status": "delegated_to_resource_service",
-            "reason": "interaction_type=load_node",
+            "reason": "event_type=browse_node",
         })
         logs.append({
             "agent": "Validator",
             "status": "handled_by_resource_service",
             "reason": "resources are fetched through the session resources boundary",
+        })
+    elif not evidence_verified:
+        logs.append({
+            "agent": "ContentMesh",
+            "status": "skipped",
+            "reason": mastery_update_reason,
+        })
+        logs.append({
+            "agent": "Validator",
+            "status": "skipped",
+            "reason": mastery_update_reason,
         })
     elif resources_complete:
         logs.append({
@@ -716,12 +925,13 @@ def run_official_learning_step(
             "reason": "resource_service validates cards before publishing",
         })
 
-    # ── Step 8: Assessment (skipped on load_node) ─────────────────────────
-    if interaction_type == "load_node":
+    # ── Step 8: Assessment (verified completion only) ────────────────────
+    if not evidence_verified:
         logs.append({
             "agent": "Assessment",
             "status": "skipped",
-            "reason": "interaction_type=load_node",
+            "reason": mastery_update_reason,
+            "mastery_updated": False,
         })
     else:
         assess_output = _runtime.assessment(AssessmentInput(agent_state=state))
@@ -752,7 +962,11 @@ def run_official_learning_step(
                 return nid
         return None
 
-    if interaction_type == "diagnostic" and evaluated_mastery >= _MASTERY_ADVANCE_THRESHOLD:
+    if (
+        event_type == "complete_learning"
+        and evidence_verified
+        and evaluated_mastery >= _MASTERY_ADVANCE_THRESHOLD
+    ):
         next_node_id = _find_next(
             state.active_path,
             state.dynamic_profile.knowledge_mastery,
@@ -780,5 +994,9 @@ def run_official_learning_step(
         advanced_to_next_node=advanced_to_next_node,
         next_node_id=next_node_id,
         interaction_type=interaction_type,
+        event_type=event_type,
         correctness=correctness,
+        evidence_accepted=evidence_verified,
+        mastery_updated=abs(evaluated_mastery - previous_mastery) > 1e-9,
+        mastery_update_reason=mastery_update_reason,
     )

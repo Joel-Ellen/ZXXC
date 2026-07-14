@@ -1,6 +1,6 @@
 <template>
   <div
-    class="workspace-shell relative z-10 flex h-screen overflow-hidden font-sans text-text-primary animate-fadeIn"
+    class="workspace-shell relative z-10 flex h-[100dvh] min-h-0 overflow-hidden font-sans text-text-primary"
     :class="{
       'is-high-contrast': highContrast,
       'is-reduced-motion': reduceMotion,
@@ -10,11 +10,9 @@
     @wheel="$emit('workspace-wheel', $event)"
   >
     <SidebarRail
-      :active-panel="activePanel"
-      :drawer-open="drawerOpen"
-      :panel-id="panelId"
-      :path-count="pathNodes.length"
-      @select="$emit('select-panel', $event)"
+      :path-nodes="pathNodes"
+      :current-node="currentNode"
+      @select-node="$emit('select-node', $event)"
     />
 
     <div class="workspace-shell__body relative flex min-w-0 flex-1 flex-col">
@@ -36,16 +34,14 @@ import SidebarRail from "../SidebarRail.vue";
 
 defineProps({
   pathNodes: { type: Array, default: () => [] },
-  activePanel: { type: String, default: "concept" },
-  drawerOpen: { type: Boolean, default: false },
-  panelId: { type: String, default: "workspace-sidebar-drawer" },
+  currentNode: { type: String, default: "" },
   highContrast: { type: Boolean, default: false },
   reduceMotion: { type: Boolean, default: false },
   fontSize: { type: Number, default: 16 },
   busy: { type: Boolean, default: false },
 });
 
-defineEmits(["select-panel", "workspace-wheel"]);
+defineEmits(["select-node", "workspace-wheel"]);
 </script>
 
 <style scoped>
@@ -62,12 +58,16 @@ defineEmits(["select-panel", "workspace-wheel"]);
 }
 
 .workspace-shell__body {
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--space-panel) 82%, transparent), transparent 36%),
-    transparent;
+  background: var(--space-bg);
 }
 
 .workspace-shell__main {
   isolation: isolate;
+}
+
+@media (min-width: 1024px) {
+  .workspace-shell {
+    gap: 0;
+  }
 }
 </style>

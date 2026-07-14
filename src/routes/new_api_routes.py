@@ -33,25 +33,11 @@ from src.agents.agent_factory import build_agent, get_default_llm
 
 
 def build_health_response() -> dict:
-    return {"status": "ok", "version": "2.1.0", "docs": "/docs", "route_tier": "legacy_internal"}
+    return {"status": "ok"}
 
 
 async def api_health(request: Request) -> JSONResponse:
-    import os
-
-    api_key = (
-        os.environ.get("DASHSCOPE_API_KEY")
-        or os.environ.get("DEEPSEEK_API_KEY")
-        or os.environ.get("OPENAI_API_KEY")
-    )
-    return JSONResponse(
-        {
-            "status": "ok",
-            "version": "2.1.0",
-            "llm_available": bool(api_key),
-            "provider": os.environ.get("LLM_PROVIDER", "auto") if api_key else "none",
-        }
-    )
+    return JSONResponse(build_health_response(), headers={"Cache-Control": "no-store"})
 
 
 async def api_profile_build(request: Request) -> JSONResponse:

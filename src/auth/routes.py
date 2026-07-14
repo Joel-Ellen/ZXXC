@@ -25,6 +25,7 @@ from .security import SecurityManager
 from .models import UserStore, UserRecord, PresetAccounts
 from .captcha import CaptchaGenerator
 from .middleware import AsyncAuthGuard
+from .account_service import is_production
 
 
 # ============================================================================
@@ -272,8 +273,9 @@ def create_auth_router(
         配置好的 FastAPI APIRouter。
     """
     store = UserStore(store_path)
-    # 确保预设账号存在
-    PresetAccounts.ensure_presets(store)
+    # Development fixtures must never become production credentials.
+    if not is_production():
+        PresetAccounts.ensure_presets(store)
     captcha = CaptchaGenerator()
     guard = AsyncAuthGuard()
     return AuthRouter(store, captcha, guard).build()

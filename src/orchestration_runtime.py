@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import inspect
 import os
 import time
 from dataclasses import dataclass, field
@@ -32,6 +33,34 @@ class RuntimeSession:
     pipeline_log: List[Dict[str, Any]] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class ResourceGenerationResult:
+    """The content and provenance of one resource-generation attempt."""
+
+    content: str
+    source: str
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    attempt_count: int = 0
+    fallback_reason: Optional[str] = None
+    elapsed_ms: float = 0.0
+
+    def to_metadata(self) -> Dict[str, Any]:
+        """Return learner-safe provenance suitable for the resource contract."""
+        metadata: Dict[str, Any] = {
+            "source": self.source,
+            "attempt_count": self.attempt_count,
+            "elapsed_ms": self.elapsed_ms,
+        }
+        if self.provider:
+            metadata["provider"] = self.provider
+        if self.model:
+            metadata["model"] = self.model
+        if self.fallback_reason:
+            metadata["fallback_reason"] = self.fallback_reason
+        return metadata
+
+
 class OrchestrationRuntime:
     """Singleton-style lifecycle holder for the official orchestration path."""
 
@@ -40,14 +69,34 @@ class OrchestrationRuntime:
         self._llm_clients: Dict[str, Any] = {}
         self._graph: Optional[EduAgentGraph] = None
         self._sessions: Dict[str, Dict[str, RuntimeSession]] = {}
-        self._resource_llm_timeout_sec = self._read_float_env("EDUAGENT_RESOURCE_LLM_TIMEOUT_SEC", 4.0)
-        self._resource_llm_retries = self._read_int_env("EDUAGENT_RESOURCE_LLM_RETRIES", 2)
+        # A real provider regularly needs more than a few seconds to produce a
+        # complete learning card.  The old four-second timeout caused valid
+        # requests to be discarded, then left their worker threads occupied.
+        # DashScope's complete learning-card responses regularly take about
+        # forty seconds. Keep one request alive long enough to receive a real
+        # response, while the five-card batch remains bounded by the frontend
+        # request budget through three-way concurrency.
+        self._resource_llm_timeout_sec = self._read_float_env("EDUAGENT_RESOURCE_LLM_TIMEOUT_SEC", 50.0)
+        self._resource_llm_total_timeout_sec = max(
+            self._resource_llm_timeout_sec,
+            self._read_float_env("EDUAGENT_RESOURCE_LLM_TOTAL_TIMEOUT_SEC", 55.0),
+        )
+        # One bounded attempt is the default.  Deployments with a reliable
+        # secondary provider may explicitly opt into another attempt.
+        self._resource_llm_retries = self._read_int_env("EDUAGENT_RESOURCE_LLM_RETRIES", 1)
         self._resource_llm_retry_backoff_sec = self._read_float_env(
             "EDUAGENT_RESOURCE_LLM_RETRY_BACKOFF_SEC",
             0.25,
         )
+        self._resource_generation_parallelism = min(
+            5,
+            self._read_int_env("EDUAGENT_RESOURCE_LLM_PARALLELISM", 3),
+        )
         self._resource_generation_pool = concurrent.futures.ThreadPoolExecutor(
-            max_workers=self._read_int_env("EDUAGENT_RESOURCE_LLM_WORKERS", 2),
+            max_workers=max(
+                self._resource_generation_parallelism,
+                min(8, self._read_int_env("EDUAGENT_RESOURCE_LLM_WORKERS", 3)),
+            ),
             thread_name_prefix="eduagent-resource-llm",
         )
         self._llm_provider_order = self._build_provider_order()
@@ -62,10 +111,19 @@ class OrchestrationRuntime:
         self.validator = ValidatorNode(nli_fn=llm.compute_nli_entailment if llm else None)
         self.assessment = AssessmentReporterNode(alpha=0.2)
 
+    @staticmethod
+    def _canonical_provider(provider: str) -> str:
+        aliases = {
+            "qwen": "dashscope",
+            "iflytek": "spark",
+        }
+        normalized = str(provider or "").strip().lower()
+        return aliases.get(normalized, normalized)
+
     def _build_provider_order(self) -> List[str]:
-        primary = (os.environ.get("LLM_PROVIDER") or "qwen").strip().lower()
+        primary = self._canonical_provider(os.environ.get("LLM_PROVIDER") or "dashscope")
         fallbacks = [
-            provider.strip().lower()
+            self._canonical_provider(provider)
             for provider in os.environ.get("EDUAGENT_LLM_FALLBACKS", "deepseek,openai").split(",")
             if provider.strip()
         ]
@@ -76,28 +134,46 @@ class OrchestrationRuntime:
         return ordered
 
     @staticmethod
-    def _provider_has_credentials(provider: str) -> bool:
-        if provider in {"qwen", "dashscope"}:
-            key = os.environ.get("DASHSCOPE_API_KEY", "")
-            return bool(key and not key.startswith("sk-your-") and len(key) > 20)
+    def _usable_secret(value: str, *, minimum_length: int = 8) -> bool:
+        normalized = str(value or "").strip()
+        if len(normalized) < minimum_length:
+            return False
+        placeholder_markers = (
+            "placeholder",
+            "your-",
+            "sk-your-",
+            "change-me",
+            "example",
+            "replace-me",
+        )
+        return not normalized.lower().startswith(placeholder_markers)
+
+    @classmethod
+    def _provider_has_credentials(cls, provider: str) -> bool:
+        provider = cls._canonical_provider(provider)
+        if provider == "dashscope":
+            return cls._usable_secret(os.environ.get("DASHSCOPE_API_KEY", ""), minimum_length=20)
         if provider == "deepseek":
-            return bool(os.environ.get("DEEPSEEK_API_KEY", ""))
+            return cls._usable_secret(os.environ.get("DEEPSEEK_API_KEY", ""))
         if provider == "openai":
-            return bool(os.environ.get("OPENAI_API_KEY", ""))
+            return cls._usable_secret(os.environ.get("OPENAI_API_KEY", ""))
         if provider == "spark":
             return all(
-                os.environ.get(name, "")
+                cls._usable_secret(os.environ.get(name, ""))
                 for name in ("SPARK_API_KEY", "SPARK_APP_ID", "SPARK_API_SECRET")
             )
         return False
 
     def _get_or_create_llm_for_provider(self, provider: str) -> Any:
+        provider = self._canonical_provider(provider)
         if provider in self._llm_clients:
             return self._llm_clients[provider]
         if not self._provider_has_credentials(provider):
             return None
         try:
-            from src.llm import LLMClientV2
+            # Resolve the concrete client here so optional provider-import
+            # failures are handled by this runtime's fallback path directly.
+            from src.llm.client_v2 import LLMClientV2
 
             client = LLMClientV2(provider=provider)
             self._llm_clients[provider] = client
@@ -153,7 +229,6 @@ class OrchestrationRuntime:
     def get_session(self, user_id: str, course_id: str = "data_structures") -> RuntimeSession:
         user_sessions = self._sessions.setdefault(user_id, {})
         if course_id not in user_sessions:
-            self.kg.seed_course(course_id)
             target_node = "N20" if course_id == "data_structures" else "N01"
             agent_state = AgentState(
                 user_id=user_id,
@@ -166,7 +241,7 @@ class OrchestrationRuntime:
                 agent_state=agent_state,
                 cold_engine=cold_engine,
                 cold_state=cold_engine.initialize(user_id),
-                path_planner=self.kg.create_path_planner(course_id),
+                path_planner=self.kg.create_path_planner(course_id, local_only=True),
             )
         return user_sessions[course_id]
 
@@ -188,12 +263,26 @@ class OrchestrationRuntime:
             self._sessions[user_id].pop(course_id, None)
         return self.get_session(user_id, course_id)
 
+    def drop_session(self, user_id: str, course_id: str = "data_structures") -> None:
+        """Evict a runtime session without creating a replacement."""
+        user_sessions = self._sessions.get(user_id)
+        if user_sessions is None:
+            return
+        user_sessions.pop(course_id, None)
+        if not user_sessions:
+            self._sessions.pop(user_id, None)
+
+    def drop_user_sessions(self, user_id: str) -> None:
+        """Evict every in-process learning session for an account."""
+        self._sessions.pop(user_id, None)
+
     def _candidate_llms(self) -> List[tuple[str, Any]]:
         candidates: List[tuple[str, Any]] = []
         current = self.get_llm()
         if current is not None:
-            candidates.append((getattr(current, "provider", "primary"), current))
+            candidates.append((self._canonical_provider(getattr(current, "provider", "primary")), current))
         for provider in self._llm_provider_order:
+            provider = self._canonical_provider(provider)
             client = self._get_or_create_llm_for_provider(provider)
             if client is None:
                 continue
@@ -202,29 +291,115 @@ class OrchestrationRuntime:
             candidates.append((provider, client))
         return candidates
 
-    def generate_resource_content(self, node_id: str, card_type: str, difficulty: float) -> str:
+    @staticmethod
+    def _llm_model_name(llm: Any) -> Optional[str]:
+        config = getattr(llm, "config", None)
+        if isinstance(config, dict):
+            model = str(config.get("model") or "").strip()
+            return model or None
+        return None
+
+    @staticmethod
+    def _llm_supports_resource_parameter(generate_content: Any, name: str) -> bool:
+        try:
+            parameters = inspect.signature(generate_content).parameters.values()
+        except (TypeError, ValueError):
+            return False
+        return any(
+            parameter.name == name
+            or parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters
+        )
+
+    def _call_resource_generator(
+        self,
+        llm: Any,
+        node_id: str,
+        card_type: str,
+        difficulty: float,
+        timeout_sec: float,
+        course_id: str,
+        node_title: str,
+    ) -> str:
+        generate_content = llm.generate_content
+        kwargs: Dict[str, Any] = {}
+        if self._llm_supports_resource_parameter(generate_content, "timeout_sec"):
+            kwargs["timeout_sec"] = timeout_sec
+        if self._llm_supports_resource_parameter(generate_content, "course_id"):
+            kwargs["course_id"] = course_id
+        if self._llm_supports_resource_parameter(generate_content, "node_title"):
+            kwargs["node_title"] = node_title
+        return generate_content(node_id, card_type, difficulty, **kwargs)
+
+    def generate_resource_content_result(
+        self,
+        node_id: str,
+        card_type: str,
+        difficulty: float,
+        *,
+        course_id: str = "data_structures",
+        node_title: str = "",
+        _deadline_monotonic: Optional[float] = None,
+    ) -> ResourceGenerationResult:
+        """Generate one card within a bounded deadline and retain provenance.
+
+        The string-only ``generate_resource_content`` method remains below for
+        graph compatibility. Resource service callers should use this method
+        so a local template can never be confused with an LLM response.
+        """
+        started = time.monotonic()
+        deadline = started + self._resource_llm_total_timeout_sec
+        if _deadline_monotonic is not None:
+            deadline = min(deadline, _deadline_monotonic)
         candidates = self._candidate_llms()
+        last_failure = "no_eligible_provider"
+        attempt_count = 0
+
         for provider_name, llm in candidates:
             for attempt in range(1, self._resource_llm_retries + 1):
+                remaining_sec = deadline - time.monotonic()
+                if remaining_sec <= 0:
+                    last_failure = "deadline_exceeded"
+                    break
+
+                attempt_timeout_sec = min(self._resource_llm_timeout_sec, remaining_sec)
+                # Let the provider client cancel its HTTP coroutine slightly
+                # before this outer guard expires. This avoids permanently
+                # occupying a worker after a timed-out request.
+                provider_timeout_sec = max(0.1, attempt_timeout_sec - 0.2)
                 future = self._resource_generation_pool.submit(
-                    llm.generate_content,
+                    self._call_resource_generator,
+                    llm,
                     node_id,
                     card_type,
                     difficulty,
+                    provider_timeout_sec,
+                    course_id,
+                    node_title,
                 )
+                attempt_count += 1
                 try:
-                    content = future.result(timeout=self._resource_llm_timeout_sec)
-                    if content:
+                    content = future.result(timeout=attempt_timeout_sec)
+                    if str(content or "").strip():
                         if provider_name != candidates[0][0]:
                             incr_metric(
                                 "llm.fallback_total",
                                 operation="resource_generation",
                                 fallback=provider_name,
                             )
-                        return content
-                    raise RuntimeError("empty_llm_content")
+                        return ResourceGenerationResult(
+                            content=str(content),
+                            source="llm",
+                            provider=provider_name,
+                            model=self._llm_model_name(llm),
+                            attempt_count=attempt_count,
+                            elapsed_ms=round((time.monotonic() - started) * 1000, 3),
+                        )
+                    last_failure = "empty_response"
+                    raise RuntimeError(last_failure)
                 except concurrent.futures.TimeoutError:
                     future.cancel()
+                    last_failure = "timeout"
                     incr_metric("llm.timeout_total", operation="resource_generation", provider=provider_name)
                     log_event(
                         "llm.resource.timeout",
@@ -232,9 +407,10 @@ class OrchestrationRuntime:
                         provider=provider_name,
                         card_type=card_type,
                         attempt=attempt,
-                        timeout_sec=self._resource_llm_timeout_sec,
+                        timeout_sec=round(attempt_timeout_sec, 3),
                     )
                 except Exception as exc:
+                    last_failure = "provider_error" if last_failure != "empty_response" else last_failure
                     incr_metric("llm.error_total", operation="resource_generation", provider=provider_name)
                     log_event(
                         "llm.resource.error",
@@ -242,16 +418,133 @@ class OrchestrationRuntime:
                         provider=provider_name,
                         card_type=card_type,
                         attempt=attempt,
-                        error=str(exc),
+                        error_type=type(exc).__name__,
                     )
+                if time.monotonic() >= deadline:
+                    last_failure = "deadline_exceeded"
+                    break
                 if attempt < self._resource_llm_retries:
-                    time.sleep(self._resource_llm_retry_backoff_sec * attempt)
+                    backoff_sec = min(
+                        self._resource_llm_retry_backoff_sec * attempt,
+                        max(0.0, deadline - time.monotonic()),
+                    )
+                    if backoff_sec:
+                        time.sleep(backoff_sec)
+            if time.monotonic() >= deadline:
+                break
 
         incr_metric("llm.fallback_total", operation="resource_generation", fallback="template")
-        return self._template_resource_content(node_id, card_type)
+        return ResourceGenerationResult(
+            content=self._template_resource_content(
+                node_id,
+                card_type,
+                course_id=course_id,
+                node_title=node_title,
+            ),
+            source="template",
+            attempt_count=attempt_count,
+            fallback_reason=last_failure,
+            elapsed_ms=round((time.monotonic() - started) * 1000, 3),
+        )
 
-    def _template_resource_content(self, node_id: str, card_type: str) -> str:
-        title = self.kg.get_node_title(node_id) or node_id
+    def generate_resource_contents(
+        self,
+        node_id: str,
+        card_types: List[str],
+        difficulty: float,
+        *,
+        course_id: str = "data_structures",
+        node_title: str = "",
+    ) -> Dict[str, ResourceGenerationResult]:
+        """Generate distinct requested card types concurrently and boundedly."""
+        requested_types = list(dict.fromkeys(card_types))
+        if not requested_types:
+            return {}
+        if len(requested_types) == 1:
+            card_type = requested_types[0]
+            return {
+                card_type: self.generate_resource_content_result(
+                    node_id,
+                    card_type,
+                    difficulty,
+                    course_id=course_id,
+                    node_title=node_title,
+                ),
+            }
+
+        # Every worker shares one absolute deadline. Without this, a batch
+        # larger than ``max_workers`` can consume a full timeout per wave.
+        batch_deadline = time.monotonic() + self._resource_llm_total_timeout_sec
+        max_workers = min(len(requested_types), self._resource_generation_parallelism)
+        results: Dict[str, ResourceGenerationResult] = {}
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=max_workers,
+            thread_name_prefix="eduagent-resource-batch",
+        ) as pool:
+            futures = {
+                card_type: pool.submit(
+                    self.generate_resource_content_result,
+                    node_id,
+                    card_type,
+                    difficulty,
+                    course_id=course_id,
+                    node_title=node_title,
+                    _deadline_monotonic=batch_deadline,
+                )
+                for card_type in requested_types
+            }
+            for card_type in requested_types:
+                try:
+                    results[card_type] = futures[card_type].result()
+                except Exception as exc:
+                    # This is defensive: normal failures are represented by a
+                    # template result above, but an unexpected runtime failure
+                    # must still publish truthful provenance.
+                    incr_metric("llm.error_total", operation="resource_generation", provider="runtime")
+                    log_event(
+                        "llm.resource.batch_error",
+                        level="warning",
+                        card_type=card_type,
+                        error_type=type(exc).__name__,
+                    )
+                    results[card_type] = ResourceGenerationResult(
+                        content=self._template_resource_content(
+                            node_id,
+                            card_type,
+                            course_id=course_id,
+                            node_title=node_title,
+                        ),
+                        source="template",
+                        fallback_reason="runtime_error",
+                    )
+        return results
+
+    def generate_resource_content(self, node_id: str, card_type: str, difficulty: float) -> str:
+        """Compatibility wrapper for graph integrations that consume strings."""
+        return self.generate_resource_content_result(node_id, card_type, difficulty).content
+
+    def _template_resource_content(
+        self,
+        node_id: str,
+        card_type: str,
+        *,
+        course_id: str = "data_structures",
+        node_title: str = "",
+    ) -> str:
+        title = str(node_title or "").strip()
+        if not title:
+            get_node_by_id = getattr(self.kg, "get_node_by_id", None)
+            if callable(get_node_by_id):
+                try:
+                    node = get_node_by_id(node_id, course_id)
+                    title = str(getattr(node, "title", "") or "").strip()
+                except Exception:
+                    title = ""
+        title = title or self.kg.get_node_title(node_id) or node_id
+        notice = (
+            "> Generation status: local fallback template. "
+            "This card was not produced by a model response.\n\n"
+        )
         templates = {
             "concept_map": f"## {title}\n\nCore concept map placeholder for {node_id}.",
             "code_snippet": f"## {title}\n\n```python\n# Practice scaffold for {node_id}\npass\n```",
@@ -259,7 +552,7 @@ class OrchestrationRuntime:
             "video_summary": f"## {title}\n\nShort explanation script for reviewing the idea.",
             "diagnostic_quiz": f"## {title}\n\n1. What is the key invariant of this concept?",
         }
-        return templates.get(card_type, templates["concept_map"])
+        return notice + templates.get(card_type, templates["concept_map"])
 
 
 _runtime: Optional[OrchestrationRuntime] = None

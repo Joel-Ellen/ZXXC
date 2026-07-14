@@ -156,6 +156,39 @@ class UserStore:
             self._save()
             return True
 
+    def update_public_profile(
+        self,
+        user_id: str,
+        *,
+        email: Optional[str] = None,
+        display_name: Optional[str] = None,
+    ) -> Optional[UserRecord]:
+        """Update the user-owned public identity fields with uniqueness checks."""
+        with self._lock:
+            user = self._users.get(user_id)
+            if user is None:
+                return None
+            if email is not None:
+                normalized = email.lower().strip()
+                if "@" not in normalized:
+                    raise ValueError("邮箱格式无效")
+                if any(item.user_id != user_id and item.email == normalized for item in self._users.values()):
+                    raise ValueError(f"邮箱 '{normalized}' 已被注册")
+                user.email = normalized
+            if display_name is not None:
+                user.display_name = display_name.strip() or user_id
+            self._save()
+            return user
+
+    def delete_user(self, user_id: str) -> bool:
+        """Delete a JSON-backed user record after related data is cleaned."""
+        with self._lock:
+            if user_id not in self._users:
+                return False
+            self._users.pop(user_id, None)
+            self._save()
+            return True
+
     def list_users(self) -> List[Dict[str, object]]:
         """列出所有用户（安全信息）。"""
         with self._lock:

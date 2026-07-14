@@ -103,6 +103,14 @@ class BehaviorVector(BaseModel):
     )
     node_id: str = Field(default="", description="关联的知识点 ID")
 
+    verified_quiz_score_only: bool = Field(
+        default=False,
+        description=(
+            "The score came from server-verified quiz evidence only. "
+            "Unmeasured time, code, and help fields must not influence evaluation."
+        ),
+    )
+
     @field_validator("time_spent_ratio")
     @classmethod
     def ratio_must_be_non_negative(cls, v: float) -> float:
@@ -373,6 +381,19 @@ class BehaviorCleaner:
         effective_code_pass = raw.code_pass_rate
         friction = 1.0
         is_valid = True
+
+        # A completed diagnostic quiz gives us one trustworthy signal: its
+        # server-derived correctness. Do not turn default values for unrelated
+        # dimensions into synthetic timing, coding, or help evidence.
+        if raw.verified_quiz_score_only:
+            return CleanedBehavior(
+                raw=raw,
+                effective_correctness=round(min(effective_correctness, 1.0), 6),
+                effective_code_pass=0.0,
+                anomaly=anomaly,
+                is_valid=is_valid,
+                friction_coefficient=friction,
+            )
 
         time_ratio = raw.time_spent_ratio
         correctness = raw.answer_correctness
@@ -757,7 +778,9 @@ class EvaluatorNode:
 
         # ---- Step 2: 获取当前掌握度 ----
         dp = state.dynamic_profile
-        current_mastery = dp.knowledge_mastery.get(node_id, 0.5)
+        # A missing entry means no mastery evidence has been recorded yet.
+        # Treating it as 0.5 invents credit before the first verified result.
+        current_mastery = dp.knowledge_mastery.get(node_id, 0.0)
         c_fail = dp.continuous_fail_counter
 
         # ---- Step 3: PID 平滑评估 ----

@@ -16,6 +16,14 @@ COPY frontend/postcss.config.js ./
 COPY frontend/tailwind.config.js ./
 COPY frontend/src/ ./src/
 COPY frontend/public/ ./public/
+ARG VITE_SENTRY_DSN=
+ARG VITE_SENTRY_ENVIRONMENT=production
+ARG VITE_SENTRY_RELEASE=
+ARG VITE_SENTRY_TRACES_SAMPLE_RATE=0.05
+ENV VITE_SENTRY_DSN=${VITE_SENTRY_DSN} \
+    VITE_SENTRY_ENVIRONMENT=${VITE_SENTRY_ENVIRONMENT} \
+    VITE_SENTRY_RELEASE=${VITE_SENTRY_RELEASE} \
+    VITE_SENTRY_TRACES_SAMPLE_RATE=${VITE_SENTRY_TRACES_SAMPLE_RATE}
 RUN npm run build
 
 # ============================================================================
@@ -53,7 +61,7 @@ EXPOSE 8800
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8800/api/state')" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8800/api/health')" || exit 1
 
 # 启动服务
 CMD ["python", "frontend/server.py"]

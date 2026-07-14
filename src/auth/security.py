@@ -15,7 +15,7 @@ import os
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import jwt
 
@@ -88,10 +88,49 @@ if not ARGON2_AVAILABLE:
     )
 
 
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "prod_secret_sign_key_997126_edu_agent")
+DEV_JWT_SECRET_KEY = "eduagent-explicit-development-only-jwt-secret"
+_INSECURE_JWT_SECRETS = frozenset({
+    "",
+    DEV_JWT_SECRET_KEY,
+    "prod_secret_sign_key_997126_edu_agent",
+    "change-me-in-production",
+    "changeme",
+    "secret",
+})
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "").strip() or DEV_JWT_SECRET_KEY
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 15
 REFRESH_TOKEN_EXPIRE_DAYS = 7
+
+
+class SecurityConfigurationError(RuntimeError):
+    """Raised when production authentication would use unsafe configuration."""
+
+
+def _is_production() -> bool:
+    environment = (
+        os.getenv("APP_ENV")
+        or os.getenv("ENVIRONMENT")
+        or os.getenv("NODE_ENV")
+        or "development"
+    )
+    return str(environment).strip().lower() in {"prod", "production"}
+
+
+def validate_security_configuration() -> None:
+    """Fail closed when production JWT signing is missing or predictable."""
+    configured = os.getenv("JWT_SECRET_KEY", "").strip()
+    if not _is_production():
+        return
+    if configured in _INSECURE_JWT_SECRETS or len(configured) < 32:
+        raise SecurityConfigurationError(
+            "JWT_SECRET_KEY must be a non-default secret of at least 32 characters in production"
+        )
+
+
+def _jwt_secret() -> str:
+    validate_security_configuration()
+    return os.getenv("JWT_SECRET_KEY", "").strip() or DEV_JWT_SECRET_KEY
 
 
 class SecurityManager:
@@ -116,7 +155,14 @@ class SecurityManager:
             pass
 
     @staticmethod
-    def create_token_pair(user_id: str, role: str) -> Dict[str, str]:
+    def create_token_pair(
+        user_id: str,
+        role: str,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, str]:
+        secret = _jwt_secret()
+        if _is_production() and not session_id:
+            raise SecurityConfigurationError("Production JWTs require a persistent session_id")
         now = datetime.now(timezone.utc)
 
         access_jti = str(uuid.uuid4())
@@ -128,6 +174,8 @@ class SecurityManager:
             "jti": access_jti,
             "type": "access",
         }
+        if session_id:
+            access_payload["sid"] = session_id
 
         refresh_jti = str(uuid.uuid4())
         refresh_expire = now + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
@@ -137,18 +185,29 @@ class SecurityManager:
             "jti": refresh_jti,
             "type": "refresh",
         }
+        if session_id:
+            refresh_payload["sid"] = session_id
 
         return {
-            "access_token": jwt.encode(access_payload, JWT_SECRET_KEY, algorithm=ALGORITHM),
-            "refresh_token": jwt.encode(refresh_payload, JWT_SECRET_KEY, algorithm=ALGORITHM),
+            "access_token": jwt.encode(access_payload, secret, algorithm=ALGORITHM),
+            "refresh_token": jwt.encode(refresh_payload, secret, algorithm=ALGORITHM),
             "access_jti": access_jti,
             "refresh_jti": refresh_jti,
+            "session_id": session_id or "",
         }
 
     @staticmethod
     def decode_token(token: str) -> Dict[str, Any]:
+        secret = _jwt_secret()
         try:
-            return jwt.decode(token, JWT_SECRET_KEY, algorithms=[ALGORITHM])
+            payload = jwt.decode(token, secret, algorithms=[ALGORITHM])
+            if (
+                _is_production()
+                and payload.get("type") in {"access", "refresh"}
+                and not payload.get("sid")
+            ):
+                raise ValueError("SESSION_REQUIRED")
+            return payload
         except jwt.ExpiredSignatureError:
             raise ValueError("TOKEN_EXPIRED")
         except jwt.InvalidTokenError:

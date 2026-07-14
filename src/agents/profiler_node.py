@@ -20,7 +20,7 @@ Profiler Node — LangGraph 画像演进大脑
 
 3. 干预门控 (Intervention Gate)
    - C_fail ≥ 3 → 强制风格切换（排除当前风格，选择次优伯仲）
-   - 最低掌握度保底: max(m_decayed, 0.15)
+   - Mastery decay is non-increasing and preserves zero when no evidence exists
 
 依赖声明：
   NumPy 用于 Beta 分布采样与随机数生成。
@@ -331,9 +331,6 @@ class EbbinghausForgettingEngine:
     # 复习增益
     SUCCESS_STRENGTH_MULT: float = 1.5
     FAILURE_STRENGTH_MULT: float = 0.8
-    # 最低掌握度保底
-    MASTERY_FLOOR: float = 0.15
-
     def __init__(self) -> None:
         # 每个知识点的记忆强度
         self._strengths: Dict[str, float] = {}
@@ -378,8 +375,10 @@ class EbbinghausForgettingEngine:
         decay_factor = math.exp(-lambd * elapsed_hours)
         decayed_mastery = mastery * decay_factor
 
-        # 最低保底
-        decayed_mastery = max(self.MASTERY_FLOOR, decayed_mastery)
+        # Decay must never add synthetic mastery.
+        # Forgetting is a loss-only transform. It must not manufacture
+        # mastery for a learner with no verified evidence.
+        decayed_mastery = max(0.0, decayed_mastery)
 
         return ForgettingCurveResult(
             mastery_before=round(mastery, 6),
@@ -547,13 +546,8 @@ class ProfilerNode:
                 current_ts=inp.current_timestamp,
             )
 
-            # 写回衰减后的掌握度 + 保底检查
+            # Persist the decayed value without synthetic credit.
             decayed = forgetting_result.mastery_after
-
-            # 若 C_fail ≥ 3 → 强制保底（不低于 MASTERY_FLOOR 且不低于当前值）
-            if c_fail >= 3 and decayed < EbbinghausForgettingEngine.MASTERY_FLOOR * 2:
-                decayed = max(decayed, EbbinghausForgettingEngine.MASTERY_FLOOR * 2)
-                diagnostics["mastery_floor_enforced"] = True
 
             dp.knowledge_mastery[node_id] = decayed
 

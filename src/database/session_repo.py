@@ -122,3 +122,24 @@ class SessionRepo:
         self.ensure_tables()
         db.execute("DELETE FROM learning_sessions WHERE user_id = %s AND course_id = %s", (user_id, course_id))
         db.commit()
+
+    def list_for_user(self, user_id: str) -> list[Dict[str, Any]]:
+        self.ensure_tables()
+        rows = db.execute(
+            "SELECT * FROM learning_sessions WHERE user_id = %s ORDER BY updated_at DESC",
+            (user_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def set_status(self, user_id: str, course_id: str, status: str) -> None:
+        self.ensure_tables()
+        db.execute(
+            "UPDATE learning_sessions SET status = %s, updated_at = %s WHERE user_id = %s AND course_id = %s",
+            (status, datetime.now(timezone.utc).isoformat(), user_id, course_id),
+        )
+        db.commit()
+
+    def delete_all(self, user_id: str) -> None:
+        self.ensure_tables()
+        db.execute("DELETE FROM learning_sessions WHERE user_id = %s", (user_id,))
+        db.commit()

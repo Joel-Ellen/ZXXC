@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from src.contracts.resource_contract import ResourceContract, ResourceSafety, ResourceValidation
 from src.domain.assessment import AssessmentResult, StrategyDecision
@@ -83,14 +83,15 @@ def resource_contract_from_card(card: ResourceCard) -> ResourceContract:
     title = metadata.get("title") or _node_title(card.node_id) or card.node_id
     validation_payload = metadata.get("validation") if isinstance(metadata.get("validation"), dict) else {}
     safety_payload = metadata.get("safety") if isinstance(metadata.get("safety"), dict) else {}
-    artifacts = metadata.get("artifacts") if isinstance(metadata.get("artifacts"), dict) else {}
+    generation_payload = metadata.get("generation") if isinstance(metadata.get("generation"), dict) else {}
+    artifacts = _redact_answer_keys(metadata.get("artifacts")) if isinstance(metadata.get("artifacts"), dict) else {}
     source_refs = metadata.get("source_refs") if isinstance(metadata.get("source_refs"), list) else []
     created_at = metadata.get("created_at") or metadata.get("generated_at")
-    structured_payload = {
+    structured_payload = _redact_answer_keys({
         key: value
         for key, value in metadata.items()
-        if key not in {"validation", "safety", "artifacts", "source_refs"}
-    }
+        if key not in {"generation", "validation", "safety", "artifacts", "source_refs"}
+    })
     return ResourceContract(
         resource_id=card.resource_id,
         node_id=card.node_id,
@@ -101,11 +102,39 @@ def resource_contract_from_card(card: ResourceCard) -> ResourceContract:
         artifacts=artifacts,
         difficulty=card.difficulty,
         personalization_basis={"cognitive_style": card.cognitive_style},
+        generation=generation_payload,
         validation=ResourceValidation(**validation_payload),
         safety=ResourceSafety(**safety_payload),
         source_refs=source_refs,
         created_at=created_at or ResourceContract(resource_id=card.resource_id, node_id=card.node_id, resource_type=card.card_type).created_at,
     )
+
+
+_ANSWER_KEY_FIELDS = {
+    "answer_index",
+    "answerIndex",
+    "correct_answer",
+    "correctAnswer",
+    "correct_option_index",
+    "correctOptionIndex",
+    "correct_index",
+    "correctIndex",
+    "selected_option_index",
+    "selectedOptionIndex",
+}
+
+
+def _redact_answer_keys(value: Any) -> Any:
+    """Keep grading keys in server state while removing them from API contracts."""
+    if isinstance(value, dict):
+        return {
+            key: _redact_answer_keys(item)
+            for key, item in value.items()
+            if key not in _ANSWER_KEY_FIELDS
+        }
+    if isinstance(value, list):
+        return [_redact_answer_keys(item) for item in value]
+    return value
 
 
 def learning_resource_from_card(card: ResourceCard) -> LearningResource:

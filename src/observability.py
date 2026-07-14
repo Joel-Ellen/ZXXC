@@ -134,6 +134,20 @@ class InMemoryMetrics:
         with self._lock:
             return int(self._counters.get(key, 0))
 
+    def counter_sum(self, name: str, **labels: Any) -> int:
+        expected = {
+            str(key): str(value)
+            for key, value in labels.items()
+            if value is not None and value != ""
+        }
+        with self._lock:
+            return int(sum(
+                value
+                for (metric_name, label_items), value in self._counters.items()
+                if metric_name == name
+                and all(dict(label_items).get(key) == value for key, value in expected.items())
+            ))
+
     def snapshot(self) -> Dict[str, Any]:
         with self._lock:
             counters = [
@@ -182,7 +196,86 @@ def observe_metric(name: str, value: float, **labels: Any) -> None:
 
 
 def metrics_snapshot() -> Dict[str, Any]:
-    return metrics.snapshot()
+    snapshot = metrics.snapshot()
+    snapshot["launch"] = launch_metrics_snapshot()
+    return snapshot
+
+
+def _rate(numerator: int, denominator: int) -> Optional[float]:
+    if denominator <= 0:
+        return None
+    return round(numerator / denominator, 6)
+
+
+def launch_metrics_snapshot() -> Dict[str, Any]:
+    login_failed = metrics.counter_sum("auth.login_total", outcome="failure")
+    login_total = metrics.counter_sum("auth.login_total")
+
+    resource_failed = metrics.counter_sum("resource.generate_total", outcome="failure")
+    resource_total = metrics.counter_sum("resource.generate_total")
+
+    code_accepted = metrics.counter_sum("code.execution_total", outcome="accepted")
+    code_test_failed = metrics.counter_sum("code.execution_total", outcome="test_failed")
+    code_infrastructure_failed = metrics.counter_sum(
+        "code.execution_total",
+        outcome="infrastructure_failure",
+    )
+    code_total = code_accepted + code_test_failed + code_infrastructure_failed
+    code_failed = code_test_failed + code_infrastructure_failed
+
+    refresh_success = metrics.counter_sum("frontend.refresh_recovery_total", outcome="success")
+    refresh_failure = metrics.counter_sum("frontend.refresh_recovery_total", outcome="failure")
+    refresh_total = refresh_success + refresh_failure
+
+    task_ready_within_target = metrics.counter_sum("frontend.next_task_ready_total", outcome="within_5s")
+    task_ready_over_target = metrics.counter_sum("frontend.next_task_ready_total", outcome="over_5s")
+    task_ready_total = task_ready_within_target + task_ready_over_target
+
+    completion_attempts = metrics.counter_sum("learning.node_completion_attempt_total")
+    completion_accepted = metrics.counter_sum("learning.node_completion_total")
+    completion_advanced = metrics.counter_sum("learning.node_completion_total", advanced="true")
+
+    return {
+        "login_failure": {
+            "failed": login_failed,
+            "total": login_total,
+            "rate": _rate(login_failed, login_total),
+        },
+        "resource_failure": {
+            "failed": resource_failed,
+            "total": resource_total,
+            "rate": _rate(resource_failed, resource_total),
+        },
+        "code_execution_failure": {
+            "failed": code_failed,
+            "infrastructure_failed": code_infrastructure_failed,
+            "total": code_total,
+            "rate": _rate(code_failed, code_total),
+            "infrastructure_rate": _rate(code_infrastructure_failed, code_total),
+        },
+        "frontend_exceptions": {
+            "total": metrics.counter_sum("frontend.exception_total"),
+        },
+        "next_task_ready": {
+            "within_5s": task_ready_within_target,
+            "total": task_ready_total,
+            "rate": _rate(task_ready_within_target, task_ready_total),
+            "target_ms": 5000,
+        },
+        "node_completions": {
+            "attempted": completion_attempts,
+            "accepted": completion_accepted,
+            "rate": _rate(completion_accepted, completion_attempts),
+            "advanced": completion_advanced,
+            "advanced_rate": _rate(completion_advanced, completion_accepted),
+            "total": completion_accepted,
+        },
+        "refresh_recovery": {
+            "successful": refresh_success,
+            "total": refresh_total,
+            "rate": _rate(refresh_success, refresh_total),
+        },
+    }
 
 
 def reset_metrics() -> None:

@@ -4,6 +4,7 @@ import types
 import uuid
 
 from starlette.testclient import TestClient
+from src.auth.security import SecurityManager
 
 
 def _install_import_stubs() -> None:
@@ -37,9 +38,9 @@ from frontend.server import (  # noqa: E402
     RESOURCE_CARD_ORDER,
     RESOURCE_CONTRACT_VERSION,
     app,
-    get_or_create_session,
     sessions,
 )
+from src.application._common import get_session  # noqa: E402
 
 
 def _new_identity() -> tuple[str, str]:
@@ -72,6 +73,13 @@ def _load_node(client: TestClient, user_id: str, course_id: str, node_id: str) -
         },
     )
     assert response.status_code == 200
+    resources_response = client.get(
+        f"/api/sessions/{user_id}:{course_id}/resources/{node_id}",
+        headers={
+            "Authorization": "Bearer " + SecurityManager.create_token_pair(user_id, "STUDENT")["access_token"]
+        },
+    )
+    assert resources_response.status_code == 200
     return response.json()
 
 
@@ -83,6 +91,24 @@ def _fetch_state(client: TestClient, user_id: str, course_id: str) -> dict:
 
 def _cards_for_node(state: dict, node_id: str) -> list[dict]:
     return state["generated_resources"].get(node_id, [])
+
+
+def _quiz_submission(user_id: str, course_id: str, node_id: str, *, correct: bool) -> dict:
+    session = get_session(user_id, course_id)
+    quiz_card = next(
+        card
+        for card in session.agent_state.generated_resources[node_id]
+        if card.card_type == "diagnostic_quiz"
+    )
+    answers = []
+    for question in quiz_card.metadata["questions"]:
+        answer_index = question["answer_index"]
+        selected_option_index = answer_index if correct else (answer_index + 1) % len(question["options"])
+        answers.append({
+            "question_id": question["id"],
+            "selected_option_index": selected_option_index,
+        })
+    return {"resource_id": quiz_card.resource_id, "answers": answers}
 
 
 def test_load_node_returns_current_node_resource_contract() -> None:
@@ -109,11 +135,12 @@ def test_load_node_returns_current_node_resource_contract() -> None:
         assert metadata["render_type"] == card["card_type"]
 
     metadata_by_type = {card["card_type"]: card["metadata"] for card in cards}
-    assert {"title", "summary", "bullets"} <= metadata_by_type["concept_map"].keys()
-    assert {"title", "language", "code"} <= metadata_by_type["code_snippet"].keys()
-    assert {"title", "prompt", "steps", "checkpoints"} <= metadata_by_type["interactive_exercise"].keys()
-    assert {"title", "summary", "key_points"} <= metadata_by_type["video_summary"].keys()
+    assert all(metadata_by_type[card_type]["title"] for card_type in RESOURCE_CARD_ORDER)
     assert {"title", "questions", "pass_threshold"} <= metadata_by_type["diagnostic_quiz"].keys()
+    assert all(
+        "answer_index" not in question
+        for question in metadata_by_type["diagnostic_quiz"]["questions"]
+    )
 
 
 def test_repeated_load_node_does_not_duplicate_cards() -> None:
@@ -144,10 +171,8 @@ def test_diagnostic_below_threshold_stays_on_current_node() -> None:
             "user_id": user_id,
             "course_id": course_id,
             "current_node_id": node_id,
-            "interaction_type": "diagnostic",
-            "correctness": 0.1,
-            "code_pass_rate": 0.1,
-            "time_spent_ratio": 1.0,
+            "interaction_type": "complete_learning",
+            **_quiz_submission(user_id, course_id, node_id, correct=False),
         },
     )
     assert response.status_code == 200
@@ -155,11 +180,12 @@ def test_diagnostic_below_threshold_stays_on_current_node() -> None:
 
     state = _fetch_state(client, user_id, course_id)
 
-    assert payload["interaction_type"] == "diagnostic"
+    assert payload["interaction_type"] == "complete_learning"
+    assert payload["mastery_updated"] is False
     assert payload["advanced_to_next_node"] is False
     assert payload["current_node_id"] == node_id
     assert payload["evaluated_node_id"] == node_id
-    assert payload["evaluated_node_mastery"] < MASTERY_ADVANCE_THRESHOLD
+    assert payload["evaluated_node_mastery"] == 0.0
     assert state["current_node_id"] == node_id
     assert len(_cards_for_node(state, node_id)) == len(RESOURCE_CARD_ORDER)
 
@@ -170,8 +196,8 @@ def test_diagnostic_at_threshold_advances_to_next_pending_node() -> None:
     node_id = _init_workspace(client, user_id, course_id)
     _load_node(client, user_id, course_id, node_id)
 
-    session = get_or_create_session(user_id, course_id)
-    session["agent_state"].dynamic_profile.knowledge_mastery[node_id] = 0.9
+    session = get_session(user_id, course_id)
+    session.agent_state.dynamic_profile.knowledge_mastery[node_id] = 0.9
 
     response = client.post(
         "/api/pipeline/step",
@@ -179,10 +205,8 @@ def test_diagnostic_at_threshold_advances_to_next_pending_node() -> None:
             "user_id": user_id,
             "course_id": course_id,
             "current_node_id": node_id,
-            "interaction_type": "diagnostic",
-            "correctness": 1.0,
-            "code_pass_rate": 1.0,
-            "time_spent_ratio": 1.0,
+            "interaction_type": "complete_learning",
+            **_quiz_submission(user_id, course_id, node_id, correct=True),
         },
     )
     assert response.status_code == 200
@@ -190,6 +214,7 @@ def test_diagnostic_at_threshold_advances_to_next_pending_node() -> None:
 
     state = _fetch_state(client, user_id, course_id)
 
+    assert payload["mastery_updated"] is True
     assert payload["advanced_to_next_node"] is True
     assert payload["evaluated_node_id"] == node_id
     assert payload["evaluated_node_mastery"] >= MASTERY_ADVANCE_THRESHOLD

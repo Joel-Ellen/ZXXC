@@ -15,7 +15,7 @@ KnowledgeGraphManager — 知识图谱统一管理层
 from __future__ import annotations
 
 import os
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..infrastructure.path_planner import KnowledgeNode, KnowledgeEdge
 
@@ -213,11 +213,13 @@ class KnowledgeGraphManager:
         self._in_memory_nodes: Dict[str, KnowledgeNode] = {}
         self._in_memory_edges: List[KnowledgeEdge] = []
 
+        # The bundled course graph is the latency-safe source for request-path
+        # planning even when Neo4j is available for richer background queries.
+        self._init_in_memory()
+
         # 尝试连接 Neo4j
         if self._try_connect_neo4j(neo4j_uri, neo4j_user, neo4j_password):
             self._neo4j_available = True
-        else:
-            self._init_in_memory()
 
     # ------------------------------------------------------------------
     # 公开 API
@@ -226,6 +228,20 @@ class KnowledgeGraphManager:
     @property
     def is_neo4j_available(self) -> bool:
         return self._neo4j_available
+
+    def get_local_graph(
+        self, course_id: str = "data_structures"
+    ) -> Tuple[List[KnowledgeNode], List[KnowledgeEdge]]:
+        """Return the bundled course graph without consulting remote services."""
+        nodes = [
+            node
+            for node in self._in_memory_nodes.values()
+            if node.course_id == course_id
+        ]
+        edges = [
+            edge for edge in self._in_memory_edges if edge.course_id == course_id
+        ]
+        return nodes, edges
 
     def get_all_nodes(self, course_id: str = "data_structures") -> List[KnowledgeNode]:
         """获取指定课程的全部知识点节点。"""
@@ -268,11 +284,14 @@ class KnowledgeGraphManager:
         nodes = self.get_all_nodes(course_id)
         return {n.node_id: n.title for n in nodes}
 
-    def create_path_planner(self, course_id: str = "data_structures"):
+    def create_path_planner(self, course_id: str = "data_structures", *, local_only: bool = False):
         """创建配置好的 PathPlanner 实例（仅加载指定课程数据）。"""
         from ..infrastructure.path_planner import PathPlanner
-        nodes = self.get_all_nodes(course_id)
-        edges = self.get_all_edges(course_id)
+        if local_only:
+            nodes, edges = self.get_local_graph(course_id)
+        else:
+            nodes = self.get_all_nodes(course_id)
+            edges = self.get_all_edges(course_id)
         return PathPlanner(nodes, edges)
 
     # ------------------------------------------------------------------

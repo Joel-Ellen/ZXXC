@@ -11,6 +11,7 @@ import json
 import os
 import threading
 from datetime import datetime, timezone
+from typing import Mapping, Optional
 
 import psycopg2
 import psycopg2.extras
@@ -35,6 +36,25 @@ DATABASE_URL = os.getenv(
 # 旧 JSON 文件路径（用于迁移）
 _OLD_USERS_PATH = os.path.join(_PROJECT_ROOT, "src", "auth", "_users.json")
 _OLD_ENROLLMENTS_PATH = os.path.join(_PROJECT_ROOT, "frontend", "_enrollments.json")
+
+_PRODUCTION_ENVIRONMENTS = frozenset({"prod", "production"})
+
+
+def is_production_environment(environment: Optional[Mapping[str, str]] = None) -> bool:
+    """Return whether legacy development data must be kept out of this process."""
+    source = os.environ if environment is None else environment
+    values = (source.get("APP_ENV"), source.get("ENVIRONMENT"), source.get("NODE_ENV"))
+    return any(
+        str(value).strip().lower() in _PRODUCTION_ENVIRONMENTS
+        for value in values
+        if value is not None
+    )
+
+
+def legacy_json_migrations_enabled(environment: Optional[Mapping[str, str]] = None) -> bool:
+    """Legacy fixture migration is a development-only compatibility path."""
+    return not is_production_environment(environment)
+
 
 CREATE_TABLES_SQL = """
 CREATE TABLE IF NOT EXISTS users (
@@ -70,10 +90,36 @@ CREATE TABLE IF NOT EXISTS user_state (
     UNIQUE(user_id, course_id)
 );
 
+CREATE TABLE IF NOT EXISTS user_profiles (
+    user_id                         VARCHAR(64) PRIMARY KEY,
+    university                      VARCHAR(256) NOT NULL DEFAULT '',
+    major                           VARCHAR(256) NOT NULL DEFAULT '',
+    grade                           VARCHAR(64) NOT NULL DEFAULT '',
+    learning_goal                   TEXT NOT NULL DEFAULT '',
+    weekly_study_hours              INTEGER NOT NULL DEFAULT 6,
+    preferred_resource_style        VARCHAR(32) NOT NULL DEFAULT 'textual',
+    preferred_pace                  VARCHAR(32) NOT NULL DEFAULT 'steady',
+    preferred_practice_intensity    VARCHAR(32) NOT NULL DEFAULT 'balanced',
+    updated_at                      VARCHAR(64) NOT NULL
+);
+
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS university VARCHAR(256) NOT NULL DEFAULT '';
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS major VARCHAR(256) NOT NULL DEFAULT '';
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS grade VARCHAR(64) NOT NULL DEFAULT '';
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS learning_goal TEXT NOT NULL DEFAULT '';
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS weekly_study_hours INTEGER NOT NULL DEFAULT 6;
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS preferred_resource_style VARCHAR(32) NOT NULL DEFAULT 'textual';
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS preferred_pace VARCHAR(32) NOT NULL DEFAULT 'steady';
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS preferred_practice_intensity VARCHAR(32) NOT NULL DEFAULT 'balanced';
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS updated_at VARCHAR(64) NOT NULL DEFAULT '';
+
 CREATE INDEX IF NOT EXISTS idx_users_user_id ON users(user_id);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_users_active_email_normalized
+    ON users (LOWER(email)) WHERE is_active = 1;
 CREATE INDEX IF NOT EXISTS idx_user_courses_user_id ON user_courses(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_state_user_course ON user_state(user_id, course_id);
+CREATE INDEX IF NOT EXISTS idx_user_profiles_user_id ON user_profiles(user_id);
 """
 
 
@@ -109,6 +155,10 @@ class Database:
         if self._initialized:
             self._get_conn().commit()
 
+    def rollback(self):
+        if hasattr(self._local, "conn") and self._local.conn is not None and not self._local.conn.closed:
+            self._local.conn.rollback()
+
     # ------------------------------------------------------------------
     # 初始化 + 迁移
     # ------------------------------------------------------------------
@@ -117,6 +167,7 @@ class Database:
         """延迟初始化：首次访问数据库时才连接和建表。"""
         if self._initialized:
             return
+        conn = None
         try:
             conn = self._get_conn()
             cur = conn.cursor()
@@ -125,15 +176,21 @@ class Database:
             cur.close()
             print(f"[DB] PostgreSQL connected: {DATABASE_URL.split('@')[-1]}")
             self._initialized = True
-            self._migrate_users()
-            self._migrate_enrollments()
+            if legacy_json_migrations_enabled():
+                self._migrate_users()
+                self._migrate_enrollments()
+            else:
+                print("[DB] Legacy JSON migrations disabled in production")
         except Exception as e:
+            self._initialized = False
+            if conn is not None:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
             print(f"[DB] PostgreSQL connection failed: {e}")
             print("[DB] Set DATABASE_URL env or ensure PostgreSQL is running")
             raise
-
-        self._migrate_users()
-        self._migrate_enrollments()
 
     def _migrate_users(self):
         if not os.path.exists(_OLD_USERS_PATH):
@@ -151,7 +208,7 @@ class Database:
                        VALUES (%s, %s, %s, %s, %s, %s, %s)""",
                     (
                         rec.get("user_id", uid),
-                        rec.get("email", ""),
+                        str(rec.get("email", "") or "").lower().strip(),
                         rec.get("password_hash", ""),
                         rec.get("role", "STUDENT"),
                         rec.get("display_name", uid),
@@ -163,7 +220,11 @@ class Database:
             self.commit()
             os.rename(_OLD_USERS_PATH, _OLD_USERS_PATH + ".bak")
             print(f"[DB] Migrated {migrated} users from _users.json")
+        except psycopg2.IntegrityError:
+            self.rollback()
+            raise
         except Exception as e:
+            self.rollback()
             print(f"[DB] User migration skipped: {e}")
 
     def _migrate_enrollments(self):
@@ -194,7 +255,11 @@ class Database:
             self.commit()
             os.rename(_OLD_ENROLLMENTS_PATH, _OLD_ENROLLMENTS_PATH + ".bak")
             print(f"[DB] Migrated {migrated} enrollments from _enrollments.json")
+        except psycopg2.IntegrityError:
+            self.rollback()
+            raise
         except Exception as e:
+            self.rollback()
             print(f"[DB] Enrollment migration skipped: {e}")
 
 

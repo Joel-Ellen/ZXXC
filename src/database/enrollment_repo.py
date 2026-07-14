@@ -81,3 +81,42 @@ class EnrollmentRepo:
             (progress, completed_nodes, user_id, course_id),
         )
         db.commit()
+
+    def unenroll(self, user_id: str, course_id: str) -> Dict[str, Any]:
+        """Remove one enrollment and deterministically choose the next active course."""
+        existing = db.execute(
+            "SELECT id, is_active FROM user_courses WHERE user_id = %s AND course_id = %s",
+            (user_id, course_id),
+        ).fetchone()
+        if not existing:
+            return {"removed": False, "active_course": "", "remaining_courses": []}
+
+        db.execute(
+            "DELETE FROM user_courses WHERE user_id = %s AND course_id = %s",
+            (user_id, course_id),
+        )
+        remaining = db.execute(
+            """SELECT course_id, is_active FROM user_courses WHERE user_id = %s
+               ORDER BY enrolled_at DESC, id DESC""",
+            (user_id,),
+        ).fetchall()
+        remaining_ids = [str(row["course_id"]) for row in remaining]
+        preserved_active = next((str(row["course_id"]) for row in remaining if row["is_active"]), "")
+        active_course = preserved_active or (remaining_ids[0] if remaining_ids else "")
+        if bool(existing["is_active"]):
+            db.execute("UPDATE user_courses SET is_active = 0 WHERE user_id = %s", (user_id,))
+            if active_course:
+                db.execute(
+                    "UPDATE user_courses SET is_active = 1 WHERE user_id = %s AND course_id = %s",
+                    (user_id, active_course),
+                )
+        db.commit()
+        return {
+            "removed": True,
+            "active_course": active_course,
+            "remaining_courses": remaining_ids,
+        }
+
+    def delete_all(self, user_id: str) -> None:
+        db.execute("DELETE FROM user_courses WHERE user_id = %s", (user_id,))
+        db.commit()

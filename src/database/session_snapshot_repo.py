@@ -111,3 +111,8 @@ class SessionSnapshotRepo:
         session_id = SessionRepo.build_session_id(user_id, course_id)
         db.execute("DELETE FROM session_snapshots WHERE session_id = %s", (session_id,))
         db.commit()
+
+    def delete_all(self, user_id: str) -> None:
+        self.ensure_tables()
+        db.execute("DELETE FROM session_snapshots WHERE user_id = %s", (user_id,))
+        db.commit()

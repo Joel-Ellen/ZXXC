@@ -17,18 +17,40 @@ services:
   # 主应用 — EduAgent 后端
   # =========================================================================
   app:
-    build: .
+    build:
+      context: .
+      args:
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+        VITE_SENTRY_ENVIRONMENT: ${VITE_SENTRY_ENVIRONMENT:-production}
+        VITE_SENTRY_RELEASE: ${VITE_SENTRY_RELEASE:-}
+        VITE_SENTRY_TRACES_SAMPLE_RATE: ${VITE_SENTRY_TRACES_SAMPLE_RATE:-0.05}
     container_name: edu-agent-app
     restart: unless-stopped
     ports:
       - "127.0.0.1:8800:8800"          # 仅本地访问，由宿主机 Nginx 代理
     environment:
+      - APP_ENV=production
+      - PUBLIC_APP_URL=${PUBLIC_APP_URL:?PUBLIC_APP_URL is required}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
+      - EDUAGENT_OPS_TOKEN=${EDUAGENT_OPS_TOKEN:?EDUAGENT_OPS_TOKEN is required}
+      - EDUAGENT_CODE_PRACTICE_ROLLOUT_PERCENT=${EDUAGENT_CODE_PRACTICE_ROLLOUT_PERCENT:-0}
+      - EDUAGENT_CODE_PRACTICE_ROLLOUT_ALLOWLIST=${EDUAGENT_CODE_PRACTICE_ROLLOUT_ALLOWLIST:-}
+      - EDUAGENT_CODE_PRACTICE_ROLLOUT_DENYLIST=${EDUAGENT_CODE_PRACTICE_ROLLOUT_DENYLIST:-}
+      - EDUAGENT_ENABLE_COMPAT_API=false
+      - EDUAGENT_ENABLE_PUBLIC_METRICS=false
       # ── LLM API Keys ──
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
       - SPARK_API_KEY=${SPARK_API_KEY:-}
       - SPARK_APP_ID=${SPARK_APP_ID:-}
       - SPARK_API_SECRET=${SPARK_API_SECRET:-}
+      - EDUAGENT_LLM_FALLBACKS=${EDUAGENT_LLM_FALLBACKS:-}
+      - EDUAGENT_RESOURCE_LLM_TIMEOUT_SEC=${EDUAGENT_RESOURCE_LLM_TIMEOUT_SEC:-50}
+      - EDUAGENT_RESOURCE_LLM_TOTAL_TIMEOUT_SEC=${EDUAGENT_RESOURCE_LLM_TOTAL_TIMEOUT_SEC:-55}
+      - EDUAGENT_RESOURCE_LLM_RETRIES=${EDUAGENT_RESOURCE_LLM_RETRIES:-1}
+      - EDUAGENT_RESOURCE_LLM_PARALLELISM=${EDUAGENT_RESOURCE_LLM_PARALLELISM:-3}
       # ── 数据库连接 ──
+      - DATABASE_URL=postgresql://eduagent:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/eduagent
+      - REDIS_URL=redis://redis:6379/0
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=${NEO4J_USER:-neo4j}
       - NEO4J_PASSWORD=${NEO4J_PASSWORD:-EduAgent2024!}
@@ -37,7 +59,18 @@ services:
       - MILVUS_PORT=19530
       # ── HuggingFace 镜像 ──
       - HF_ENDPOINT=https://hf-mirror.com
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-465}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_SSL=${SMTP_SSL:-1}
+      - SMTP_STARTTLS=${SMTP_STARTTLS:-1}
     depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
       neo4j:
         condition: service_healthy
       elasticsearch:
@@ -45,6 +78,37 @@ services:
     volumes:
       - ./backups:/app/backups
       - ./logs:/app/logs
+    networks:
+      - edu-agent-net
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=eduagent
+      - POSTGRES_USER=eduagent
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eduagent -d eduagent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - edu-agent-net
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     networks:
       - edu-agent-net
 
@@ -180,6 +244,8 @@ services:
 # 命名卷
 # ============================================================================
 volumes:
+  postgres-data:
+  redis-data:
   neo4j-data:
   neo4j-logs:
   es-data:

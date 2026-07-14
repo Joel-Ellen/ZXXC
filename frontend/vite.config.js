@@ -84,50 +84,68 @@ function getContentType(filePath) {
   return types[extension] || "application/octet-stream";
 }
 
-export default defineConfig({
-  plugins: [vue(), mermaidStaticRuntimePlugin()],
-  build: {
-    outDir: "dist",
-    emptyOutDir: true,
-    modulePreload: {
-      polyfill: false,
-      resolveDependencies() {
-        return [];
+export default defineConfig(() => {
+  const apiTarget = process.env.EDUAGENT_API_TARGET || "http://127.0.0.1:8800";
+
+  return {
+    plugins: [vue(), mermaidStaticRuntimePlugin()],
+    build: {
+      outDir: "dist",
+      emptyOutDir: true,
+      modulePreload: {
+        polyfill: false,
+        resolveDependencies() {
+          return [];
+        },
       },
-    },
-    rollupOptions: {
-      output: {
-        onlyExplicitManualChunks: true,
-        manualChunks(id) {
-          if (!id.includes("node_modules")) {
-            return;
-          }
+      rollupOptions: {
+        output: {
+          onlyExplicitManualChunks: true,
+          manualChunks(id) {
+            if (!id.includes("node_modules")) {
+              return;
+            }
 
-          if (id.includes("cytoscape")) {
-            return "vendor-cytoscape";
-          }
+            if (id.includes("@codemirror")) {
+              return "vendor-editor";
+            }
 
-          if (id.includes("katex")) {
-            return "vendor-katex";
-          }
+            if (id.includes("@sentry")) {
+              return "vendor-monitoring";
+            }
 
-          if (id.includes("marked") || id.includes("dompurify")) {
-            return "vendor-markdown";
-          }
+            if (id.includes("vue") || id.includes("pinia")) {
+              return "vendor-vue";
+            }
 
-          return "vendor";
+            if (id.includes("axios")) {
+              return "vendor-http";
+            }
+
+            if (id.includes("cytoscape")) {
+              return "vendor-cytoscape";
+            }
+
+            if (id.includes("katex")) {
+              return "vendor-katex";
+            }
+
+            if (id.includes("marked") || id.includes("dompurify")) {
+              return "vendor-markdown";
+            }
+          },
         },
       },
     },
-  },
-  server: {
-    host: "0.0.0.0",
-    port: 5173,
-    proxy: {
-      "/api": {
-        target: "http://127.0.0.1:8800",
-        changeOrigin: true,
+    server: {
+      host: "0.0.0.0",
+      port: 5173,
+      proxy: {
+        "/api": {
+          target: apiTarget,
+          changeOrigin: true,
+        },
       },
     },
-  },
+  };
 });

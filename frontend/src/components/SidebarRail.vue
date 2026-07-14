@@ -1,87 +1,40 @@
 <template>
-  <aside class="z-50 hidden h-full w-[96px] shrink-0 px-3 py-4 lg:flex" aria-label="内容分类导航">
-    <div
-      class="rail-shell relative flex h-full w-full flex-col items-center overflow-visible px-2 py-4 transition-all duration-300 rounded-2xl"
-    >
-      <div class="rail-shell__aura pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit]" />
-
-      <!-- Brand mark -->
-      <div class="rail-brand relative z-10 flex h-12 w-12 shrink-0 items-center justify-center rounded-xl mb-1">
-        <span class="text-[13px] font-black tracking-[0.10em] text-primary-dark">EA</span>
+  <aside class="course-path-panel hidden h-full shrink-0 xl:flex" aria-label="课程路径">
+    <div class="course-path-panel__inner">
+      <div class="course-path-panel__heading">
+        <div>
+          <p class="course-path-panel__eyebrow">课程路径</p>
+          <h2>学习节点</h2>
+        </div>
+        <span class="course-path-panel__count">{{ completedCount }}/{{ pathNodes.length }}</span>
       </div>
 
-      <div class="rail-divider relative z-10 my-3 h-px w-8" />
-
-      <!-- Content category navigation -->
-      <nav class="relative z-10 flex w-full flex-col items-center gap-2" aria-label="内容分类">
+      <nav class="course-path-panel__list" aria-label="学习节点列表">
         <button
-          v-for="item in contentItems"
-          :key="item.key"
+          v-for="(node, index) in pathNodes"
+          :key="node.id"
           type="button"
-          class="focus-ring rail-nav-btn group relative flex h-[52px] w-[52px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl transition-all duration-200"
-          :class="item.key === activePanel ? 'rail-nav-btn--active' : 'rail-nav-btn--idle'"
-          :style="item.key === activePanel ? `--rail-accent: ${item.color}` : ''"
-          :aria-label="item.label"
-          :aria-pressed="String(item.key === activePanel)"
-          :title="item.label"
-          @click="$emit('select', item.key)"
+          class="course-path-panel__node focus-ring"
+          :class="nodeClass(node)"
+          :aria-current="node.id === currentNode ? 'step' : undefined"
+          @click="$emit('select-node', node.id)"
         >
-          <span class="text-[18px] leading-none">{{ item.icon }}</span>
-          <span class="text-[8px] font-bold tracking-[0.08em] uppercase leading-none opacity-70 mt-0.5">
-            {{ item.short }}
+          <span class="course-path-panel__order">{{ nodeOrder(node, index) }}</span>
+          <span class="course-path-panel__node-copy">
+            <span class="course-path-panel__node-title">{{ node.title }}</span>
+            <span class="course-path-panel__node-state">{{ nodeState(node) }}</span>
           </span>
-
-          <!-- Tooltip -->
-          <span class="rail-tooltip pointer-events-none absolute left-[calc(100%+12px)] top-1/2 z-50 flex -translate-y-1/2 items-center gap-2.5 whitespace-nowrap rounded-xl px-3 py-2 text-left opacity-0 shadow-[0_12px_32px_rgba(0,107,173,0.12)] transition-all duration-200 group-hover:translate-x-0.5 group-hover:opacity-100">
-            <span class="flex h-7 w-7 items-center justify-center rounded-lg text-sm"
-                  :style="{ background: item.softColor, color: item.color }">
-              {{ item.icon }}
-            </span>
-            <span>
-              <span class="block text-[9px] font-black uppercase tracking-[0.14em] text-text-muted">{{ item.short }}</span>
-              <span class="mt-0.5 block text-xs font-semibold text-text-primary">{{ item.label }}</span>
-            </span>
-          </span>
+          <span class="course-path-panel__mastery">{{ mastery(node) }}%</span>
         </button>
+
+        <p v-if="!pathNodes.length" class="course-path-panel__empty">
+          完成诊断后，学习路径会显示在这里。
+        </p>
       </nav>
 
-      <div class="rail-divider relative z-10 my-3 h-px w-8" />
-
-      <!-- Path nav -->
-      <button
-        type="button"
-        class="focus-ring rail-nav-btn group relative flex h-[52px] w-[52px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl transition-all duration-200"
-        :class="activePanel === 'tree' ? 'rail-nav-btn--active' : 'rail-nav-btn--idle'"
-        aria-label="知识路径"
-        :aria-pressed="String(activePanel === 'tree')"
-        title="知识路径"
-        @click="$emit('select', 'tree')"
-      >
-        <IconTree :size="18" />
-        <span class="text-[8px] font-bold tracking-[0.08em] uppercase leading-none opacity-70 mt-0.5">PATH</span>
-        <span
-          v-if="pathCount"
-          class="rail-nav-btn__badge absolute -right-1 -top-1 flex h-4.5 min-w-[18px] items-center justify-center rounded-full px-1 text-[9px] font-black leading-none"
-        >
-          {{ pathCount }}
-        </span>
-        <!-- Tooltip -->
-        <span class="rail-tooltip pointer-events-none absolute left-[calc(100%+12px)] top-1/2 z-50 flex -translate-y-1/2 items-center gap-2.5 whitespace-nowrap rounded-xl px-3 py-2 text-left opacity-0 shadow-[0_12px_32px_rgba(0,107,173,0.12)] transition-all duration-200 group-hover:translate-x-0.5 group-hover:opacity-100">
-          <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-primary-soft text-primary-dark">
-            <IconTree :size="14" />
-          </span>
-          <span>
-            <span class="block text-[9px] font-black uppercase tracking-[0.14em] text-text-muted">KNOWLEDGE</span>
-            <span class="mt-0.5 block text-xs font-semibold text-text-primary">知识路径</span>
-          </span>
-        </span>
-      </button>
-
-      <!-- Bottom stats -->
-      <div class="relative z-10 mt-auto flex w-[52px] shrink-0 flex-col items-center rounded-xl border border-subtle bg-space-elevated px-1 py-2.5 text-center">
-        <span class="text-[8px] font-black uppercase tracking-[0.14em] text-text-muted">节点</span>
-        <span class="mt-1.5 text-[22px] font-black leading-none text-text-primary">{{ pathCount }}</span>
-        <span class="mt-1.5 h-1.5 w-1.5 rounded-full bg-success shadow-[0_0_8px_var(--color-success)]" aria-label="就绪" />
+      <div class="course-path-panel__footer">
+        <span>当前进度</span>
+        <strong>{{ currentNodeLabel }}</strong>
       </div>
     </div>
   </aside>
@@ -89,121 +42,194 @@
 
 <script setup>
 import { computed } from "vue";
-import IconTree from "./icons/IconTree.vue";
 
 const props = defineProps({
-  activePanel:  { type: String, default: "concept" },
-  drawerOpen:   { type: Boolean, default: false },
-  panelId:      { type: String, default: "workspace-sidebar-drawer" },
-  pathCount:    { type: Number, default: 0 },
+  pathNodes: { type: Array, default: () => [] },
+  currentNode: { type: String, default: "" },
 });
 
-defineEmits(["select"]);
+defineEmits(["select-node"]);
 
-const contentItems = computed(() => [
-  {
-    key: "concept",
-    short: "概念",
-    label: "概念导图",
-    icon: "🗺",
-    color: "var(--learning-concept-dark)",
-    softColor: "var(--learning-concept-soft)",
-  },
-  {
-    key: "code",
-    short: "代码",
-    label: "代码示例",
-    icon: "💻",
-    color: "var(--learning-code-dark)",
-    softColor: "var(--learning-code-soft)",
-  },
-  {
-    key: "practice",
-    short: "练习",
-    label: "互动练习",
-    icon: "✏️",
-    color: "var(--learning-practice-dark)",
-    softColor: "var(--learning-practice-soft)",
-  },
-  {
-    key: "video",
-    short: "视频",
-    label: "视频摘要",
-    icon: "🎬",
-    color: "var(--learning-video-dark)",
-    softColor: "var(--learning-video-soft)",
-  },
-  {
-    key: "quiz",
-    short: "测验",
-    label: "诊断测验",
-    icon: "📋",
-    color: "var(--learning-quiz-dark)",
-    softColor: "var(--learning-quiz-soft)",
-  },
-]);
+const completedCount = computed(() => (
+  props.pathNodes.filter((node) => Number(node?.mastery ?? 0) >= 0.65).length
+));
+
+const currentNodeLabel = computed(() => {
+  const node = props.pathNodes.find((candidate) => candidate.id === props.currentNode);
+  return node?.title || "等待选择节点";
+});
+
+function mastery(node) {
+  return Math.max(0, Math.min(100, Math.round(Number(node?.mastery ?? 0) * 100)));
+}
+
+function nodeOrder(node, index) {
+  const order = Number(node?.order);
+  return String(Number.isFinite(order) && order > 0 ? order : index + 1).padStart(2, "0");
+}
+
+function nodeState(node) {
+  if (node?.id === props.currentNode) return "当前学习";
+  if (mastery(node) >= 65) return "已完成";
+  return "待学习";
+}
+
+function nodeClass(node) {
+  if (node?.id === props.currentNode) return "is-current";
+  if (mastery(node) >= 65) return "is-complete";
+  return "";
+}
 </script>
 
 <style scoped>
-.rail-shell {
-  border: 1px solid var(--border-subtle);
-  background: var(--space-panel);
-  box-shadow: var(--workspace-shadow-soft);
+.course-path-panel {
+  width: 20%;
+  flex: 0 0 20%;
+  border-right: 1px solid var(--border-subtle);
+  background: var(--space-elevated);
 }
 
-.rail-shell__aura {
-  background: linear-gradient(180deg,
-    color-mix(in srgb, var(--color-primary-soft) 70%, transparent) 0%,
-    transparent 40%
-  );
+.course-path-panel__inner {
+  display: flex;
+  min-height: 0;
+  width: 100%;
+  flex-direction: column;
+  padding: 1.25rem 1rem 1rem;
 }
 
-.rail-brand {
-  border: 1px solid color-mix(in srgb, var(--color-primary) 22%, var(--border-subtle));
-  background: color-mix(in srgb, var(--color-primary-soft) 80%, white);
+.course-path-panel__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0 0.25rem 1rem;
+}
+
+.course-path-panel__eyebrow {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.course-path-panel__heading h2 {
+  margin: 0.3rem 0 0;
+  color: var(--text-primary);
+  font-size: var(--font-size-lg);
+  font-weight: 750;
+  line-height: 1.25;
+}
+
+.course-path-panel__count,
+.course-path-panel__mastery {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.course-path-panel__count {
+  padding-top: 0.15rem;
+}
+
+.course-path-panel__list {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.3rem;
+  overflow-y: auto;
+  padding-right: 0.2rem;
+}
+
+.course-path-panel__node {
+  display: grid;
+  grid-template-columns: 2.1rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  min-height: 3.75rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 0.6rem 0.55rem;
+  text-align: left;
+  transition: background-color var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+
+.course-path-panel__node:hover {
+  background: var(--card-bg-hover);
+  color: var(--text-primary);
+}
+
+.course-path-panel__node.is-current {
+  border-color: color-mix(in srgb, var(--color-primary) 26%, var(--border-subtle));
+  background: var(--color-primary-soft);
   color: var(--color-primary-dark);
 }
 
-.rail-divider {
-  background: linear-gradient(90deg, transparent, var(--border-strong), transparent);
+.course-path-panel__node.is-complete:not(.is-current) .course-path-panel__node-state,
+.course-path-panel__node.is-complete:not(.is-current) .course-path-panel__mastery {
+  color: var(--color-success-dark);
 }
 
-/* nav buttons */
-.rail-nav-btn {
-  border: 1px solid transparent;
+.course-path-panel__order {
   color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
 }
 
-.rail-nav-btn--idle {
-  background: transparent;
+.course-path-panel__node-copy {
+  display: grid;
+  min-width: 0;
+  gap: 0.2rem;
 }
 
-.rail-nav-btn--idle:hover {
-  border-color: var(--border-hover);
-  background: var(--card-bg-hover);
+.course-path-panel__node-title,
+.course-path-panel__node-state {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.course-path-panel__node-title {
   color: var(--text-primary);
-  transform: translateY(-1px);
+  font-size: 0.82rem;
+  font-weight: 650;
+  line-height: 1.25;
 }
 
-.rail-nav-btn--active {
-  border-color: color-mix(in srgb, var(--rail-accent, var(--color-primary)) 28%, var(--border-subtle));
-  background: color-mix(in srgb, var(--rail-accent, var(--color-primary)) 12%, var(--card-bg));
-  color: var(--rail-accent, var(--color-primary));
-  box-shadow:
-    0 4px 14px color-mix(in srgb, var(--rail-accent, var(--color-primary)) 18%, transparent),
-    inset 0 1px 0 rgba(255,255,255,0.60);
+.course-path-panel__node-state {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  line-height: 1.2;
 }
 
-.rail-nav-btn__badge {
-  height: 1.125rem;
-  border: 1px solid var(--border-subtle);
-  background: var(--color-primary);
-  color: white;
+.course-path-panel__empty {
+  margin: 1rem 0.25rem;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.6;
 }
 
-.rail-tooltip {
-  border: 1px solid var(--border-subtle);
-  background: var(--space-panel);
-  min-width: 7rem;
+.course-path-panel__footer {
+  display: grid;
+  gap: 0.35rem;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  margin-top: 0.85rem;
+  padding: 0.9rem 0.25rem 0;
+}
+
+.course-path-panel__footer strong {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

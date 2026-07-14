@@ -18,7 +18,7 @@ from src.state.agent_state import AgentFeedbackItem, ResourceCard
 from src.validation.pipeline import get_validation_pipeline
 from src.validation.result import ValidationResult
 
-RESOURCE_CONTRACT_VERSION = 1
+RESOURCE_CONTRACT_VERSION = 2
 AGENT_FEEDBACK_VERSION = 1
 MASTERY_ADVANCE_THRESHOLD = 0.65
 RESOURCE_CARD_ORDER = [
@@ -47,43 +47,67 @@ def reset_session(user_id: str, course_id: str = "data_structures") -> RuntimeSe
     return get_runtime().reset_session(user_id, course_id)
 
 
-def persist_session(session: RuntimeSession) -> None:
+def persist_session(session: RuntimeSession) -> Dict[str, Any]:
     state = session.agent_state
     state_json = state.model_dump_json()
     cold_json = session.cold_state.model_dump_json() if session.cold_state else None
+    attempted: list[str] = []
+    succeeded: list[str] = []
+    failed: list[str] = []
 
-    try:
-        if StateRepo is not None:
+    if StateRepo is not None:
+        attempted.append("state")
+        try:
             StateRepo().save_state(state.user_id, state.course_id, state_json, cold_json)
-    except Exception:
-        pass
+            succeeded.append("state")
+        except Exception as exc:
+            failed.append("state")
+            state.record_error(f"state_save_failed:{type(exc).__name__}")
 
-    try:
-        if SessionSnapshotRepo is None:
-            return
-        from src.adapters.state_to_domain import (
-            assessment_from_state,
-            path_from_state,
-            profile_from_state,
-            resources_from_state,
-        )
+    if SessionSnapshotRepo is not None:
+        attempted.append("snapshot")
+        try:
+            from src.adapters.state_to_domain import (
+                assessment_from_state,
+                path_from_state,
+                profile_from_state,
+                resources_from_state,
+            )
 
-        SessionSnapshotRepo().save_snapshot(
-            state.user_id,
-            state.course_id,
-            state_json,
-            cold_json,
-            path_json=path_from_state(state).model_dump(),
-            profile_json=profile_from_state(state).model_dump(),
-            resource_bundle_json={
-                node_id: [resource.model_dump() for resource in resources]
-                for node_id, resources in resources_from_state(state).items()
-            },
-            assessment_json=assessment_from_state(state).model_dump(),
-            pipeline_log_json=session.pipeline_log,
+            SessionSnapshotRepo().save_snapshot(
+                state.user_id,
+                state.course_id,
+                state_json,
+                cold_json,
+                path_json=path_from_state(state).model_dump(),
+                profile_json=profile_from_state(state).model_dump(),
+                resource_bundle_json={
+                    node_id: [resource.model_dump() for resource in resources]
+                    for node_id, resources in resources_from_state(state).items()
+                },
+                assessment_json=assessment_from_state(state).model_dump(),
+                pipeline_log_json=session.pipeline_log,
+            )
+            succeeded.append("snapshot")
+        except Exception as exc:
+            failed.append("snapshot")
+            state.record_error(f"session_snapshot_save_failed:{type(exc).__name__}")
+
+    durable = bool(succeeded)
+    if not durable:
+        incr_metric("session.persistence_failed_total")
+        log_event(
+            "session.persistence.failed",
+            level="error",
+            attempted=attempted,
+            failed=failed,
         )
-    except Exception as exc:
-        state.record_error(f"session_snapshot_save_failed:{exc}")
+    return {
+        "durable": durable,
+        "attempted": attempted,
+        "succeeded": succeeded,
+        "failed": failed,
+    }
 
 
 def load_persisted_session(user_id: str, course_id: str = "data_structures") -> Optional[RuntimeSession]:

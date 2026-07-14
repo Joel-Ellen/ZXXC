@@ -1,6 +1,13 @@
 import json
 
-from src.application import _common, profile_service, resource_service, session_service, tutor_service
+from src.application import (
+    _common,
+    learning_assets_service,
+    profile_service,
+    resource_service,
+    session_service,
+    tutor_service,
+)
 from tests.helpers import FakeValidationPipeline, install_fake_runtime
 
 
@@ -180,6 +187,75 @@ def test_tutor_response_is_persisted(monkeypatch):
 
     assert latest["state_json"]["tutor_response"]["text_explanation"] == "Persisted tutor response"
     assert latest["state_json"]["agent_feedback"][0]["agent"] == "Tutor"
+
+
+def test_all_learning_asset_categories_restore_after_runtime_restart(monkeypatch):
+    fake_runtime, _store = _audit_context(monkeypatch)
+    user_id = "audit-assets"
+    course_id = "course1"
+    client_assets = {
+        "drafts": ("tutor:N01", {"node_id": "N01", "content": "last tutor draft"}),
+        "code_drafts": ("code:N01:r1", {"node_id": "N01", "resource_id": "r1", "code": "print(1)"}),
+        "quiz_progress": ("quiz:N01:q1", {"node_id": "N01", "resource_id": "q1", "answers": {"q": 1}, "attempt_number": 1}),
+        "annotations": ("note:N01:r1", {"node_id": "N01", "resource_id": "r1", "kind": "note", "content": "invariant"}),
+        "bookmarks": ("bookmark:N01:r1", {"node_id": "N01", "resource_id": "r1", "favorite": True}),
+        "scroll_positions": ("resource-canvas:N01", {"node_id": "N01", "top": 240}),
+        "card_state": ("canvas:N01", {"node_id": "N01", "resource_id": "r1", "card_id": "r1", "expanded": True}),
+    }
+    revision = 0
+    for category, (key, value) in client_assets.items():
+        patched = learning_assets_service.patch_learning_asset(
+            user_id,
+            course_id,
+            category=category,
+            key=key,
+            value=value,
+            base_revision=revision,
+        )
+        revision = patched["revision"]
+
+    session = fake_runtime.get_session(user_id, course_id)
+    state = session.agent_state
+    state.current_node_id = "N01"
+    state.internal_state["verified_completion_events"] = [{
+        "event_id": "diagnostic-1",
+        "node_id": "N01",
+        "resource_id": "quiz-1",
+        "correctness": 0.5,
+        "question_count": 2,
+        "correct_count": 1,
+        "question_results": [],
+    }]
+    learning_assets_service.record_learning_event_asset(state, {
+        "event_id": "diagnostic-1",
+        "event_type": "lesson_completed",
+        "node_id": "N01",
+        "resource_id": "quiz-1",
+        "received_at": "2026-01-01T00:00:00+00:00",
+        "verified_evidence": {"resource_id": "quiz-1"},
+    })
+    learning_assets_service.record_tutor_exchange_asset(
+        state,
+        question="What is the invariant?",
+        response={"text_explanation": "It must hold after every operation."},
+        context_type="concept",
+    )
+    assert _common.persist_session(session)["durable"] is True
+
+    fake_runtime.sessions.clear()
+    restored_session = _common.load_persisted_session(user_id, course_id)
+    assert restored_session is not None
+    restored = learning_assets_service.get_learning_assets(user_id, course_id)
+
+    assert set(restored["assets"]) == set(learning_assets_service.ASSET_CATEGORIES)
+    assert all(restored["assets"][category] for category in learning_assets_service.ASSET_CATEGORIES)
+    history = list(restored["assets"]["tutor_history"].values())
+    assert len({entry["exchange_id"] for entry in history}) == 1
+    history.sort(key=lambda entry: (entry["created_at"], entry["exchange_id"], entry["sequence"]))
+    assert [(entry["role"], entry["sequence"]) for entry in history] == [
+        ("user", 0),
+        ("assistant", 1),
+    ]
 
 
 def test_replan_persists_path_and_version_update(monkeypatch):

@@ -469,7 +469,14 @@ class LLMClientV2:
     # ==================================================================
 
     def generate_content(
-        self, node_id: str, card_type: str, difficulty: float
+        self,
+        node_id: str,
+        card_type: str,
+        difficulty: float,
+        *,
+        timeout_sec: Optional[float] = None,
+        course_id: str = "",
+        node_title: str = "",
     ) -> str:
         """为指定知识点生成多模态教育资源（ContentMesh Node 注入用）。"""
         type_names = {
@@ -480,19 +487,25 @@ class LLMClientV2:
             "diagnostic_quiz": "诊断测验题",
         }
         type_name = type_names.get(card_type, card_type)
+        canonical_title = str(node_title or node_id).strip()
+        canonical_course = str(course_id or "unspecified").strip()
 
         system_prompt = (
             "你是一个顶级的计算机科学教育专家，擅长数据结构与算法教学。"
             "请根据指定知识点、资源类型和难度系数，生成高质量的中文学习资源。"
             "内容需使用 Markdown 格式，包含适当的结构化组织。"
+            "课程 ID、知识点 ID 和规范标题由服务端提供，不得自行改成其他知识点。"
+            "输出的第一个 Markdown 标题必须包含服务端给出的规范标题，正文必须始终围绕该标题。"
             "难度系数 0.0-0.3 为基础入门，0.3-0.7 为进阶，0.7-1.0 为高级/竞赛。"
         )
 
         user_prompt = (
+            f"课程 ID: {canonical_course}\n"
             f"知识点 ID: {node_id}\n"
+            f"规范知识点标题: {canonical_title}\n"
             f"资源类型: {type_name}\n"
             f"难度系数: {difficulty:.2f} (0-1)\n\n"
-            f"请为该知识点生成一份完整的 {type_name} 学习资源。"
+            f"请只为“{canonical_title}”生成一份完整的 {type_name} 学习资源。"
             f"使用 Markdown 格式输出，包含标题、要点和具体内容。"
         )
 
@@ -500,7 +513,7 @@ class LLMClientV2:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
-        return self._sync_chat_wrapper(messages)
+        return self._sync_chat_wrapper(messages, timeout_sec=timeout_sec)
 
     def generate_academic_explanation(
         self, query: str, reference_chunks: List[str]
@@ -620,22 +633,41 @@ class LLMClientV2:
         messages: List[Dict[str, str]],
         temperature: float = None,
         max_tokens: int = None,
+        timeout_sec: Optional[float] = None,
     ) -> str:
         """同步调用 chat() 的便捷封装。"""
+        bounded_timeout = None
+        if timeout_sec is not None:
+            bounded_timeout = max(0.1, float(timeout_sec))
+
+        async def invoke() -> Dict[str, Any]:
+            request = self.chat(messages, temperature, max_tokens)
+            if bounded_timeout is not None:
+                return await asyncio.wait_for(request, timeout=bounded_timeout)
+            return await request
+
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             if loop.is_running():
                 # 在已运行的事件循环中（如 uvicorn），在线程池中运行
                 import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    future = pool.submit(asyncio.run, self.chat(messages, temperature, max_tokens))
-                    result = future.result(timeout=45.0)
+                pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                future = pool.submit(asyncio.run, invoke())
+                try:
+                    result = future.result(timeout=(bounded_timeout or 45.0) + 0.5)
+                finally:
+                    # The coroutine has its own ``wait_for`` cancellation
+                    # budget. Do not turn an outer timeout into an unbounded
+                    # shutdown wait on this synchronous compatibility path.
+                    pool.shutdown(wait=False, cancel_futures=True)
             else:
                 result = loop.run_until_complete(
-                    self.chat(messages, temperature, max_tokens)
+                    invoke()
                 )
-        except RuntimeError:
-            result = asyncio.run(self.chat(messages, temperature, max_tokens))
+        except RuntimeError as exc:
+            if "no current event loop" not in str(exc).lower() and "no running event loop" not in str(exc).lower():
+                raise
+            result = asyncio.run(invoke())
 
         return result.get("content", "") if isinstance(result, dict) else str(result)
 

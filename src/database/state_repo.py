@@ -53,3 +53,14 @@ class StateRepo:
             (user_id, course_id),
         )
         db.commit()
+
+    def list_user_states(self, user_id: str) -> list[Dict[str, Any]]:
+        rows = db.execute(
+            "SELECT user_id, course_id, state_json, cold_state_json, updated_at FROM user_state WHERE user_id = %s",
+            (user_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def delete_all(self, user_id: str) -> None:
+        db.execute("DELETE FROM user_state WHERE user_id = %s", (user_id,))
+        db.commit()

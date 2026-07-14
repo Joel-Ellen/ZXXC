@@ -22,8 +22,8 @@
 
     <AuthView
       v-else-if="bootMode === 'login'"
-      @login="onLogin"
-      @register="onRegister"
+      :submit-login="onLogin"
+      :submit-register="onRegister"
       @go-home="goHome"
     />
 
@@ -32,7 +32,9 @@
       :courses="availableCourses"
       :enrolled="enrolledCourses"
       :loading="isBusy"
+      :return-to-workspace="courseSelectionReturnMode !== null"
       @select="onCourseSelect"
+      @back="returnToWorkspace"
       @go-home="goHome"
     />
 
@@ -69,6 +71,7 @@
       @submit-probe="submitProbe"
       @logout="handleLogout"
       @go-home="goHome"
+      @browse-courses="openCourseSelection"
       @switch-course="onSwitchCourse"
       @refresh-resources="() => refreshNodeResources(currentNode, true)"
       @generate-card="onGenerateCard"
@@ -77,7 +80,7 @@
 </template>
 
 <script setup>
-import { defineAsyncComponent, onMounted } from "vue";
+import { defineAsyncComponent, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import AuroraBackground from "../components/AuroraBackground.vue";
 import { useEduAgent } from "../composables/useEduAgent";
@@ -87,6 +90,7 @@ const CourseSelectionView = defineAsyncComponent(() => import("../components/Cou
 const PremiumWorkspace = defineAsyncComponent(() => import("../components/PremiumWorkspace.vue"));
 
 const router = useRouter();
+const courseSelectionReturnMode = ref(null);
 
 const {
   bootMode,
@@ -143,11 +147,37 @@ async function onRegister(userId, email, password, captchaToken, captchaAnswer) 
 }
 
 function goHome() {
+  courseSelectionReturnMode.value = null;
   router.push("/");
 }
 
-function onCourseSelect(courseId) {
-  handleEnrollCourse(courseId);
+function openCourseSelection() {
+  courseSelectionReturnMode.value = bootMode.value;
+  bootMode.value = "course_selection";
+}
+
+function returnToWorkspace() {
+  const returnMode = courseSelectionReturnMode.value;
+  courseSelectionReturnMode.value = null;
+  bootMode.value = returnMode === "probe" ? "probe" : "ready";
+}
+
+async function onCourseSelect(courseId) {
+  const isEnrolled = enrolledCourses.value.some((course) => course.course_id === courseId);
+
+  if (isEnrolled) {
+    if (activeCourse.value?.course_id === courseId) {
+      returnToWorkspace();
+      return;
+    }
+    await handleSwitchCourse(courseId);
+  } else {
+    await handleEnrollCourse(courseId);
+  }
+
+  if (bootMode.value !== "course_selection") {
+    courseSelectionReturnMode.value = null;
+  }
 }
 
 async function onSendTutorMessage(payload) {
@@ -162,9 +192,9 @@ function onSwitchCourse(courseId) {
   handleSwitchCourse(courseId);
 }
 
-async function onGenerateCard({ nodeId, force = false } = {}) {
+async function onGenerateCard({ nodeId, cardType = "", force = false } = {}) {
   const targetNode = nodeId || currentNode.value;
   if (!targetNode) return;
-  await refreshNodeResources(targetNode, force);
+  await refreshNodeResources(targetNode, { force, cardType });
 }
 </script>

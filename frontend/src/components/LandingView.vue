@@ -1194,6 +1194,7 @@
 
 <script setup>
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 import IconCheck from "./icons/IconCheck.vue";
 import IconChat from "./icons/IconChat.vue";
 import IconDoc from "./icons/IconDoc.vue";
@@ -1204,7 +1205,7 @@ import IconSettings from "./icons/IconSettings.vue";
 import IconTree from "./icons/IconTree.vue";
 import RadarCanvas from "./RadarCanvas.vue";
 
-const emit = defineEmits(["enter"]);
+const router = useRouter();
 
 const navScrolled = ref(false);
 const mobileMenuOpen = ref(false);
@@ -1305,7 +1306,7 @@ const faqs = [
 ];
 
 function enterApp() {
-  emit("enter");
+  router.push({ name: "app-workspace" });
 }
 
 function scrollToTop() {

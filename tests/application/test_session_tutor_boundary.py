@@ -5,6 +5,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from frontend import server
+from src.api_models.tutor_request import TutorRequest
+from src.auth.security import SecurityManager
 
 
 class _Receive:
@@ -20,11 +22,15 @@ class _Receive:
 
 
 def _request(payload, accept="application/json"):
+    token = SecurityManager.create_token_pair("u1", "STUDENT")["access_token"]
     scope = {
         "type": "http",
         "method": "POST",
         "path": "/api/sessions/u1:course1/tutor",
-        "headers": [(b"accept", accept.encode("utf-8"))],
+        "headers": [
+            (b"accept", accept.encode("utf-8")),
+            (b"authorization", f"Bearer {token}".encode("ascii")),
+        ],
         "path_params": {"session_id": "u1:course1"},
         "query_string": b"",
         "server": ("testserver", 80),
@@ -49,27 +55,48 @@ def _compat_request(payload, path="/api/tutor/ask", accept="application/json"):
     return Request(scope, _Receive(payload))
 
 
+def test_tutor_request_maps_study_advice_to_general_mode():
+    assert TutorRequest(question="How should I review?", contextType="study_advice").context_type == "general"
+
+
 @pytest.mark.asyncio
 async def test_session_tutor_json_uses_non_stream_service(monkeypatch):
     called = {}
 
-    def fake_run(user_id, course_id, question):
-        called.update({"mode": "json", "user_id": user_id, "course_id": course_id, "question": question})
+    def fake_run(user_id, course_id, question, **kwargs):
+        called.update({
+            "mode": "json",
+            "user_id": user_id,
+            "course_id": course_id,
+            "question": question,
+            "request": kwargs["tutor_request"],
+        })
         return {"tutor_response": {"text_explanation": "ok"}}
 
     monkeypatch.setattr(server.tutor_service, "run_tutor", fake_run)
 
-    response = await server.api_session_tutor(_request({"question": "What is a heap?"}))
+    response = await server.api_session_tutor(_request({
+        "question": "What is a heap?",
+        "contextType": "code_debug",
+        "codeSnippet": "heap.push(1)",
+        "errorMessage": "IndexError",
+    }))
 
     assert isinstance(response, JSONResponse)
-    assert called == {"mode": "json", "user_id": "u1", "course_id": "course1", "question": "What is a heap?"}
+    assert called["mode"] == "json"
+    assert called["user_id"] == "u1"
+    assert called["course_id"] == "course1"
+    assert called["question"] == "What is a heap?"
+    assert called["request"].context_type == "code_debug"
+    assert called["request"].code_snippet == "heap.push(1)"
+    assert called["request"].error_message == "IndexError"
 
 
 @pytest.mark.asyncio
 async def test_session_tutor_stream_flag_uses_canonical_endpoint(monkeypatch):
     called = {}
 
-    async def fake_stream(user_id, course_id, question):
+    async def fake_stream(user_id, course_id, question, **kwargs):
         called.update({"mode": "stream", "user_id": user_id, "course_id": course_id, "question": question})
         yield {"event": "done", "data": "{}"}
 
@@ -86,7 +113,7 @@ async def test_session_tutor_stream_flag_uses_canonical_endpoint(monkeypatch):
 async def test_session_tutor_accept_header_uses_canonical_endpoint(monkeypatch):
     called = {}
 
-    async def fake_stream(user_id, course_id, question):
+    async def fake_stream(user_id, course_id, question, **kwargs):
         called.update({"mode": "stream", "user_id": user_id, "course_id": course_id, "question": question})
         yield {"event": "done", "data": "{}"}
 
@@ -100,8 +127,40 @@ async def test_session_tutor_accept_header_uses_canonical_endpoint(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_session_tutor_stream_forwards_context(monkeypatch):
+    called = {}
+
+    async def fake_stream(user_id, course_id, question, **kwargs):
+        called.update({
+            "user_id": user_id,
+            "course_id": course_id,
+            "question": question,
+            "request": kwargs["tutor_request"],
+        })
+        yield {"event": "done", "data": "{}"}
+
+    monkeypatch.setattr(server.tutor_service, "stream_tutor", fake_stream)
+
+    response = await server.api_session_tutor(_request({
+        "question": "Why does this fail?",
+        "stream": True,
+        "contextType": "code_debug",
+        "codeSnippet": "items[0]",
+        "errorMessage": "IndexError",
+    }))
+    await anext(response.body_iterator)
+
+    assert called["user_id"] == "u1"
+    assert called["course_id"] == "course1"
+    assert called["question"] == "Why does this fail?"
+    assert called["request"].context_type == "code_debug"
+    assert called["request"].code_snippet == "items[0]"
+    assert called["request"].error_message == "IndexError"
+
+
+@pytest.mark.asyncio
 async def test_session_tutor_stream_alias_is_deprecated(monkeypatch):
-    async def fake_stream(user_id, course_id, question):
+    async def fake_stream(user_id, course_id, question, **kwargs):
         yield {"event": "done", "data": "{}"}
 
     monkeypatch.setattr(server.tutor_service, "stream_tutor", fake_stream)
