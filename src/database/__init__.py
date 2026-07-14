@@ -14,7 +14,8 @@ from .state_repo import StateRepo
 from .session_repo import SessionRepo
 from .session_snapshot_repo import SessionSnapshotRepo
 from .redis_client import (
-    get_redis, blacklist_token, is_blacklisted,
+    get_redis, redis_backend_status, durable_redis_available,
+    blacklist_token, is_blacklisted,
     mark_rotated, is_rotated, store_refresh_token, is_refresh_token_active,
     revoke_user_session, revoke_all_user_sessions, cache_action_token,
     consume_cached_action_token,
@@ -30,7 +31,8 @@ __all__ = [
     # sync layer
     "db", "UserRepo", "UserProfileRepo", "JsonUserProfileRepo", "AccountRepo", "JsonAccountRepo",
     "EnrollmentRepo", "StateRepo", "SessionRepo", "SessionSnapshotRepo",
-    "get_redis", "blacklist_token", "is_blacklisted",
+    "get_redis", "redis_backend_status", "durable_redis_available",
+    "blacklist_token", "is_blacklisted",
     "mark_rotated", "is_rotated", "store_refresh_token", "is_refresh_token_active",
     "revoke_user_session", "revoke_all_user_sessions", "cache_action_token",
     "consume_cached_action_token",

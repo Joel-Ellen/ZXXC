@@ -16,9 +16,6 @@ EduAgent 认证系统 — 完整单元 + 集成测试
   10. PresetAccounts: 预设账号自动创建
   11. LangGraphImmutableContextGuard: 越权拦截
   12. LangGraphImmutableContextGuard: 正常放行
-  13. AuthRouter: 注册/登录端点集成测试
-  14. AuthRouter: 缺少验证码拒绝
-  15. AuthRouter: 重复注册拒绝
 
 运行方式:
     pytest tests/test_auth.py -v

@@ -9,8 +9,9 @@
 from __future__ import annotations
 
 import random
+import secrets
 import time
-import hashlib
+import threading
 from typing import Dict, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -20,7 +21,7 @@ from datetime import datetime
 class CaptchaRecord:
     """单条验证码记录。"""
 
-    token: str            # 唯一标识 (SHA256 hash)
+    token: str            # 不可预测的一次性标识
     answer: str           # 正确答案
     expression: str       # 显示的表达式 (如 "3 + 5 = ?")
     created_at: float     # 创建时间戳
@@ -44,10 +45,12 @@ class CaptchaGenerator:
     SVG_WIDTH: int = 180
     SVG_HEIGHT: int = 60
     SVG_FONT_SIZE: int = 28
+    MAX_RECORDS: int = 10_000
 
     def __init__(self) -> None:
         self._records: Dict[str, CaptchaRecord] = {}
         self._cleanup_counter: int = 0
+        self._lock = threading.RLock()
 
     # ------------------------------------------------------------------
     # 验证码生成
@@ -61,9 +64,9 @@ class CaptchaGenerator:
         """
         self._maybe_cleanup()
 
-        a = random.randint(1, 20)
-        b = random.randint(1, 20)
-        op = random.choice(["+", "-", "*"])
+        a = secrets.randbelow(20) + 1
+        b = secrets.randbelow(20) + 1
+        op = secrets.choice(["+", "-", "*"])
 
         if op == "+":
             answer = a + b
@@ -76,22 +79,24 @@ class CaptchaGenerator:
             expr = f"{a} - {b} = ?"
         else:  # "*"
             # 限制乘数范围避免过大
-            a = random.randint(1, 9)
-            b = random.randint(1, 9)
+            a = secrets.randbelow(9) + 1
+            b = secrets.randbelow(9) + 1
             answer = a * b
             expr = f"{a} x {b} = ?"
 
-        token = hashlib.sha256(
-            f"{expr}{time.time()}{random.random()}".encode()
-        ).hexdigest()[:16]
+        token = secrets.token_hex(8)
 
-        self._records[token] = CaptchaRecord(
-            token=token,
-            answer=str(answer),
-            expression=expr,
-            created_at=time.time(),
-            ttl_seconds=self.EXPIRE_SECONDS,
-        )
+        with self._lock:
+            if len(self._records) >= self.MAX_RECORDS:
+                oldest = min(self._records.values(), key=lambda record: record.created_at)
+                self._records.pop(oldest.token, None)
+            self._records[token] = CaptchaRecord(
+                token=token,
+                answer=str(answer),
+                expression=expr,
+                created_at=time.time(),
+                ttl_seconds=self.EXPIRE_SECONDS,
+            )
 
         return self._render_svg(expr), token
 
@@ -106,16 +111,17 @@ class CaptchaGenerator:
             True 若正确且在有效期内。
         """
         self._maybe_cleanup()
-        record = self._records.get(token)
-        if record is None:
-            return False
-        if record.is_expired():
+        with self._lock:
+            record = self._records.get(token)
+            if record is None:
+                return False
+            if record.is_expired():
+                del self._records[token]
+                return False
+            # 验证后立即删除（一次性使用）
+            is_correct = record.answer.strip() == user_answer.strip()
             del self._records[token]
-            return False
-        # 验证后立即删除（一次性使用）
-        is_correct = record.answer.strip() == user_answer.strip()
-        del self._records[token]
-        return is_correct
+            return is_correct
 
     # ------------------------------------------------------------------
     # SVG 渲染
@@ -174,10 +180,11 @@ class CaptchaGenerator:
 
     def _maybe_cleanup(self) -> None:
         """定期清理过期记录（每 50 次调用执行一次）。"""
-        self._cleanup_counter += 1
-        if self._cleanup_counter < 50:
-            return
-        self._cleanup_counter = 0
-        expired = [t for t, r in self._records.items() if r.is_expired()]
-        for t in expired:
-            del self._records[t]
+        with self._lock:
+            self._cleanup_counter += 1
+            if self._cleanup_counter < 50:
+                return
+            self._cleanup_counter = 0
+            expired = [token for token, record in self._records.items() if record.is_expired()]
+            for token in expired:
+                del self._records[token]

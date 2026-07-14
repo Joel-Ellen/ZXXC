@@ -9,6 +9,13 @@ on:
       - master
       - "codex/**"
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   core:
     name: Core Suite
@@ -35,6 +42,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
+
+      - name: Audit Python dependencies
+        run: |
+          python -m pip install "pip-audit==2.9.0"
+          python -m pip check
+          python -m pip_audit --requirement requirements.txt
 
       - name: Run Python suite
         run: python -m pytest tests
@@ -109,3 +122,59 @@ jobs:
             frontend/playwright-report
           if-no-files-found: ignore
           retention-days: 7
+
+  deployment:
+    name: Deployment Contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: core
+    env:
+      EDUAGENT_IMAGE: registry.example.test/eduagent@sha256:0000000000000000000000000000000000000000000000000000000000000000
+      PUBLIC_APP_URL: https://eduagent.example.test
+      JWT_SECRET_KEY: ci-production-secret-with-at-least-32-characters
+      EDUAGENT_OPS_TOKEN: ci-operations-secret
+      POSTGRES_PASSWORD: ci-postgres-password
+      REDIS_PASSWORD: ci-redis-password
+      NEO4J_PASSWORD: ci-neo4j-password
+      MINIO_ACCESS_KEY: ci-minio-access
+      MINIO_SECRET_KEY: ci-minio-secret-password
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Compose production configuration
+        run: docker compose config --quiet
+
+      - name: Validate Nginx configurations
+        run: |
+          docker run --rm \
+            -v "$PWD/nginx/edu-agent.conf:/etc/nginx/conf.d/default.conf:ro" \
+            nginx:1.27-alpine nginx -t
+          docker run --rm \
+            -v "$PWD/nginx/edu-agent-standalone.conf:/etc/nginx/conf.d/default.conf:ro" \
+            nginx:1.27-alpine nginx -t
+
+      - name: Build production image
+        run: docker build --tag "eduagent-ci:${GITHUB_SHA}" .
+
+      - name: Verify non-root runtime and probes
+        run: |
+          test "$(docker image inspect "eduagent-ci:${GITHUB_SHA}" --format '{{.Config.User}}')" = "10001:10001"
+          docker run -d --name eduagent-ci-app \
+            -e APP_ENV=test \
+            -p 127.0.0.1:8800:8800 \
+            "eduagent-ci:${GITHUB_SHA}"
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8800/api/health >/dev/null \
+              && curl --fail --silent http://127.0.0.1:8800/api/ready >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs eduagent-ci-app
+          exit 1
+
+      - name: Stop smoke container
+        if: always()
+        run: docker rm --force eduagent-ci-app 2>/dev/null || true

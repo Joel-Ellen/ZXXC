@@ -900,6 +900,12 @@ def _record_learning_event_unlocked(
                 "learning_event.mastery_update_total",
                 event_type=event.event_type.value,
             )
+        mastery_result = event_record.get("mastery")
+        if isinstance(mastery_result, dict) and mastery_result.get("updated") is True:
+            incr_metric(
+                "learning_event.mastery_mutation_total",
+                outcome="attributed" if attribution is not None else "unattributed",
+            )
         log_event(
             "learning_event.recorded",
             event_id=event.event_id,
@@ -924,13 +930,40 @@ def get_learning_event_history(
     requested_node_id = str(node_id or "").strip()
     requested_event_id = str(event_id or "").strip()
     try:
-        bounded_limit = max(1, int(limit or 100))
+        bounded_limit = min(500, max(1, int(limit or 100)))
     except (TypeError, ValueError):
         bounded_limit = 100
 
+    all_events = [dict(event) for event in _event_history(state)]
+    opened_nodes = {
+        str(event.get("node_id") or "").strip()
+        for event in all_events
+        if event.get("event_type") == LearningEventType.LESSON_OPENED.value
+        and str(event.get("node_id") or "").strip()
+    }
+    verified_completed_nodes = set()
+    for event in all_events:
+        if event.get("event_type") not in {
+            LearningEventType.LESSON_COMPLETED.value,
+            LearningEventType.REVIEW_COMPLETED.value,
+        }:
+            continue
+        mastery = event.get("mastery") if isinstance(event.get("mastery"), dict) else {}
+        if mastery.get("evidence_accepted") is not True:
+            continue
+        node = str(mastery.get("evaluated_node_id") or event.get("node_id") or "").strip()
+        if node:
+            verified_completed_nodes.add(node)
+    completed_opened_nodes = opened_nodes & verified_completed_nodes
+    completion_rate = (
+        round(len(completed_opened_nodes) / len(opened_nodes), 6)
+        if opened_nodes
+        else None
+    )
+
     events = [
-        dict(event)
-        for event in _event_history(state)
+        event
+        for event in all_events
         if (not requested_node_id or event.get("node_id") == requested_node_id)
         and (not requested_event_id or event.get("event_id") == requested_event_id)
     ][-bounded_limit:]
@@ -948,6 +981,13 @@ def get_learning_event_history(
         "event_id": requested_event_id or None,
         "events": events,
         "mastery_attributions": attributions,
+        "learning_funnel": {
+            "opened_nodes": len(opened_nodes),
+            "verified_completed_nodes": len(completed_opened_nodes),
+            "verified_completed_without_open": len(verified_completed_nodes - opened_nodes),
+            "completion_rate": completion_rate,
+            "definition": "unique verified completed opened nodes / unique opened nodes",
+        },
     }
 
 

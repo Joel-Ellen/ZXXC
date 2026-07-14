@@ -1529,7 +1529,9 @@ function createEduAgent() {
   }
 
   async function refreshNodeResources(nodeId, options = {}) {
-    if (!nodeId) return;
+    if (!nodeId) {
+      return { ok: false, error: new Error("缺少要加载的学习节点。") };
+    }
 
     const { force, cardType } = normalizeResourceOptions(options);
     const nodeLabel = nodeTitles.value[nodeId] || nodeId;
@@ -1546,9 +1548,11 @@ function createEduAgent() {
           ? `「${nodeLabel}」资源已就绪（${cardCount} 份），无需重新生成。`
           : `「${nodeLabel}」已生成 ${cardCount} 份新资源。`
       );
+      return { ok: true, result, resources: nodeResources };
     } catch (e) {
       const message = e?.response?.data?.detail || e?.message || "未知错误";
       setInfo(`资源生成失败：${message}`, 10000);
+      return { ok: false, error: e };
     } finally {
       isLoadingNode.value = false;
       refreshStatuses();

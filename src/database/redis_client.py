@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from typing import Optional
 
 import redis
@@ -26,38 +27,81 @@ except ImportError:
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 _redis_client: Optional[redis.Redis] = None
+_redis_backend = "uninitialized"
+_last_connection_attempt = 0.0
 _lock = threading.Lock()
 
 
+def _is_production_environment() -> bool:
+    value = (
+        os.getenv("APP_ENV")
+        or os.getenv("ENVIRONMENT")
+        or os.getenv("NODE_ENV")
+        or "development"
+    )
+    return str(value).strip().lower() in {"prod", "production"}
+
+
 def get_redis() -> Optional[redis.Redis]:
-    """获取 Redis 客户端（惰性初始化，连接失败则自动降级为 fakeredis）。"""
-    global _redis_client
+    """获取 Redis 客户端；生产环境禁止降级到进程内 fakeredis。"""
+    global _redis_client, _redis_backend, _last_connection_attempt
     if _redis_client is not None:
-        return _redis_client
+        if _redis_backend != "fakeredis" or not _is_production_environment():
+            return _redis_client
+        # 测试/开发进程内后端不能在切换到生产环境后继续被复用。
+        _redis_client = None
+        _redis_backend = "unavailable"
     with _lock:
         if _redis_client is not None:
             return _redis_client
+        now = time.monotonic()
+        if _redis_backend == "unavailable" and now - _last_connection_attempt < 5.0:
+            return None
+        _last_connection_attempt = now
         # 1. 尝试连接真实 Redis
         try:
             _redis_client = redis.from_url(REDIS_URL, socket_connect_timeout=3)
             _redis_client.ping()
+            _redis_backend = "redis"
             print(f"[Redis] Connected: {REDIS_URL.split('@')[-1]}")
             return _redis_client
         except Exception:
-            pass
+            _redis_client = None
+            _redis_backend = "unavailable"
+        if _is_production_environment():
+            print("[Redis] Unavailable - production fallback is disabled")
+            return None
         # 2. 降级为 fakeredis（纯 Python，零配置）
         try:
             import fakeredis
             _redis_client = fakeredis.FakeRedis()
             _redis_client.ping()
+            _redis_backend = "fakeredis"
             print("[Redis] Using fakeredis (in-process, zero-config)")
             return _redis_client
         except Exception:
-            pass
+            _redis_client = None
+            _redis_backend = "unavailable"
         # 3. 完全不可用
-        print("[Redis] Unavailable — session features disabled")
-        _redis_client = None
+        print("[Redis] Unavailable - session features disabled")
         return _redis_client
+
+
+def redis_backend_status() -> str:
+    """返回不含连接信息的有限后端状态。"""
+    get_redis()
+    return _redis_backend
+
+
+def durable_redis_available() -> bool:
+    """确认外部 Redis 可达；fakeredis 永远不满足生产就绪条件。"""
+    client = get_redis()
+    if client is None or _redis_backend != "redis":
+        return False
+    try:
+        return bool(client.ping())
+    except Exception:
+        return False
 
 
 # ─── 便捷操作 ───

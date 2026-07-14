@@ -63,6 +63,21 @@
     {{ reviewActionError }}
   </p>
   <div
+    v-if="retestResourceError"
+    class="fixed bottom-5 left-1/2 z-40 flex max-w-[calc(100%-2rem)] -translate-x-1/2 flex-wrap items-center gap-3 border border-error/30 bg-space-panel px-4 py-3 text-sm text-text-primary"
+    role="alert"
+  >
+    <span>{{ retestResourceError }}</span>
+    <button
+      type="button"
+      class="workspace-shell-btn focus-ring min-h-11 px-3 py-2 text-sm font-semibold"
+      :disabled="retestResourceRetrying"
+      @click="retryRetestResource"
+    >
+      {{ retestResourceRetrying ? "正在加载复测..." : "重新加载复测" }}
+    </button>
+  </div>
+  <div
     v-if="learningAssets.syncError"
     class="fixed left-1/2 top-4 z-50 flex max-w-[calc(100%-2rem)] -translate-x-1/2 flex-wrap items-center gap-3 border border-error/30 bg-space-panel px-4 py-3 text-sm text-text-primary"
     role="alert"
@@ -117,6 +132,9 @@ const router = useRouter();
 const learningAssets = useLearningAssetsStore();
 const routeError = ref("");
 const reviewActionError = ref("");
+const retestResourceError = ref("");
+const retestResourceRetrying = ref(false);
+const pendingRetestResource = ref(null);
 const codeReviewNotice = ref("");
 const codeEventError = ref("");
 const codeEventRetrying = ref(false);
@@ -194,6 +212,18 @@ const reviewFocusCardType = computed(() => {
   return "";
 });
 const currentRouteKey = computed(() => `${props.courseId}/${props.nodeId}`);
+
+watch(
+  () => [reviewItemId.value, reviewPhase.value, props.nodeId],
+  ([itemId, phase, nodeId]) => {
+    const pending = pendingRetestResource.value;
+    if (!pending) return;
+    if (phase !== "retest" || pending.reviewItemId !== itemId || pending.nodeId !== nodeId) {
+      clearRetestResourceFailure();
+    }
+  },
+  { flush: "sync" },
+);
 
 watch(currentRouteKey, synchronizeCurrentRoute, { immediate: true });
 
@@ -582,6 +612,7 @@ async function prepareReviewRetest(practiceSubmission) {
     ? practiceSubmission
     : String(practiceSubmission?.reviewItemId || "");
   reviewActionError.value = "";
+  clearRetestResourceFailure();
   if (!itemId || !practiceSubmission || typeof practiceSubmission === "string") {
     reviewActionError.value = "请先完成并提交当前定向练习。";
     return;
@@ -607,8 +638,11 @@ async function prepareReviewRetest(practiceSubmission) {
         throw new Error("服务端无法验证这次定向练习，请重新加载练习后再试。");
       }
       if (!verification.correct) {
-        practiceSubmission.onIncorrect?.(verification);
-        reviewActionError.value = "这次练习答案未通过服务端验证，请调整后再次提交。";
+        if (typeof practiceSubmission.onIncorrect === "function") {
+          practiceSubmission.onIncorrect(verification);
+        } else {
+          reviewActionError.value = "这次练习答案未通过服务端验证，请调整后再次提交。";
+        }
         return;
       }
       practiceEventId = String(practiceResponse?.event_id || "");
@@ -640,14 +674,65 @@ async function prepareReviewRetest(practiceSubmission) {
     // card after changing the route; asking for every resource type can start
     // unrelated long-running generation and hide a ready retest behind a
     // timeout.
-    await refreshNodeResources(result.learning_task.node_id, {
+    const cardType = result.learning_task.focus_resource_type || "diagnostic_quiz";
+    const retryContext = {
+      reviewItemId: itemId,
+      practiceEventId,
+      nodeId: result.learning_task.node_id,
+      cardType,
+      retestResourceId: String(result.learning_task.retest_resource_id || ""),
+    };
+    const resourceOutcome = await refreshNodeResources(result.learning_task.node_id, {
       force: false,
-      cardType: result.learning_task.focus_resource_type || "diagnostic_quiz",
+      cardType,
     });
+    if (!resourceOutcome?.ok) {
+      pendingRetestResource.value = retryContext;
+      retestResourceError.value = retestResourceFailureMessage(resourceOutcome?.error);
+    }
   } catch (error) {
-    reviewActionError.value = error?.response?.data?.detail || error?.message || "无法生成新的复测，请稍后重试。";
-    practiceSubmission.onFailure?.(error);
+    if (typeof practiceSubmission.onFailure === "function") {
+      practiceSubmission.onFailure(error);
+    } else {
+      reviewActionError.value = error?.response?.data?.detail || error?.message || "无法生成新的复测，请稍后重试。";
+    }
   }
+}
+
+function retestResourceFailureMessage(error) {
+  const detail = error?.response?.data?.detail || error?.message || "复测题暂时不可用。";
+  return `复测已创建，但复测题加载失败：${detail}`;
+}
+
+function clearRetestResourceFailure() {
+  pendingRetestResource.value = null;
+  retestResourceError.value = "";
+  retestResourceRetrying.value = false;
+}
+
+async function retryRetestResource() {
+  const pending = pendingRetestResource.value;
+  if (!pending || retestResourceRetrying.value) return;
+  if (
+    reviewPhase.value !== "retest"
+    || reviewItemId.value !== pending.reviewItemId
+    || props.nodeId !== pending.nodeId
+  ) {
+    clearRetestResourceFailure();
+    return;
+  }
+
+  retestResourceRetrying.value = true;
+  const outcome = await refreshNodeResources(pending.nodeId, {
+    force: false,
+    cardType: pending.cardType,
+  });
+  if (outcome?.ok) {
+    clearRetestResourceFailure();
+    return;
+  }
+  retestResourceRetrying.value = false;
+  retestResourceError.value = retestResourceFailureMessage(outcome?.error);
 }
 
 async function submitCurrentProbe(values) {

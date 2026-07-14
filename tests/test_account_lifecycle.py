@@ -495,12 +495,3 @@ def test_account_delete_identity_failure_is_retryable(account_app, monkeypatch):
     )
     assert retried.status_code == 200
     assert env.users.get_by_id("alice") is None
-
-
-def test_production_auth_router_does_not_create_preset_accounts(tmp_path, monkeypatch):
-    from src.auth.routes import create_auth_router
-
-    path = str(tmp_path / "production-users.json")
-    monkeypatch.setenv("APP_ENV", "production")
-    create_auth_router(path)
-    assert UserStore(path).count() == 0

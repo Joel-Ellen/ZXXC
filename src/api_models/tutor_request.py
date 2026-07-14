@@ -15,18 +15,22 @@ class TutorRequest(BaseModel):
 
     question: str = Field(
         default="",
+        max_length=4000,
         validation_alias=AliasChoices("question", "query", "tutor_query"),
     )
     context_type: str = Field(
         default="general",
+        max_length=32,
         validation_alias=AliasChoices("context_type", "contextType"),
     )
     code_snippet: str = Field(
         default="",
+        max_length=64 * 1024,
         validation_alias=AliasChoices("code_snippet", "codeSnippet"),
     )
     error_message: str = Field(
         default="",
+        max_length=8 * 1024,
         validation_alias=AliasChoices("error_message", "errorMessage"),
     )
     stream: bool = False

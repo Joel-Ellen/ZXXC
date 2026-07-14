@@ -43,6 +43,7 @@ class QuizAnswer(BaseModel):
 
     question_id: str = Field(
         default="",
+        max_length=256,
         validation_alias=AliasChoices("question_id", "questionId", "id"),
     )
     answer_index: int = Field(
@@ -70,13 +71,15 @@ class QuizCompletionEvidence(BaseModel):
 
     evidence_type: str = Field(
         default="diagnostic_quiz",
+        max_length=64,
         validation_alias=AliasChoices("evidence_type", "evidenceType", "type"),
     )
     resource_id: str = Field(
         default="",
+        max_length=256,
         validation_alias=AliasChoices("resource_id", "resourceId"),
     )
-    answers: list[QuizAnswer] = Field(default_factory=list)
+    answers: list[QuizAnswer] = Field(default_factory=list, max_length=200)
 
     @field_validator("evidence_type", mode="before")
     @classmethod
@@ -103,6 +106,7 @@ class LearningEventRequest(BaseModel):
 
     event_id: str = Field(
         default="",
+        max_length=128,
         validation_alias=AliasChoices("event_id", "eventId", "id"),
     )
     event_type: LearningEventType = Field(
@@ -111,22 +115,27 @@ class LearningEventRequest(BaseModel):
     )
     user_id: str = Field(
         default="",
+        max_length=128,
         validation_alias=AliasChoices("user_id", "userId"),
     )
     course_id: str = Field(
         default="",
+        max_length=128,
         validation_alias=AliasChoices("course_id", "courseId"),
     )
     node_id: str = Field(
         default="",
+        max_length=256,
         validation_alias=AliasChoices("node_id", "nodeId", "current_node_id", "currentNodeId"),
     )
     resource_id: str = Field(
         default="",
+        max_length=256,
         validation_alias=AliasChoices("resource_id", "resourceId"),
     )
     question_id: str = Field(
         default="",
+        max_length=256,
         validation_alias=AliasChoices("question_id", "questionId"),
     )
     duration_ms: int = Field(
@@ -145,7 +154,7 @@ class LearningEventRequest(BaseModel):
         default=False,
         validation_alias=AliasChoices("used_hint", "usedHint"),
     )
-    result: dict[str, Any] = Field(default_factory=dict)
+    result: dict[str, Any] = Field(default_factory=dict, max_length=128)
     completion_evidence: Optional[QuizCompletionEvidence] = Field(
         default=None,
         validation_alias=AliasChoices("completion_evidence", "completionEvidence", "evidence"),

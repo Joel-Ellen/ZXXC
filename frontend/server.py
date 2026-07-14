@@ -75,6 +75,7 @@ from src.observability import (
     observe_metric,
 )
 from src.release_controls import RolloutDecision, operational_switch, rollout_decision
+from src.auth.rate_limiter import KeyedConcurrencyLimiter, RateLimitBackendUnavailable, RateLimiter
 from sse_starlette.sse import EventSourceResponse
 
 
@@ -96,6 +97,7 @@ validate_security_configuration()
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
 import json
+import hashlib
 import math
 import secrets
 import threading
@@ -150,7 +152,8 @@ try:
         db as _db, UserRepo, UserProfileRepo, JsonUserProfileRepo,
         AccountRepo, JsonAccountRepo, EnrollmentRepo, StateRepo,
         SessionRepo, SessionSnapshotRepo,
-        get_redis, blacklist_token, is_blacklisted, store_refresh_token,
+        get_redis, redis_backend_status, durable_redis_available,
+        blacklist_token, is_blacklisted, store_refresh_token,
         mark_rotated, is_rotated, is_refresh_token_active,
         revoke_user_session, revoke_all_user_sessions,
         cache_action_token, consume_cached_action_token,
@@ -171,6 +174,8 @@ except Exception as e:
     from src.database.user_profile_repo import JsonUserProfileRepo
     from src.database.account_repo import JsonAccountRepo
     get_redis = lambda: None
+    redis_backend_status = lambda: "unavailable"
+    durable_redis_available = lambda: False
     blacklist_token = lambda *a, **kw: None
     is_blacklisted = lambda *a, **kw: False
     store_refresh_token = lambda *a, **kw: None
@@ -3925,16 +3930,23 @@ def _user_public_payload(user: Any) -> Dict[str, Any]:
     return payload
 
 
+def _trusted_client_host(request: Request) -> str:
+    client_host = request.client.host if request.client else "unknown"
+    trust_proxy = str(os.environ.get("EDUAGENT_TRUST_PROXY_HEADERS") or "").strip().lower()
+    if trust_proxy in {"1", "true", "yes", "on"}:
+        forwarded = str(request.headers.get("X-Forwarded-For") or "").split(",", 1)[0].strip()
+        return forwarded or client_host
+    return client_host
+
+
 def _device_metadata(request: Request) -> Dict[str, str]:
     user_agent = str(request.headers.get("User-Agent", ""))[:512]
     explicit_name = str(request.headers.get("X-Device-Name", "")).strip()[:160]
     device_name = explicit_name or (user_agent[:120] if user_agent else "Unknown device")
-    forwarded = str(request.headers.get("X-Forwarded-For", "")).split(",", 1)[0].strip()
-    client_host = request.client.host if request.client else ""
     return {
         "device_name": device_name,
         "user_agent": user_agent,
-        "ip_address": (forwarded or client_host)[:96],
+        "ip_address": _trusted_client_host(request)[:96],
     }
 
 
@@ -3990,6 +4002,9 @@ def _access_principal(request: Request) -> Tuple[Optional[Dict[str, Any]], Optio
             return None, JSONResponse({"detail": "AUTH_STORAGE_UNAVAILABLE"}, status_code=503)
         if not user_exists:
             return None, JSONResponse({"detail": "USER_NOT_FOUND"}, status_code=401)
+    _decision, rollout_error = _app_access_rollout(str(payload.get("sub") or ""), record=False)
+    if rollout_error is not None:
+        return None, rollout_error
     return payload, None
 
 
@@ -4023,6 +4038,10 @@ async def api_auth_register(request: Request) -> JSONResponse:
     if len(password) < 8:
         return JSONResponse({"detail": "密码至少 8 个字符"}, status_code=400)
 
+    access_decision, rollout_response = _app_access_rollout(user_id)
+    if rollout_response is not None:
+        return rollout_response
+
     try:
         user = store.create_user(user_id, email, password)
     except ValueError as e:
@@ -4032,13 +4051,13 @@ async def api_auth_register(request: Request) -> JSONResponse:
         token_pair = _create_authenticated_session(user, request)
     except Exception:
         return JSONResponse({"detail": "SESSION_PERSISTENCE_UNAVAILABLE"}, status_code=503)
-    return JSONResponse({
+    return _attach_app_rollout_header(JSONResponse({
         "access_token": token_pair["access_token"],
         "refresh_token": token_pair["refresh_token"],
         "token_type": "bearer",
         "session_id": token_pair["session_id"],
         "user": _user_public_payload(user),
-    })
+    }), access_decision)
 
 
 def _auth_login_response(
@@ -4108,6 +4127,16 @@ async def api_auth_login(request: Request) -> JSONResponse:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    access_decision, rollout_response = _app_access_rollout(user_id)
+    if rollout_response is not None:
+        return _auth_login_response(
+            {"status": "release_unavailable", "detail": "RELEASE_NOT_AVAILABLE"},
+            status_code=403,
+            outcome="failure",
+            reason="release_holdback",
+            headers={"X-EduAgent-Release-Cohort": access_decision.cohort},
+        )
+
     try:
         token_pair = _create_authenticated_session(user, request)
     except Exception:
@@ -4129,6 +4158,7 @@ async def api_auth_login(request: Request) -> JSONResponse:
         status_code=200,
         outcome="success",
         reason="authenticated",
+        headers={"X-EduAgent-Release-Cohort": access_decision.cohort},
     )
 
 
@@ -4204,6 +4234,10 @@ async def api_auth_refresh(request: Request) -> JSONResponse:
     if not user_id or not old_jti or is_blacklisted(old_jti):
         return JSONResponse({"detail": "TOKEN_REVOKED"}, status_code=401)
 
+    access_decision, rollout_response = _app_access_rollout(str(user_id))
+    if rollout_response is not None:
+        return rollout_response
+
     # Redis 重放攻击检测
     if is_rotated(old_jti):
         try:
@@ -4264,13 +4298,13 @@ async def api_auth_refresh(request: Request) -> JSONResponse:
     store_refresh_token(user_id, token_pair["refresh_jti"], session_id)
 
     user_info = _user_public_payload(user) if user else {}
-    return JSONResponse({
+    return _attach_app_rollout_header(JSONResponse({
         "access_token": token_pair["access_token"],
         "refresh_token": token_pair["refresh_token"],
         "token_type": "bearer",
         "session_id": session_id,
         "user": user_info,
-    })
+    }), access_decision)
 
 
 async def api_auth_me(request: Request) -> JSONResponse:
@@ -4961,6 +4995,7 @@ def _session_tutor_response(
 
     wants_stream = tutor_request.stream or "text/event-stream" in accept_header.lower()
     if wants_stream:
+        stream_headers = {"X-Accel-Buffering": "no", **(headers or {})}
         return EventSourceResponse(
             tutor_service.stream_tutor(
                 user_id,
@@ -4968,17 +5003,21 @@ def _session_tutor_response(
                 tutor_request.question,
                 tutor_request=tutor_request,
             ),
-            headers=headers,
+            headers=stream_headers,
         )
-    return JSONResponse(
-        tutor_service.run_tutor(
-            user_id,
-            course_id,
-            tutor_request.question,
-            tutor_request=tutor_request,
-        ),
-        headers=headers,
+    result = tutor_service.run_tutor(
+        user_id,
+        course_id,
+        tutor_request.question,
+        tutor_request=tutor_request,
     )
+    if result.get("status") == "capacity_exceeded":
+        return JSONResponse(
+            result,
+            status_code=503,
+            headers={"Retry-After": str(result.get("retry_after") or 1), **(headers or {})},
+        )
+    return JSONResponse(result, headers=headers)
 
 
 async def api_reset(request: Request) -> JSONResponse:
@@ -5393,6 +5432,60 @@ async def api_session_review_prepare_retest(request: Request) -> JSONResponse:
     return _session_event_response(result)
 
 
+def _concurrency_environment(name: str, default: int) -> int:
+    try:
+        return max(1, min(64, int(os.environ.get(name, str(default)))))
+    except (TypeError, ValueError):
+        return default
+
+
+_CODE_EXECUTION_CAPACITY = threading.BoundedSemaphore(
+    _concurrency_environment("EDUAGENT_CODE_MAX_CONCURRENT", 2)
+)
+_CODE_EXECUTION_USER_CAPACITY = KeyedConcurrencyLimiter(1)
+_RESOURCE_GENERATION_CAPACITY = threading.BoundedSemaphore(
+    _concurrency_environment("EDUAGENT_RESOURCE_MAX_CONCURRENT", 3)
+)
+_RESOURCE_GENERATION_USER_CAPACITY = KeyedConcurrencyLimiter(1)
+
+
+def _capacity_response(surface: str) -> JSONResponse:
+    incr_metric("runtime.capacity_reject_total", surface=surface)
+    return JSONResponse(
+        {"status": "capacity_exceeded", "detail": f"{surface.upper()}_CAPACITY_EXCEEDED"},
+        status_code=503,
+        headers={"Retry-After": "1", "Cache-Control": "no-store"},
+    )
+
+
+def _app_access_rollout(
+    user_id: str,
+    *,
+    record: bool = True,
+) -> tuple[RolloutDecision, Optional[JSONResponse]]:
+    default_percent = 0.0 if is_production() else 100.0
+    decision = rollout_decision("app_access", user_id, default_percent=default_percent)
+    if record:
+        incr_metric(
+            "release.rollout_decision_total",
+            feature="app_access",
+            cohort=decision.cohort,
+        )
+    if decision.enabled:
+        return decision, None
+    response = JSONResponse(
+        {"status": "release_unavailable", "detail": "RELEASE_NOT_AVAILABLE"},
+        status_code=403,
+    )
+    response.headers["X-EduAgent-Release-Cohort"] = decision.cohort
+    return decision, response
+
+
+def _attach_app_rollout_header(response: JSONResponse, decision: RolloutDecision) -> JSONResponse:
+    response.headers["X-EduAgent-Release-Cohort"] = decision.cohort
+    return response
+
+
 def _code_practice_rollout(user_id: str) -> tuple[RolloutDecision, Optional[JSONResponse]]:
     default_percent = 0.0 if is_production() else 100.0
     decision = rollout_decision("code_practice", user_id, default_percent=default_percent)
@@ -5514,28 +5607,45 @@ async def _api_session_practice_execute(request: Request, mode: str) -> JSONResp
             decision,
         )
 
-    session = get_session(user_id, course_id)
-    try:
-        result = await asyncio.to_thread(
-            code_practice_service.execute_practice,
-            session.agent_state,
-            user_id=user_id,
-            course_id=course_id,
-            resource_id=body.get("resource_id", body.get("resourceId", "")),
-            problem_id=body.get("problem_id", body.get("problemId", "")),
-            language=body.get("language", "python"),
-            source_code=body.get("code", ""),
-            mode=mode,
-        )
-    except Exception as exc:
+    global_acquired = _CODE_EXECUTION_CAPACITY.acquire(blocking=False)
+    user_acquired = global_acquired and _CODE_EXECUTION_USER_CAPACITY.acquire(user_id)
+    if not global_acquired or not user_acquired:
+        if global_acquired:
+            _CODE_EXECUTION_CAPACITY.release()
         incr_metric(
             "code.execution_total",
             mode=mode,
             outcome="infrastructure_failure",
-            verdict="exception",
+            verdict="capacity_exceeded",
         )
-        log_event("code.execution.failed", level="error", mode=mode, error_type=type(exc).__name__)
-        raise
+        return _attach_rollout_header(_capacity_response("code_execution"), decision)
+
+    session = get_session(user_id, course_id)
+    try:
+        try:
+            result = await asyncio.to_thread(
+                code_practice_service.execute_practice,
+                session.agent_state,
+                user_id=user_id,
+                course_id=course_id,
+                resource_id=body.get("resource_id", body.get("resourceId", "")),
+                problem_id=body.get("problem_id", body.get("problemId", "")),
+                language=body.get("language", "python"),
+                source_code=body.get("code", ""),
+                mode=mode,
+            )
+        except Exception as exc:
+            incr_metric(
+                "code.execution_total",
+                mode=mode,
+                outcome="infrastructure_failure",
+                verdict="exception",
+            )
+            log_event("code.execution.failed", level="error", mode=mode, error_type=type(exc).__name__)
+            raise
+    finally:
+        _CODE_EXECUTION_USER_CAPACITY.release(user_id)
+        _CODE_EXECUTION_CAPACITY.release()
     # Submission receipts and lazy resource bindings are server state, not
     # browser state, and must survive a refresh before the event is reported.
     persist_session(session)
@@ -5602,24 +5712,35 @@ async def api_session_resources(request: Request) -> JSONResponse:
         "diagnostic_quiz",
     }:
         card_type_label = "invalid"
-    try:
-        result = await asyncio.to_thread(
-            resource_service.generate_current_node_resources,
-            user_id,
-            course_id,
-            node_id,
-            force,
-            card_type=card_type,
-        )
-    except Exception as exc:
+    global_acquired = _RESOURCE_GENERATION_CAPACITY.acquire(blocking=False)
+    user_acquired = global_acquired and _RESOURCE_GENERATION_USER_CAPACITY.acquire(user_id)
+    if not global_acquired or not user_acquired:
+        if global_acquired:
+            _RESOURCE_GENERATION_CAPACITY.release()
         incr_metric("resource.generate_total", outcome="failure", card_type=card_type_label)
-        log_event(
-            "resource.generate.failed",
-            level="error",
-            card_type=card_type_label,
-            error_type=type(exc).__name__,
-        )
-        raise
+        return _capacity_response("resource_generation")
+    try:
+        try:
+            result = await asyncio.to_thread(
+                resource_service.generate_current_node_resources,
+                user_id,
+                course_id,
+                node_id,
+                force,
+                card_type=card_type,
+            )
+        except Exception as exc:
+            incr_metric("resource.generate_total", outcome="failure", card_type=card_type_label)
+            log_event(
+                "resource.generate.failed",
+                level="error",
+                card_type=card_type_label,
+                error_type=type(exc).__name__,
+            )
+            raise
+    finally:
+        _RESOURCE_GENERATION_USER_CAPACITY.release(user_id)
+        _RESOURCE_GENERATION_CAPACITY.release()
     status_code = int(result.pop("status_code", 200))
     generation = result.get("generation") if isinstance(result.get("generation"), dict) else {}
     generation_status = str(generation.get("status") or result.get("status") or "")
@@ -5673,11 +5794,29 @@ async def api_ops_client_event(request: Request) -> JSONResponse:
     surface = str(body.get("surface") or "other").strip().lower()
     if surface not in _CLIENT_TELEMETRY_SURFACES:
         surface = "other"
-    if event == "frontend_exception":
+    authenticated = False
+    if is_production():
+        principal, auth_error = _access_principal(request)
+        authenticated = auth_error is None and bool((principal or {}).get("sub"))
+        public_auth_exception = event == "frontend_exception" and surface == "auth"
+        if not authenticated and not public_auth_exception:
+            return JSONResponse(
+                {"status": "authentication_required", "detail": "CLIENT_EVENT_AUTH_REQUIRED"},
+                status_code=401,
+                headers={"Cache-Control": "no-store"},
+            )
+    if event == "client_session_started":
+        incr_metric("frontend.session_total", surface=surface)
+    elif event == "frontend_exception":
         kind = str(body.get("kind") or "window").strip().lower()
         if kind not in _CLIENT_EXCEPTION_KINDS:
             kind = "window"
-        incr_metric("frontend.exception_total", surface=surface, kind=kind)
+        metric_name = (
+            "frontend.exception_total"
+            if authenticated or not is_production()
+            else "frontend.auth_public_exception_total"
+        )
+        incr_metric(metric_name, surface=surface, kind=kind)
     elif event == "refresh_recovery":
         outcome = str(body.get("outcome") or "").strip().lower()
         if outcome not in _CLIENT_RECOVERY_OUTCOMES:
@@ -5704,6 +5843,47 @@ async def api_ops_metrics(request: Request) -> JSONResponse:
     if not _ops_metrics_allowed(request):
         return JSONResponse({"detail": "NOT_FOUND"}, status_code=404)
     return JSONResponse(metrics_snapshot(), headers={"Cache-Control": "no-store"})
+
+
+def _production_readiness_status() -> tuple[bool, str]:
+    if not is_production():
+        return True, "development"
+    required_environment = ("PUBLIC_APP_URL", "EDUAGENT_OPS_TOKEN")
+    if any(not str(os.environ.get(name) or "").strip() for name in required_environment):
+        return False, "configuration"
+    try:
+        validate_security_configuration()
+    except Exception:
+        return False, "configuration"
+    if not _db_available or _db is None:
+        return False, "postgres"
+    try:
+        row = _db.execute("SELECT 1 AS ready").fetchone()
+        if not row:
+            return False, "postgres"
+        _get_auth()
+        _get_account_repo()
+    except Exception:
+        return False, "postgres"
+    try:
+        if redis_backend_status() != "redis" or not durable_redis_available():
+            return False, "redis"
+    except Exception:
+        return False, "redis"
+    return True, "ready"
+
+
+async def api_readiness(request: Request) -> JSONResponse:
+    ready, reason = await asyncio.to_thread(_production_readiness_status)
+    incr_metric("runtime.readiness_total", outcome="ready" if ready else "not_ready", reason=reason)
+    if ready:
+        return JSONResponse({"status": "ready"}, headers={"Cache-Control": "no-store"})
+    log_event("runtime.readiness.failed", level="warning", reason=reason)
+    return JSONResponse(
+        {"status": "not_ready"},
+        status_code=503,
+        headers={"Cache-Control": "no-store", "Retry-After": "5"},
+    )
 
 
 class SpaStaticFiles(StaticFiles):
@@ -5781,6 +5961,7 @@ app = Starlette(
         Route("/api/knowledge-graph", api_knowledge_graph, methods=["GET"]),
         Route("/api/ops/client-events", api_ops_client_event, methods=["POST"]),
         Route("/api/ops/metrics", api_ops_metrics, methods=["GET"]),
+        Route("/api/ready", api_readiness, methods=["GET"]),
         Route("/api/reset", api_reset, methods=["POST"]),
 
         # Compat/internal legacy learning endpoints.
@@ -5851,6 +6032,187 @@ def _compat_request_allowed(request: Request) -> bool:
     return not is_production() or _ops_token_matches(request)
 
 
+_CORE_RATE_LIMITERS: dict[tuple[str, int, int, str, int], RateLimiter] = {}
+_CORE_RATE_LIMITERS_LOCK = threading.Lock()
+
+
+def _positive_int_environment(name: str, default: int, *, maximum: int) -> int:
+    try:
+        return max(1, min(maximum, int(os.environ.get(name, str(default)))))
+    except (TypeError, ValueError):
+        return default
+
+
+def _core_rate_limit_policy(request: Request) -> Optional[tuple[str, int, int]]:
+    if not is_production():
+        enabled = str(os.environ.get("EDUAGENT_ENABLE_RATE_LIMITS") or "").strip().lower()
+        if enabled not in {"1", "true", "yes", "on"}:
+            return None
+    path = request.url.path
+    method = request.method.upper()
+    policy: Optional[tuple[str, int, int]] = None
+    if method == "GET" and path in {"/api/auth/captcha", "/api/auth/captcha-json"}:
+        policy = ("captcha", 10, 60)
+    elif method == "POST" and path == "/api/auth/login":
+        policy = ("login", 20, 60)
+    elif method == "POST" and path == "/api/auth/register":
+        policy = ("register", 3, 3600)
+    elif method == "POST" and path == "/api/auth/refresh":
+        policy = ("refresh", 30, 60)
+    elif method == "POST" and path == "/api/auth/password/forgot":
+        policy = ("password_forgot", 10, 3600)
+    elif method == "POST" and path == "/api/auth/password/reset":
+        policy = ("password_reset", 10, 3600)
+    elif method == "POST" and path == "/api/auth/email-verification/request":
+        policy = ("email_verification_request", 3, 3600)
+    elif method == "POST" and path == "/api/auth/email-verification/verify":
+        policy = ("email_verification_verify", 10, 3600)
+    elif method == "POST" and path == "/api/ops/client-events":
+        policy = ("client_events", 30, 60)
+    elif method == "POST" and path.endswith(("/tutor", "/tutor-stream")):
+        policy = ("tutor", 6, 60)
+    elif method == "GET" and "/resources/" in path and path.startswith("/api/sessions/"):
+        force = request.query_params.get("force", "false").lower() in {"1", "true", "yes"}
+        policy = ("resource_force", 2, 300) if force else ("resource", 12, 60)
+    elif method == "POST" and path.endswith("/practice/run"):
+        policy = ("practice_run", 10, 60)
+    elif method == "POST" and path.endswith("/practice/submit"):
+        policy = ("practice_submit", 5, 60)
+    elif method == "POST" and path.endswith("/replan"):
+        policy = ("replan", 6, 300)
+    elif method == "POST" and path.endswith("/events") and path.startswith("/api/sessions/"):
+        policy = ("learning_events", 120, 60)
+    elif method == "PATCH" and path.endswith("/assets") and path.startswith("/api/sessions/"):
+        policy = ("learning_assets", 30, 60)
+    if policy is None:
+        return None
+    name, default_requests, default_window = policy
+    key = name.upper()
+    requests = _positive_int_environment(
+        f"EDUAGENT_RATE_LIMIT_{key}_REQUESTS",
+        default_requests,
+        maximum=100_000,
+    )
+    window = _positive_int_environment(
+        f"EDUAGENT_RATE_LIMIT_{key}_WINDOW_SECONDS",
+        default_window,
+        maximum=86_400,
+    )
+    return name, requests, window
+
+
+def _rate_limit_subject(request: Request) -> str:
+    authorization = str(request.headers.get("authorization") or "")
+    if authorization.lower().startswith("bearer ") and authorization[7:].strip():
+        source = f"token:{authorization[7:].strip()}"
+    else:
+        source = f"ip:{_trusted_client_host(request)}"
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()
+
+
+def _policy_rate_limiter(name: str, requests: int, window: int) -> RateLimiter:
+    backend = str(os.environ.get("EDUAGENT_RATE_LIMIT_BACKEND") or "memory").strip().lower()
+    redis_client = None
+    if backend == "redis":
+        redis_client = get_redis()
+        if redis_client is None or (is_production() and redis_backend_status() != "redis"):
+            raise RateLimitBackendUnavailable("shared rate limiter unavailable")
+    elif backend != "memory":
+        raise RateLimitBackendUnavailable("invalid rate limiter backend")
+    cache_key = (name, requests, window, backend, id(redis_client))
+    with _CORE_RATE_LIMITERS_LOCK:
+        limiter = _CORE_RATE_LIMITERS.get(cache_key)
+        if limiter is None:
+            limiter = RateLimiter(
+                max_requests=requests,
+                window_seconds=window,
+                redis_client=redis_client,
+                namespace=name,
+            )
+            _CORE_RATE_LIMITERS[cache_key] = limiter
+        return limiter
+
+
+def _reset_core_rate_limiters() -> None:
+    with _CORE_RATE_LIMITERS_LOCK:
+        _CORE_RATE_LIMITERS.clear()
+
+
+def _request_body_limit(request: Request) -> Optional[int]:
+    if request.method.upper() not in {"POST", "PUT", "PATCH", "DELETE"}:
+        return None
+    path = request.url.path
+    if path == "/api/ops/client-events":
+        return 2 * 1024
+    if path.startswith("/api/auth/"):
+        return 16 * 1024
+    if path.startswith("/api/sessions/") and path.endswith("/events"):
+        return 32 * 1024
+    if path.startswith("/api/sessions/") and path.endswith(("/tutor", "/tutor-stream")):
+        return 64 * 1024
+    if path.startswith("/api/sessions/") and "/practice/" in path:
+        return 96 * 1024
+    if path.startswith("/api/sessions/") and path.endswith("/assets"):
+        return 128 * 1024
+    return 1024 * 1024
+
+
+async def _enforce_request_body_limit(request: Request) -> Optional[JSONResponse]:
+    limit = _request_body_limit(request)
+    if limit is None:
+        return None
+    raw_length = request.headers.get("content-length")
+    if raw_length:
+        try:
+            if int(raw_length) > limit:
+                raise ValueError("body too large")
+        except ValueError:
+            incr_metric("security.request_body_reject_total", surface=_request_surface(request.url.path))
+            return JSONResponse(
+                {"status": "invalid_request", "detail": "REQUEST_BODY_TOO_LARGE"},
+                status_code=413,
+                headers={"Cache-Control": "no-store"},
+            )
+    body = await request.body()
+    if len(body) > limit:
+        incr_metric("security.request_body_reject_total", surface=_request_surface(request.url.path))
+        return JSONResponse(
+            {"status": "invalid_request", "detail": "REQUEST_BODY_TOO_LARGE"},
+            status_code=413,
+            headers={"Cache-Control": "no-store"},
+        )
+    return None
+
+
+def _enforce_core_rate_limit(request: Request) -> Optional[JSONResponse]:
+    policy = _core_rate_limit_policy(request)
+    if policy is None:
+        return None
+    name, requests, window = policy
+    try:
+        decision = _policy_rate_limiter(name, requests, window).check(_rate_limit_subject(request))
+    except RateLimitBackendUnavailable:
+        incr_metric("security.rate_limit_backend_total", policy=name, outcome="unavailable")
+        return JSONResponse(
+            {"status": "temporarily_unavailable", "detail": "RATE_LIMIT_BACKEND_UNAVAILABLE"},
+            status_code=503,
+            headers={"Retry-After": "5", "Cache-Control": "no-store"},
+        )
+    headers = {
+        "X-RateLimit-Limit": str(decision.limit),
+        "X-RateLimit-Remaining": str(decision.remaining),
+    }
+    request.state.rate_limit_headers = headers
+    if decision.allowed:
+        return None
+    incr_metric("security.rate_limit_total", policy=name, outcome="blocked")
+    return JSONResponse(
+        {"status": "rate_limited", "detail": "RATE_LIMITED", "policy": name},
+        status_code=429,
+        headers={**headers, "Retry-After": str(decision.retry_after), "Cache-Control": "no-store"},
+    )
+
+
 class ObservabilityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         request_id = request.headers.get("x-request-id") or new_request_id()
@@ -5866,11 +6228,18 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         ):
             request.state.request_id = request_id
             try:
-                if path in _COMPAT_INTERNAL_PATHS and not _compat_request_allowed(request):
-                    incr_metric("release.internal_surface_block_total", surface="compat_api")
-                    response = JSONResponse({"detail": "NOT_FOUND"}, status_code=404)
+                rate_limit_response = _enforce_core_rate_limit(request)
+                if rate_limit_response is not None:
+                    response = rate_limit_response
                 else:
-                    response = await call_next(request)
+                    body_limit_response = await _enforce_request_body_limit(request)
+                    if body_limit_response is not None:
+                        response = body_limit_response
+                    elif path in _COMPAT_INTERNAL_PATHS and not _compat_request_allowed(request):
+                        incr_metric("release.internal_surface_block_total", surface="compat_api")
+                        response = JSONResponse({"detail": "NOT_FOUND"}, status_code=404)
+                    else:
+                        response = await call_next(request)
             except Exception as exc:
                 duration_ms = round((time.perf_counter() - started) * 1000, 3)
                 incr_metric(
@@ -5895,6 +6264,8 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
                 raise
 
             response.headers["X-Request-ID"] = request_id
+            for header, value in getattr(request.state, "rate_limit_headers", {}).items():
+                response.headers.setdefault(header, value)
             duration_ms = round((time.perf_counter() - started) * 1000, 3)
             incr_metric(
                 "http.request_total",

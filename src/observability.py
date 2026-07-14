@@ -210,6 +210,10 @@ def _rate(numerator: int, denominator: int) -> Optional[float]:
 def launch_metrics_snapshot() -> Dict[str, Any]:
     login_failed = metrics.counter_sum("auth.login_total", outcome="failure")
     login_total = metrics.counter_sum("auth.login_total")
+    login_infrastructure_failed = sum(
+        metrics.counter_sum("auth.login_total", outcome="failure", reason=reason)
+        for reason in ("session_persistence_unavailable", "storage_unavailable")
+    )
 
     resource_failed = metrics.counter_sum("resource.generate_total", outcome="failure")
     resource_total = metrics.counter_sum("resource.generate_total")
@@ -230,16 +234,29 @@ def launch_metrics_snapshot() -> Dict[str, Any]:
     task_ready_within_target = metrics.counter_sum("frontend.next_task_ready_total", outcome="within_5s")
     task_ready_over_target = metrics.counter_sum("frontend.next_task_ready_total", outcome="over_5s")
     task_ready_total = task_ready_within_target + task_ready_over_target
+    frontend_sessions = metrics.counter_sum("frontend.session_total")
+    frontend_exceptions = metrics.counter_sum("frontend.exception_total")
 
     completion_attempts = metrics.counter_sum("learning.node_completion_attempt_total")
     completion_accepted = metrics.counter_sum("learning.node_completion_total")
     completion_advanced = metrics.counter_sum("learning.node_completion_total", advanced="true")
+    mastery_mutations = metrics.counter_sum("learning_event.mastery_mutation_total")
+    attributed_mastery_mutations = metrics.counter_sum(
+        "learning_event.mastery_mutation_total",
+        outcome="attributed",
+    )
+    unattributed_mastery_mutations = metrics.counter_sum(
+        "learning_event.mastery_mutation_total",
+        outcome="unattributed",
+    )
 
     return {
         "login_failure": {
             "failed": login_failed,
+            "infrastructure_failed": login_infrastructure_failed,
             "total": login_total,
             "rate": _rate(login_failed, login_total),
+            "infrastructure_rate": _rate(login_infrastructure_failed, login_total),
         },
         "resource_failure": {
             "failed": resource_failed,
@@ -254,7 +271,9 @@ def launch_metrics_snapshot() -> Dict[str, Any]:
             "infrastructure_rate": _rate(code_infrastructure_failed, code_total),
         },
         "frontend_exceptions": {
-            "total": metrics.counter_sum("frontend.exception_total"),
+            "total": frontend_exceptions,
+            "sessions": frontend_sessions,
+            "rate": _rate(frontend_exceptions, frontend_sessions),
         },
         "next_task_ready": {
             "within_5s": task_ready_within_target,
@@ -266,6 +285,8 @@ def launch_metrics_snapshot() -> Dict[str, Any]:
             "attempted": completion_attempts,
             "accepted": completion_accepted,
             "rate": _rate(completion_accepted, completion_attempts),
+            "definition": "accepted terminal event submissions / terminal event submissions",
+            "authoritative_completion_rate_source": "session event history learning_funnel",
             "advanced": completion_advanced,
             "advanced_rate": _rate(completion_advanced, completion_accepted),
             "total": completion_accepted,
@@ -274,6 +295,12 @@ def launch_metrics_snapshot() -> Dict[str, Any]:
             "successful": refresh_success,
             "total": refresh_total,
             "rate": _rate(refresh_success, refresh_total),
+        },
+        "mastery_attribution_integrity": {
+            "attributed": attributed_mastery_mutations,
+            "unattributed": unattributed_mastery_mutations,
+            "total": mastery_mutations,
+            "rate": _rate(attributed_mastery_mutations, mastery_mutations),
         },
     }
 

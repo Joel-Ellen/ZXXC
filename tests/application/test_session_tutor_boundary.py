@@ -105,6 +105,7 @@ async def test_session_tutor_stream_flag_uses_canonical_endpoint(monkeypatch):
     response = await server.api_session_tutor(_request({"question": "Explain trees", "stream": True}))
 
     assert response.__class__.__name__ == "EventSourceResponse"
+    assert response.headers["x-accel-buffering"] == "no"
     assert called == {}
     assert response.body_iterator is not None
 

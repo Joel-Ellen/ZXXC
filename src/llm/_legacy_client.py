@@ -564,7 +564,7 @@ def create_llm_client_from_env() -> LLMClient:
     else:
         raise RuntimeError(
             "未检测到可用的大模型 API Key。请设置以下环境变量之一:\n"
-            "  方案一 (DashScope): export DASHSCOPE_API_KEY=sk-xxx\n"
+            "  方案一 (DashScope): export DASHSCOPE_API_KEY=your-dashscope-api-key\n"
             "  方案二 (iFlyTek):   export SPARK_APP_ID=xxx SPARK_API_KEY=xxx SPARK_API_SECRET=xxx"
         )
     return LLMClient(config)

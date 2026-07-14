@@ -8,6 +8,7 @@ import "./styles/base.css";
 import "./styles/motion.css";
 import { initTheme } from "./composables/useTheme.js";
 import { initErrorMonitoring } from "./services/errorMonitoring.js";
+import { reportClientSessionStarted } from "./services/clientTelemetry.js";
 
 initTheme();
 
@@ -17,6 +18,7 @@ async function bootstrap() {
   app.use(router);
   await initErrorMonitoring(app, router);
   app.mount("#app");
+  void reportClientSessionStarted();
 }
 
 void bootstrap();

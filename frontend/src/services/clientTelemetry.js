@@ -1,6 +1,13 @@
 const CLIENT_EVENT_ENDPOINT = "/api/ops/client-events";
+const ACCESS_TOKEN_KEY = "access_token";
 const LOGIN_READY_MARKER = "eduagent.login_ready_started_at";
-const ALLOWED_EVENTS = new Set(["frontend_exception", "next_task_ready", "refresh_recovery"]);
+const SESSION_REPORTED_MARKER = "eduagent.client_session_reported";
+const ALLOWED_EVENTS = new Set([
+  "client_session_started",
+  "frontend_exception",
+  "next_task_ready",
+  "refresh_recovery",
+]);
 const ALLOWED_SURFACES = new Set(["app", "auth", "learn", "other"]);
 const ALLOWED_KINDS = new Set(["api", "bootstrap", "unhandled_rejection", "vue", "window"]);
 const ALLOWED_OUTCOMES = new Set(["failure", "success"]);
@@ -31,6 +38,7 @@ function normalizedPayload(event, details = {}) {
   const surface = ALLOWED_SURFACES.has(details.surface)
     ? details.surface
     : currentTelemetrySurface();
+  if (event === "client_session_started") return { event, surface };
   if (event === "frontend_exception") {
     return {
       event,
@@ -77,13 +85,45 @@ export function reportNextTaskReady({
 export function reportClientMetric(event, details = {}) {
   const payload = normalizedPayload(event, details);
   if (!payload || typeof globalThis.fetch !== "function") return Promise.resolve(false);
+  let accessToken = "";
+  try {
+    accessToken = globalThis.localStorage?.getItem(ACCESS_TOKEN_KEY) || "";
+  } catch {
+    accessToken = "";
+  }
   return globalThis.fetch(CLIENT_EVENT_ENDPOINT, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
     body: JSON.stringify(payload),
     credentials: "same-origin",
     keepalive: true,
   }).then((response) => response.ok).catch(() => false);
+}
+
+export function reportClientSessionStarted({
+  storage = globalThis.sessionStorage,
+  surface = currentTelemetrySurface(),
+} = {}) {
+  try {
+    if (!globalThis.localStorage?.getItem(ACCESS_TOKEN_KEY)) return Promise.resolve(false);
+    if (storage?.getItem(SESSION_REPORTED_MARKER)) return Promise.resolve(false);
+    storage?.setItem(SESSION_REPORTED_MARKER, "1");
+  } catch {
+    return Promise.resolve(false);
+  }
+  return reportClientMetric("client_session_started", { surface }).then((accepted) => {
+    if (!accepted) {
+      try {
+        storage?.removeItem(SESSION_REPORTED_MARKER);
+      } catch {
+        // A storage failure should not affect the application session.
+      }
+    }
+    return accepted;
+  });
 }
 
 export function createRefreshRecoveryReporter(options = {}) {

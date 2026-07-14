@@ -78,6 +78,113 @@ const mockQuizResource = Object.freeze({
   },
 });
 
+const mockRetestQuizResource = Object.freeze({
+  ...mockQuizResource,
+  resource_id: "quiz-arrays-retest-v2",
+  structured_payload: {
+    ...mockQuizResource.structured_payload,
+    title: "数组基础复测",
+  },
+});
+
+const mockCodeResource = Object.freeze({
+  resource_id: "code-arrays-v1",
+  node_id: "arrays",
+  card_type: "code_snippet",
+  resource_type: "code_snippet",
+  body_markdown: "```python\ndef first_value(values):\n    return values[0]\n```",
+  structured_payload: {
+    render_type: "code_snippet",
+    title: "读取数组首项",
+    scenario: "实现一个返回数组首项的函数。",
+    language: "python",
+    code: "def first_value(values):\n    return values[0]",
+    practice: {
+      problem_id: "arrays-first-value",
+      language: "python",
+      starter_code: "def first_value(values):\n    pass\n",
+    },
+  },
+});
+
+const mockConceptResource = Object.freeze({
+  resource_id: "concept-arrays-v1",
+  node_id: "arrays",
+  card_type: "concept_map",
+  resource_type: "concept_map",
+  body_markdown: "数组使用连续索引定位元素。",
+  structured_payload: {
+    render_type: "concept_map",
+    title: "数组索引讲解",
+    summary: "从零开始的索引把位置映射到数组元素。",
+    objectives: ["识别有效索引范围"],
+  },
+});
+
+const mockReviewPracticeResource = Object.freeze({
+  resource_id: "practice-arrays-review-v1",
+  node_id: "arrays",
+  card_type: "interactive_exercise",
+  resource_type: "interactive_exercise",
+  body_markdown: "",
+  structured_payload: {
+    render_type: "interactive_exercise",
+    title: "数组索引定向练习",
+    goal: "修正数组起始索引的概念偏差。",
+    prompt: "选择数组的第一个有效索引。",
+    questions: [{
+      id: "arrays-targeted-q1",
+      prompt: "数组的第一个有效索引是什么？",
+      options: ["0", "1", "-1"],
+      explanation: "多数编程语言的数组索引从 0 开始。",
+    }],
+    hints: ["从最常见的零基索引规则开始判断。"],
+  },
+});
+
+const mockReviewItem = Object.freeze({
+  review_item_id: "review-arrays-q1",
+  source_event_id: "lesson-failure-e2e",
+  source_resource_id: "quiz-arrays-v1",
+  review_kind: "diagnostic_quiz",
+  node_id: "arrays",
+  node_title: "数组基础",
+  question_id: "arrays-q1",
+  question_prompt: "数组的第一个索引通常是什么？",
+  error_type: "concept_understanding",
+  original_answer: "1",
+  original_answer_index: 1,
+  correct_answer: "0",
+  correct_answer_index: 0,
+  explanation: "多数编程语言使用从 0 开始的数组索引。",
+  status: "due",
+  phase: "material_review",
+  attempt_count: 1,
+  next_review_at: "2026-07-13T09:00:00Z",
+  updated_at: "2026-07-13T08:30:00Z",
+  recommended_materials: [],
+});
+
+const mockPracticeProblem = Object.freeze({
+  status: "ok",
+  problem_id: "arrays-first-value",
+  version: "1",
+  title: "读取数组首项",
+  prompt: "实现 first_value(values)，返回数组中的第一项。",
+  constraints: "输入数组至少包含一个元素。",
+  language: "python",
+  starter_code: "def first_value(values):\n    pass\n",
+  public_test_count: 1,
+  hidden_test_count: 1,
+  public_tests: [{
+    id: "public-1",
+    name: "公开测试 1",
+    input: [[3, 5, 8]],
+    expected: 3,
+    visibility: "public",
+  }],
+});
+
 const emptyAssets = () => ({
   tutor_history: {},
   drafts: {},
@@ -140,22 +247,46 @@ function courseIdFromSessionPath(pathname) {
 }
 
 export async function installMockApi(page, options = {}) {
+  const arrayResources = [
+    ...(options.withQuiz ? [mockQuizResource] : []),
+    ...(options.withCodePractice ? [mockCodeResource] : []),
+    ...(options.withReviewItem ? [mockReviewPracticeResource] : []),
+  ];
   const state = {
     authenticated: options.authenticated ?? false,
     failLoginAttempts: options.failLoginAttempts ?? 0,
+    failCourseCatalogAttempts: options.failCourseCatalogAttempts ?? 0,
+    failTutorAttempts: options.failTutorAttempts ?? 0,
+    disconnectTutorAttempts: options.disconnectTutorAttempts ?? 0,
+    failResourceGenerationAttempts: options.failResourceGenerationAttempts ?? 0,
+    failPracticeRunAttempts: options.failPracticeRunAttempts ?? 0,
+    failPracticeSubmitAttempts: options.failPracticeSubmitAttempts ?? 0,
+    failAnswerSubmitAttempts: options.failAnswerSubmitAttempts ?? 0,
+    failReviewDashboardAttempts: options.failReviewDashboardAttempts ?? 0,
+    failPrepareRetestAttempts: options.failPrepareRetestAttempts ?? 0,
+    failRetestResourceAttempts: options.failRetestResourceAttempts ?? 0,
     activeCourseId: options.activeCourseId || "course-a",
     enrolledCourseIds: new Set(options.enrolledCourseIds || mockCourses.map((course) => course.course_id)),
     loginRequests: [],
+    courseCatalogRequests: [],
     courseActions: [],
     tutorRequests: [],
+    practiceRequests: { run: [], submit: [] },
+    learningEventRequests: [],
     learningEvents: [],
+    reviewDashboardRequests: [],
+    reviewStartRequests: [],
+    prepareRetestRequests: [],
+    retestCreationCount: 0,
+    retestResultsByPracticeEvent: new Map(),
     clientEvents: [],
     assetPatches: [],
+    resourceRequests: [],
     unhandledRequests: [],
     assets: emptyAssets(),
     assetRevision: 1,
-    resourcesByNode: options.withQuiz ? { arrays: [mockQuizResource] } : {},
-    reviewItems: [],
+    resourcesByNode: arrayResources.length ? { arrays: arrayResources } : {},
+    reviewItems: options.withReviewItem ? [{ ...mockReviewItem }] : [],
   };
 
   await page.route("**/api/**", async (route) => {
@@ -254,6 +385,11 @@ export async function installMockApi(page, options = {}) {
     }
 
     if (method === "GET" && pathname === "/api/courses") {
+      state.courseCatalogRequests.push({ search: url.searchParams.get("search") || "" });
+      if (state.failCourseCatalogAttempts > 0) {
+        state.failCourseCatalogAttempts -= 1;
+        return json(route, { detail: "课程目录暂时不可用，请原位重试。" }, 503);
+      }
       return json(route, { courses: mockCourses });
     }
 
@@ -341,7 +477,31 @@ export async function installMockApi(page, options = {}) {
 
     if (method === "POST" && /\/api\/sessions\/[^/]+\/events$/.test(pathname)) {
       const body = requestBody(request);
+      state.learningEventRequests.push(body);
+      if (body.event_type === "answer_submitted" && state.failAnswerSubmitAttempts > 0) {
+        state.failAnswerSubmitAttempts -= 1;
+        return json(route, { detail: "答案暂时无法保存，请原位重试。" }, 503);
+      }
       state.learningEvents.push(body);
+      if (body.event_type === "answer_submitted" && body.result?.review_item_id) {
+        const correct = body.result.answer_index === mockReviewItem.correct_answer_index;
+        const practiceVerification = {
+          verified: true,
+          correct,
+          reason: correct ? "verified_targeted_practice_correct" : "verified_targeted_practice_incorrect",
+          review_item_id: body.result.review_item_id,
+          resource_id: body.resource_id,
+          question_id: body.question_id,
+          selected_index: body.result.answer_index,
+        };
+        return json(route, {
+          accepted: true,
+          event_id: body.event_id,
+          event: { ...body, practice_verification: practiceVerification },
+          practice_verification: practiceVerification,
+          knowledge_mastery: {},
+        });
+      }
       if (body.event_type === "lesson_completed" || body.event_type === "review_completed") {
         const answers = Array.isArray(body.result?.answers) ? body.result.answers : [];
         const questionResults = answers.map((answer, index) => ({
@@ -407,10 +567,146 @@ export async function installMockApi(page, options = {}) {
 
     if (method === "GET" && /\/api\/sessions\/[^/]+\/resources\/[^/]+$/.test(pathname)) {
       const nodeId = decodeURIComponent(pathname.split("/").at(-1));
+      const cardType = url.searchParams.get("card_type") || "";
+      state.resourceRequests.push({
+        nodeId,
+        cardType,
+        force: url.searchParams.get("force") === "true",
+      });
+      if (cardType && state.failResourceGenerationAttempts > 0) {
+        state.failResourceGenerationAttempts -= 1;
+        return json(route, { detail: "资源服务暂时不可用，请原位重试。" }, 503);
+      }
+      if (cardType === "diagnostic_quiz" && state.failRetestResourceAttempts > 0) {
+        state.failRetestResourceAttempts -= 1;
+        return json(route, { detail: "复测题资源暂时不可用，请原位重试。" }, 503);
+      }
+      if (options.generateResourceOnRequest && cardType === "concept_map") {
+        state.resourcesByNode[nodeId] = [mockConceptResource];
+      }
+      if (options.withReviewItem && cardType === "diagnostic_quiz" && state.retestCreationCount > 0) {
+        const existing = state.resourcesByNode[nodeId] || [];
+        state.resourcesByNode[nodeId] = [
+          ...existing.filter((resource) => resource.resource_type !== "diagnostic_quiz"),
+          mockRetestQuizResource,
+        ];
+      }
       return json(route, { status: "already_exists", resources: state.resourcesByNode[nodeId] || [] });
     }
 
+    if (method === "GET" && /\/api\/sessions\/[^/]+\/practice\/problems\/[^/]+$/.test(pathname)) {
+      return json(route, { status: "ok", problem: mockPracticeProblem });
+    }
+
+    if (method === "POST" && /\/api\/sessions\/[^/]+\/practice\/(run|submit)$/.test(pathname)) {
+      const mode = pathname.endsWith("/submit") ? "submit" : "run";
+      const body = requestBody(request);
+      state.practiceRequests[mode].push(body);
+      const failureKey = mode === "submit" ? "failPracticeSubmitAttempts" : "failPracticeRunAttempts";
+      if (state[failureKey] > 0) {
+        state[failureKey] -= 1;
+        return json(route, {
+          status: "sandbox_unavailable",
+          verdict: "sandbox_unavailable",
+          mode,
+          message: "隔离运行时暂时不可用，请原位重试。",
+          resource_id: body.resource_id,
+          problem_id: mockPracticeProblem.problem_id,
+          problem_version: mockPracticeProblem.version,
+        }, 503);
+      }
+      const hiddenTotal = mode === "submit" ? 1 : 0;
+      return json(route, {
+        status: "ok",
+        mode,
+        verdict: "accepted",
+        submission_id: mode === "submit" ? "submission-e2e-1" : "",
+        message: mode === "submit" ? "全部测试通过。" : "公开测试通过。",
+        resource_id: body.resource_id,
+        node_id: "arrays",
+        problem_id: mockPracticeProblem.problem_id,
+        problem_version: mockPracticeProblem.version,
+        runtime_ms: 4.2,
+        memory_kb: 768,
+        summary: {
+          passed: 1 + hiddenTotal,
+          total: 1 + hiddenTotal,
+          public_passed: 1,
+          public_total: 1,
+          hidden_passed: hiddenTotal,
+          hidden_total: hiddenTotal,
+        },
+        tests: [{
+          id: "public-1",
+          name: "公开测试 1",
+          passed: true,
+          verdict: "accepted",
+          visibility: "public",
+          input: [[3, 5, 8]],
+          expected: 3,
+          actual: 3,
+        }],
+      });
+    }
+
+    if (method === "POST" && /\/api\/sessions\/[^/]+\/review\/items\/[^/]+\/start$/.test(pathname)) {
+      const reviewItemId = decodeURIComponent(pathname.split("/").at(-2));
+      state.reviewStartRequests.push({ reviewItemId });
+      const reviewItem = state.reviewItems.find((item) => item.review_item_id === reviewItemId);
+      if (!reviewItem) {
+        return json(route, { status: "review_item_not_found", detail: "复习项目不存在。" }, 404);
+      }
+      Object.assign(reviewItem, { status: "in_progress", phase: "material_review" });
+      return json(route, {
+        status: "ok",
+        review_item: reviewItem,
+        learning_task: {
+          node_id: reviewItem.node_id,
+          phase: "material_review",
+          focus_resource_type: "interactive_exercise",
+        },
+      });
+    }
+
+    if (method === "POST" && /\/api\/sessions\/[^/]+\/review\/items\/[^/]+\/prepare-retest$/.test(pathname)) {
+      const reviewItemId = decodeURIComponent(pathname.split("/").at(-2));
+      const body = requestBody(request);
+      state.prepareRetestRequests.push({ reviewItemId, body });
+      if (state.failPrepareRetestAttempts > 0) {
+        state.failPrepareRetestAttempts -= 1;
+        return json(route, { detail: "复测生成暂时不可用，请原位重试。" }, 503);
+      }
+      const practiceEventId = String(body.practice_event_id || "");
+      if (!practiceEventId) {
+        return json(route, { status: "targeted_practice_evidence_required", detail: "缺少定向练习凭据。" }, 409);
+      }
+      let result = state.retestResultsByPracticeEvent.get(practiceEventId);
+      const idempotent = Boolean(result);
+      if (!result) {
+        state.retestCreationCount += 1;
+        const reviewItem = state.reviewItems.find((item) => item.review_item_id === reviewItemId);
+        if (reviewItem) Object.assign(reviewItem, { status: "in_progress", phase: "retest" });
+        result = {
+          status: "ok",
+          review_item: reviewItem,
+          learning_task: {
+            node_id: reviewItem?.node_id || "arrays",
+            phase: "retest",
+            focus_resource_type: "diagnostic_quiz",
+            retest_resource_id: mockRetestQuizResource.resource_id,
+          },
+        };
+        state.retestResultsByPracticeEvent.set(practiceEventId, result);
+      }
+      return json(route, { ...result, idempotent });
+    }
+
     if (method === "GET" && /\/api\/sessions\/[^/]+\/review$/.test(pathname)) {
+      state.reviewDashboardRequests.push({ pathname });
+      if (state.failReviewDashboardAttempts > 0) {
+        state.failReviewDashboardAttempts -= 1;
+        return json(route, { detail: "复习队列暂时不可用，请原位重试。" }, 503);
+      }
       const hasReview = state.reviewItems.length > 0;
       return json(route, {
         status: "ok",
@@ -449,6 +745,21 @@ export async function installMockApi(page, options = {}) {
     if (method === "POST" && /\/api\/sessions\/[^/]+\/tutor$/.test(pathname)) {
       const body = requestBody(request);
       state.tutorRequests.push(body);
+      if (state.disconnectTutorAttempts > 0) {
+        state.disconnectTutorAttempts -= 1;
+        return route.fulfill({
+          status: 200,
+          headers: {
+            "content-type": "text/event-stream; charset=utf-8",
+            "cache-control": "no-cache",
+          },
+          body: 'event: token\ndata: {"token":"回答尚未完成。"}\n\n',
+        });
+      }
+      if (state.failTutorAttempts > 0) {
+        state.failTutorAttempts -= 1;
+        return json(route, { detail: "Tutor 暂时不可用，请原位重试。" }, 503);
+      }
       return route.fulfill({
         status: 200,
         headers: {

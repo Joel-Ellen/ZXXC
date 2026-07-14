@@ -708,6 +708,7 @@ const canvasMounted = ref(false);
 const selectedTextByResource = ref({});
 const learningAssets = useLearningAssetsStore();
 const restoredCanvasLayoutKey = ref("");
+const restoredReviewPracticeKey = ref("");
 const dirtyCanvasLayoutKeys = new Set();
 const restoredQuizProgressKeys = new Set();
 const dirtyQuizProgressKeys = new Set();
@@ -790,6 +791,7 @@ watch(
     }
 
     restoreCanvasLayout();
+    restoreReviewPracticeProgress();
     void restoreContentScrollPosition();
   },
   { immediate: true },
@@ -851,6 +853,7 @@ watch(
     observedResourceId.value = "";
     selectedTextByResource.value = {};
     restoredCanvasLayoutKey.value = "";
+    restoredReviewPracticeKey.value = "";
   },
   { flush: "sync" },
 );
@@ -864,6 +867,8 @@ watch(
     reviewPracticeError.value = "";
     reviewPracticeEventId.value = "";
     reviewPracticeStartedAt.value = 0;
+    restoredReviewPracticeKey.value = "";
+    void nextTick(() => restoreReviewPracticeProgress());
   },
   { flush: "sync" },
 );
@@ -873,6 +878,7 @@ watch(
   () => {
     restoreCanvasLayout();
     restoreQuizProgress(quizResourceId.value);
+    restoreReviewPracticeProgress();
     void restoreContentScrollPosition();
   },
 );
@@ -894,6 +900,7 @@ onMounted(async () => {
   canvasMounted.value = true;
   await nextTick();
   observeResource(activeCardId.value);
+  restoreReviewPracticeProgress();
   await restoreContentScrollPosition();
 });
 
@@ -1690,6 +1697,91 @@ function reviewPracticeQuestion(card) {
   return exerciseQuestions(card)[0] || null;
 }
 
+function reviewPracticeProgressCard() {
+  return props.cards.find((card) => (
+    resourceType(card) === "interactive_exercise"
+    && exerciseQuestions(card).length > 0
+  )) || null;
+}
+
+function reviewPracticeProgressKey(card = reviewPracticeProgressCard()) {
+  const session = String(props.sessionId || "").trim();
+  const node = String(props.currentNode || "").trim();
+  const item = String(props.reviewItemId || "").trim();
+  const resource = resourceId(card);
+  if (!session || !node || !item || !resource) return "";
+  return `review-practice:${node}:${item}:${resource}`;
+}
+
+function persistReviewPracticeProgress(card = reviewPracticeProgressCard()) {
+  const question = reviewPracticeQuestion(card);
+  const key = reviewPracticeProgressKey(card);
+  if (!question || !key || String(learningAssets.sessionId || "") !== String(props.sessionId || "")) return;
+  learningAssets.write("quiz_progress", key, {
+    kind: "review_practice",
+    node_id: String(props.currentNode || ""),
+    resource_id: resourceId(card),
+    review_item_id: String(props.reviewItemId || ""),
+    question_id: String(question.id || ""),
+    selected_option_index: Number.isInteger(reviewPracticeAnswerIndex.value)
+      ? reviewPracticeAnswerIndex.value
+      : null,
+    attempt_number: Math.max(1, Number(reviewPracticeAttemptNumber.value) || 1),
+    used_hint: Boolean(revealedHintsByResource.value[resourceId(card)]),
+    practice_event_id: String(reviewPracticeEventId.value || ""),
+    error: String(reviewPracticeError.value || ""),
+    updated_at: Date.now(),
+  });
+}
+
+function restoreReviewPracticeProgress() {
+  if (!props.reviewItemId || props.reviewPhase !== "material_review") return;
+  const card = reviewPracticeProgressCard();
+  const question = reviewPracticeQuestion(card);
+  const key = reviewPracticeProgressKey(card);
+  if (!card || !question || !key) return;
+  const restoreKey = `${key}:${learningAssets.hydrated ? "remote" : "cache"}`;
+  if (restoredReviewPracticeKey.value === restoreKey) return;
+  restoredReviewPracticeKey.value = restoreKey;
+
+  const progress = learningAssets.read("quiz_progress", key, null);
+  if (!progress || typeof progress !== "object" || Array.isArray(progress)) return;
+  if (
+    progress.kind !== "review_practice"
+    || String(progress.node_id || "") !== String(props.currentNode || "")
+    || String(progress.resource_id || "") !== resourceId(card)
+    || String(progress.review_item_id || "") !== String(props.reviewItemId || "")
+    || String(progress.question_id || "") !== String(question.id || "")
+  ) {
+    return;
+  }
+
+  const selectedOptionIndex = Number(progress.selected_option_index);
+  reviewPracticeAnswerIndex.value = Number.isInteger(selectedOptionIndex)
+    && selectedOptionIndex >= 0
+    && selectedOptionIndex < question.options.length
+    ? selectedOptionIndex
+    : null;
+  reviewPracticeAttemptNumber.value = Math.max(1, Number(progress.attempt_number) || 1);
+  reviewPracticeEventId.value = String(progress.practice_event_id || "");
+  reviewPracticeError.value = String(progress.error || "");
+  reviewPracticeStartedAt.value = reviewPracticeAnswerIndex.value === null ? 0 : Date.now();
+  if (progress.used_hint) {
+    revealedHintsByResource.value = {
+      ...revealedHintsByResource.value,
+      [resourceId(card)]: Math.max(1, Number(revealedHintsByResource.value[resourceId(card)]) || 0),
+    };
+  }
+}
+
+function clearReviewPracticeProgress(card = reviewPracticeProgressCard()) {
+  const key = reviewPracticeProgressKey(card);
+  if (key && String(learningAssets.sessionId || "") === String(props.sessionId || "")) {
+    learningAssets.remove("quiz_progress", key);
+  }
+  restoredReviewPracticeKey.value = "";
+}
+
 function reviewPracticeDomToken(card) {
   return `${props.reviewItemId}-${resourceId(card)}`.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
@@ -1715,6 +1807,7 @@ function selectReviewPracticeAnswer(card, optionIndex) {
   }
   reviewPracticeAnswerIndex.value = optionIndex;
   reviewPracticeError.value = "";
+  persistReviewPracticeProgress(card);
   emit("answer-selected", {
     resourceId: resourceId(card),
     questionId: String(question.id),
@@ -1755,18 +1848,24 @@ function submitReviewPractice(card) {
     practiceEventId: reviewPracticeEventId.value,
     onPracticeRecorded: (eventId) => {
       reviewPracticeEventId.value = String(eventId || "");
+      persistReviewPracticeProgress(card);
     },
     onIncorrect: () => {
       reviewPracticeSubmitting.value = false;
       reviewPracticeAttemptNumber.value += 1;
       reviewPracticeEventId.value = "";
       reviewPracticeError.value = "答案尚未通过验证。请回看条件和边界后重新选择。";
+      persistReviewPracticeProgress(card);
     },
     onFailure: (error) => {
       reviewPracticeSubmitting.value = false;
       reviewPracticeError.value = error?.response?.data?.detail
         || error?.message
         || "练习提交失败，请原位重试。";
+      persistReviewPracticeProgress(card);
+    },
+    onPrepared: () => {
+      clearReviewPracticeProgress(card);
     },
   });
 }
@@ -1792,6 +1891,9 @@ function requestExerciseHint(card) {
     ...revealedHintsByResource.value,
     [id]: nextHintIndex + 1,
   };
+  if (props.reviewItemId && props.reviewPhase === "material_review") {
+    persistReviewPracticeProgress(card);
+  }
   emit("hint-requested", {
     resourceId: id,
     attemptNumber: 1,

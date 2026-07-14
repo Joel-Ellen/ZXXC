@@ -17,15 +17,27 @@ services:
   # 主应用 — EduAgent 后端
   # =========================================================================
   app:
+    image: ${EDUAGENT_IMAGE:-eduagent-local:dev}
     build:
       context: .
       args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
         VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
         VITE_SENTRY_ENVIRONMENT: ${VITE_SENTRY_ENVIRONMENT:-production}
         VITE_SENTRY_RELEASE: ${VITE_SENTRY_RELEASE:-}
         VITE_SENTRY_TRACES_SAMPLE_RATE: ${VITE_SENTRY_TRACES_SAMPLE_RATE:-0.05}
     container_name: edu-agent-app
     restart: unless-stopped
+    init: true
+    user: "10001:10001"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=256m,mode=1777
     ports:
       - "127.0.0.1:8800:8800"          # 仅本地访问，由宿主机 Nginx 代理
     environment:
@@ -36,6 +48,11 @@ services:
       - EDUAGENT_CODE_PRACTICE_ROLLOUT_PERCENT=${EDUAGENT_CODE_PRACTICE_ROLLOUT_PERCENT:-0}
       - EDUAGENT_CODE_PRACTICE_ROLLOUT_ALLOWLIST=${EDUAGENT_CODE_PRACTICE_ROLLOUT_ALLOWLIST:-}
       - EDUAGENT_CODE_PRACTICE_ROLLOUT_DENYLIST=${EDUAGENT_CODE_PRACTICE_ROLLOUT_DENYLIST:-}
+      - EDUAGENT_APP_ACCESS_ROLLOUT_PERCENT=${EDUAGENT_APP_ACCESS_ROLLOUT_PERCENT:-0}
+      - EDUAGENT_APP_ACCESS_ROLLOUT_ALLOWLIST=${EDUAGENT_APP_ACCESS_ROLLOUT_ALLOWLIST:-}
+      - EDUAGENT_APP_ACCESS_ROLLOUT_DENYLIST=${EDUAGENT_APP_ACCESS_ROLLOUT_DENYLIST:-}
+      - EDUAGENT_RATE_LIMIT_BACKEND=redis
+      - EDUAGENT_TRUST_PROXY_HEADERS=true
       - EDUAGENT_ENABLE_COMPAT_API=false
       - EDUAGENT_ENABLE_PUBLIC_METRICS=false
       # ── LLM API Keys ──
@@ -50,13 +67,16 @@ services:
       - EDUAGENT_RESOURCE_LLM_PARALLELISM=${EDUAGENT_RESOURCE_LLM_PARALLELISM:-3}
       # ── 数据库连接 ──
       - DATABASE_URL=postgresql://eduagent:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/eduagent
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379/0
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=${NEO4J_USER:-neo4j}
-      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-EduAgent2024!}
-      - ES_HOST=http://elasticsearch:9200
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:?NEO4J_PASSWORD is required}
+      - ES_HOSTS=http://elasticsearch:9200
       - MILVUS_HOST=milvus-standalone
       - MILVUS_PORT=19530
+      - ENROLLMENT_STATE_PATH=/app/data/enrollments.json
+      - USER_PROFILE_STATE_PATH=/app/data/user_profiles.json
+      - ACCOUNT_STATE_PATH=/app/data/account.json
       # ── HuggingFace 镜像 ──
       - HF_ENDPOINT=https://hf-mirror.com
       - SMTP_HOST=${SMTP_HOST:-}
@@ -76,8 +96,10 @@ services:
       elasticsearch:
         condition: service_healthy
     volumes:
-      - ./backups:/app/backups
-      - ./logs:/app/logs
+      - app-data:/app/data
+      - app-cache:/app/cache
+      - app-backups:/app/backups
+      - app-logs:/app/logs
     networks:
       - edu-agent-net
 
@@ -101,11 +123,13 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -123,7 +147,7 @@ services:
       - "127.0.0.1:7474:7474"          # HTTP (仅本地)
       - "127.0.0.1:7687:7687"          # Bolt (仅本地)
     environment:
-      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:-EduAgent2024!}
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:?NEO4J_PASSWORD is required}
       - NEO4J_PLUGINS=["apoc"]
       - NEO4J_server_memory_heap_initial__size=256m
       - NEO4J_server_memory_heap_max__size=512m
@@ -132,7 +156,7 @@ services:
       - neo4j-data:/data
       - neo4j-logs:/logs
     healthcheck:
-      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "${NEO4J_PASSWORD:-EduAgent2024!}", "RETURN 1"]
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "${NEO4J_PASSWORD:?NEO4J_PASSWORD is required}", "RETURN 1"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -194,8 +218,8 @@ services:
     container_name: edu-agent-minio
     restart: unless-stopped
     environment:
-      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
-      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin2024}
+      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY is required}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is required}
     volumes:
       - minio-data:/minio_data
     command: minio server /minio_data --console-address ":9001"
@@ -220,8 +244,8 @@ services:
     environment:
       - ETCD_ENDPOINTS=etcd:2379
       - MINIO_ADDRESS=minio:9000
-      - MINIO_ACCESS_KEY_ID=${MINIO_ACCESS_KEY:-minioadmin}
-      - MINIO_SECRET_ACCESS_KEY=${MINIO_SECRET_KEY:-minioadmin2024}
+      - MINIO_ACCESS_KEY_ID=${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY is required}
+      - MINIO_SECRET_ACCESS_KEY=${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is required}
     ports:
       - "127.0.0.1:19530:19530"
       - "127.0.0.1:9091:9091"
@@ -244,6 +268,10 @@ services:
 # 命名卷
 # ============================================================================
 volumes:
+  app-data:
+  app-cache:
+  app-backups:
+  app-logs:
   postgres-data:
   redis-data:
   neo4j-data:

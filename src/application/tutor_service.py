@@ -7,11 +7,13 @@ import asyncio
 import concurrent.futures
 import json
 import os
+import threading
 import time
 from typing import Any, AsyncIterator, Dict, Optional
 
 from src.agents.tutor_node import TutorInput
 from src.api_models.tutor_request import TutorRequest
+from src.auth.rate_limiter import KeyedConcurrencyLimiter
 from src.observability import bind_context, incr_metric, log_event, observe_metric
 from src.validation.pipeline import get_validation_pipeline
 from src.validation.result import ValidationResult
@@ -48,6 +50,14 @@ _TUTOR_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     max_workers=_read_int_env("EDUAGENT_TUTOR_WORKERS", 2),
     thread_name_prefix="eduagent-tutor",
 )
+_TUTOR_REQUEST_CAPACITY = threading.BoundedSemaphore(
+    _read_int_env("EDUAGENT_TUTOR_MAX_CONCURRENT", 2)
+)
+_TUTOR_REQUEST_USER_CAPACITY = KeyedConcurrencyLimiter(1)
+_TUTOR_STREAM_CAPACITY = threading.BoundedSemaphore(
+    _read_int_env("EDUAGENT_TUTOR_STREAM_MAX_CONCURRENT", 2)
+)
+_TUTOR_STREAM_USER_CAPACITY = KeyedConcurrencyLimiter(1)
 
 
 def _fallback_tutor_response(request: TutorRequest, node_id: str = "") -> Dict[str, object]:
@@ -267,7 +277,7 @@ def _render_structured_tutor_stream(payload: Any) -> str:
     return "\n\n".join(sections).strip()
 
 
-def run_tutor(
+def _run_tutor_unlimited(
     user_id: str,
     course_id: str,
     question: str | TutorRequest,
@@ -386,7 +396,45 @@ def run_tutor(
         }
 
 
-async def stream_tutor(
+def run_tutor(
+    user_id: str,
+    course_id: str,
+    question: str | TutorRequest,
+    *,
+    tutor_request: Optional[TutorRequest] = None,
+    context_type: str = "general",
+    code_snippet: str = "",
+    error_message: str = "",
+    persist_history: bool = True,
+) -> Dict[str, object]:
+    global_acquired = _TUTOR_REQUEST_CAPACITY.acquire(blocking=False)
+    user_acquired = global_acquired and _TUTOR_REQUEST_USER_CAPACITY.acquire(user_id)
+    if not global_acquired or not user_acquired:
+        if global_acquired:
+            _TUTOR_REQUEST_CAPACITY.release()
+        incr_metric("tutor.capacity_reject_total", mode="request")
+        return {
+            "status": "capacity_exceeded",
+            "detail": "TUTOR_CAPACITY_EXCEEDED",
+            "retry_after": 1,
+        }
+    try:
+        return _run_tutor_unlimited(
+            user_id,
+            course_id,
+            question,
+            tutor_request=tutor_request,
+            context_type=context_type,
+            code_snippet=code_snippet,
+            error_message=error_message,
+            persist_history=persist_history,
+        )
+    finally:
+        _TUTOR_REQUEST_USER_CAPACITY.release(user_id)
+        _TUTOR_REQUEST_CAPACITY.release()
+
+
+async def _stream_tutor_unlimited(
     user_id: str,
     course_id: str,
     question: str | TutorRequest,
@@ -575,3 +623,43 @@ async def stream_tutor(
         observe_metric("tutor.stream.duration_ms", duration_ms)
         log_event("tutor.stream.complete", duration_ms=duration_ms)
         yield {"event": "done", "data": json.dumps({"reference_count": 0}, ensure_ascii=False)}
+
+
+async def stream_tutor(
+    user_id: str,
+    course_id: str,
+    question: str | TutorRequest,
+    *,
+    tutor_request: Optional[TutorRequest] = None,
+    context_type: str = "general",
+    code_snippet: str = "",
+    error_message: str = "",
+) -> AsyncIterator[Dict[str, str]]:
+    global_acquired = _TUTOR_STREAM_CAPACITY.acquire(blocking=False)
+    user_acquired = global_acquired and _TUTOR_STREAM_USER_CAPACITY.acquire(user_id)
+    if not global_acquired or not user_acquired:
+        if global_acquired:
+            _TUTOR_STREAM_CAPACITY.release()
+        incr_metric("tutor.capacity_reject_total", mode="stream")
+        yield {
+            "event": "error",
+            "data": json.dumps(
+                {"detail": "TUTOR_STREAM_CAPACITY_EXCEEDED", "retry_after": 1},
+                ensure_ascii=False,
+            ),
+        }
+        return
+    try:
+        async for event in _stream_tutor_unlimited(
+            user_id,
+            course_id,
+            question,
+            tutor_request=tutor_request,
+            context_type=context_type,
+            code_snippet=code_snippet,
+            error_message=error_message,
+        ):
+            yield event
+    finally:
+        _TUTOR_STREAM_USER_CAPACITY.release(user_id)
+        _TUTOR_STREAM_CAPACITY.release()

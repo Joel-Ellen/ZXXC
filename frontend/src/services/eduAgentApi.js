@@ -263,7 +263,7 @@ async function streamSsePost(url, payload, { onToken, onDone, onReset, onError, 
   const reader = response.body.getReader();
   const decoder = new TextDecoder("utf-8");
   let buffer = "";
-  let receivedDone = false;
+  let receivedTerminalEvent = false;
 
   const dispatch = (rawEvent) => {
     // 单个 SSE 事件块可能包含多行 event:/data:
@@ -289,9 +289,10 @@ async function streamSsePost(url, payload, { onToken, onDone, onReset, onError, 
     } else if (eventName === "reset") {
       onReset?.(parsed);
     } else if (eventName === "done") {
-      receivedDone = true;
+      receivedTerminalEvent = true;
       onDone?.(parsed);
     } else if (eventName === "error") {
+      receivedTerminalEvent = true;
       onError?.(new Error(parsed.error || "流式辅导出错"));
     }
   };
@@ -314,7 +315,9 @@ async function streamSsePost(url, payload, { onToken, onDone, onReset, onError, 
     }
     // 冲刷残余
     if (buffer.trim()) dispatch(buffer);
-    if (!receivedDone) onDone?.({});
+    if (!receivedTerminalEvent) {
+      onError?.(new Error("辅导连接意外结束，输入已保留，请重试。"));
+    }
   } catch (err) {
     if (err?.name !== "AbortError") onError?.(err);
   }

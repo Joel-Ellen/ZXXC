@@ -56,18 +56,32 @@ def test_launch_metrics_expose_rates_without_identity_labels() -> None:
     incr_metric("code.execution_total", outcome="accepted", mode="run", verdict="accepted")
     incr_metric("code.execution_total", outcome="test_failed", mode="run", verdict="wrong_answer")
     incr_metric("frontend.exception_total", surface="learn", kind="vue")
+    incr_metric("frontend.session_total", surface="app")
     incr_metric("frontend.next_task_ready_total", outcome="within_5s", surface="app")
     incr_metric("learning.node_completion_attempt_total", event_type="lesson_completed", outcome="accepted")
     incr_metric("learning.node_completion_total", event_type="lesson_completed", advanced="false")
     incr_metric("frontend.refresh_recovery_total", outcome="success", surface="learn")
+    incr_metric("learning_event.mastery_mutation_total", outcome="attributed")
 
     launch = launch_metrics_snapshot()
 
-    assert launch["login_failure"] == {"failed": 1, "total": 2, "rate": 0.5}
+    assert launch["login_failure"] == {
+        "failed": 1,
+        "infrastructure_failed": 0,
+        "total": 2,
+        "rate": 0.5,
+        "infrastructure_rate": 0.0,
+    }
     assert launch["resource_failure"] == {"failed": 0, "total": 1, "rate": 0.0}
     assert launch["code_execution_failure"]["rate"] == 0.5
-    assert launch["frontend_exceptions"]["total"] == 1
+    assert launch["frontend_exceptions"] == {"total": 1, "sessions": 1, "rate": 1.0}
     assert launch["next_task_ready"]["rate"] == 1.0
     assert launch["node_completions"]["rate"] == 1.0
     assert launch["node_completions"]["advanced_rate"] == 0.0
     assert launch["refresh_recovery"]["rate"] == 1.0
+    assert launch["mastery_attribution_integrity"] == {
+        "attributed": 1,
+        "unattributed": 0,
+        "total": 1,
+        "rate": 1.0,
+    }

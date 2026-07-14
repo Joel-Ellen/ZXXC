@@ -3,11 +3,14 @@ import {
   createRefreshRecoveryReporter,
   isLearningRouteReload,
   markLoginSuccess,
+  reportClientSessionStarted,
   reportNextTaskReady,
   reportClientMetric,
 } from "./clientTelemetry";
 
 afterEach(() => {
+  globalThis.localStorage?.removeItem("access_token");
+  globalThis.sessionStorage?.removeItem("eduagent.client_session_reported");
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -30,6 +33,31 @@ describe("client telemetry", () => {
       event: "frontend_exception",
       surface: "learn",
       kind: "vue",
+    });
+  });
+
+  it("authenticates release metrics when a session token exists", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+    globalThis.localStorage?.setItem("access_token", "session-token");
+
+    await reportClientMetric("next_task_ready", { surface: "app", durationMs: 1200 });
+
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer session-token");
+  });
+
+  it("reports one authenticated frontend session", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+    globalThis.localStorage?.setItem("access_token", "session-token");
+
+    await expect(reportClientSessionStarted({ surface: "app" })).resolves.toBe(true);
+    await expect(reportClientSessionStarted({ surface: "app" })).resolves.toBe(false);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      event: "client_session_started",
+      surface: "app",
     });
   });
 

@@ -28,7 +28,7 @@ import {
   verifyEmail,
 } from "../services/accountApi";
 import { tokenStore } from "../services/apiClient";
-import { markLoginSuccess } from "../services/clientTelemetry";
+import { markLoginSuccess, reportClientSessionStarted } from "../services/clientTelemetry";
 import { useEduAgent } from "../composables/useEduAgent";
 
 const route = useRoute();
@@ -61,11 +61,13 @@ const initialNotice = computed(() => ({
 async function onLogin(userId, password, captchaToken, captchaAnswer) {
   await handleLogin(userId, password, captchaToken, captchaAnswer);
   markLoginSuccess();
+  void reportClientSessionStarted({ surface: "app" });
   await router.replace(redirectTarget.value);
 }
 
 async function onRegister(userId, email, password, captchaToken, captchaAnswer) {
   await handleRegister(userId, email, password, captchaToken, captchaAnswer);
+  void reportClientSessionStarted({ surface: "app" });
   await router.replace(redirectTarget.value);
 }
 

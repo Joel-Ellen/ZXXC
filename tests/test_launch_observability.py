@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from starlette.responses import JSONResponse
 from starlette.testclient import TestClient
 
 from frontend import server
@@ -96,6 +97,45 @@ def test_client_events_accept_only_fixed_non_pii_dimensions() -> None:
     assert all("user_id" not in labels and "message" not in labels for labels in counter_labels)
 
 
+def test_production_release_metrics_require_authenticated_telemetry(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setattr(
+        server,
+        "_access_principal",
+        lambda request: (
+            ({"sub": "launch-user"}, None)
+            if request.headers.get("authorization") == "Bearer valid"
+            else (None, JSONResponse({"detail": "invalid"}, status_code=401))
+        ),
+    )
+    client = TestClient(server.app)
+
+    rejected = client.post(
+        "/api/ops/client-events",
+        json={"event": "next_task_ready", "surface": "app", "duration_ms": 1000},
+    )
+    public_auth_exception = client.post(
+        "/api/ops/client-events",
+        json={"event": "frontend_exception", "surface": "auth", "kind": "window"},
+    )
+    accepted = client.post(
+        "/api/ops/client-events",
+        json={"event": "next_task_ready", "surface": "app", "duration_ms": 1000},
+        headers={"Authorization": "Bearer valid"},
+    )
+
+    assert rejected.status_code == 401
+    assert public_auth_exception.status_code == 202
+    assert accepted.status_code == 202
+    assert metrics.counter_value("frontend.next_task_ready_total", surface="app", outcome="within_5s") == 1
+    assert metrics.counter_value("frontend.exception_total") == 0
+    assert metrics.counter_value(
+        "frontend.auth_public_exception_total",
+        surface="auth",
+        kind="window",
+    ) == 1
+
+
 def test_resource_and_code_execution_outcomes_feed_launch_rates(monkeypatch) -> None:
     monkeypatch.setattr(server, "_event_session_auth_error", lambda *_args: None)
 
@@ -177,6 +217,97 @@ def test_public_health_is_minimal_in_production(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
     assert response.headers["cache-control"] == "no-store"
+
+
+def test_production_readiness_fails_closed_without_postgres(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("PUBLIC_APP_URL", "https://learn.example.test")
+    monkeypatch.setenv("EDUAGENT_OPS_TOKEN", "operations-secret")
+    monkeypatch.setenv("JWT_SECRET_KEY", "production-test-secret-with-at-least-32-characters")
+    monkeypatch.setattr(server, "_db_available", False)
+    monkeypatch.setattr(server, "_db", None)
+
+    response = TestClient(server.app).get("/api/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {"status": "not_ready"}
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["retry-after"] == "5"
+
+
+def test_production_readiness_requires_durable_postgres_and_redis(monkeypatch) -> None:
+    class Cursor:
+        def fetchone(self):
+            return {"ready": 1}
+
+    class Database:
+        def execute(self, statement):
+            assert statement == "SELECT 1 AS ready"
+            return Cursor()
+
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("PUBLIC_APP_URL", "https://learn.example.test")
+    monkeypatch.setenv("EDUAGENT_OPS_TOKEN", "operations-secret")
+    monkeypatch.setenv("JWT_SECRET_KEY", "production-test-secret-with-at-least-32-characters")
+    monkeypatch.setattr(server, "_db_available", True)
+    monkeypatch.setattr(server, "_db", Database())
+    monkeypatch.setattr(server, "_get_auth", lambda: (object(), object()))
+    monkeypatch.setattr(server, "_get_account_repo", lambda: object())
+    monkeypatch.setattr(server, "redis_backend_status", lambda: "redis")
+    monkeypatch.setattr(server, "durable_redis_available", lambda: True)
+
+    response = TestClient(server.app).get("/api/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready"}
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_production_login_is_held_back_outside_app_access_cohort(monkeypatch) -> None:
+    user = {
+        "user_id": "held-back-user",
+        "email": "held-back@example.test",
+        "display_name": "Held Back",
+        "role": "STUDENT",
+        "created_at": "",
+        "last_login_at": "",
+    }
+    store = SimpleNamespace(verify_login=lambda *_args: user)
+    captcha = SimpleNamespace(verify=lambda *_args: True)
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("EDUAGENT_APP_ACCESS_ROLLOUT_PERCENT", "0")
+    monkeypatch.setattr(server, "_get_auth", lambda: (store, captcha))
+    monkeypatch.setattr(
+        server,
+        "_create_authenticated_session",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("held-back login created a session")),
+    )
+
+    response = TestClient(server.app).post(
+        "/api/auth/login",
+        json={
+            "user_id": "held-back-user",
+            "password": "Password123!",
+            "captcha_token": "captcha",
+            "captcha_answer": "1",
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "RELEASE_NOT_AVAILABLE"
+    assert response.headers["x-eduagent-release-cohort"] == "holdback"
+
+
+def test_app_access_allowlist_overrides_zero_percent(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("EDUAGENT_APP_ACCESS_ROLLOUT_PERCENT", "0")
+    monkeypatch.setenv("EDUAGENT_APP_ACCESS_ROLLOUT_ALLOWLIST", "internal-user")
+
+    decision, response = server._app_access_rollout("internal-user")
+
+    assert decision.enabled is True
+    assert decision.cohort == "allowlist"
+    assert response is None
 
 
 def test_legacy_debug_routes_remain_available_in_test_mode(monkeypatch) -> None:

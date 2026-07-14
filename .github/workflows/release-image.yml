@@ -1,0 +1,253 @@
+name: Release Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_release:
+        description: Type PUBLISH to confirm an immutable image release
+        required: true
+        type: string
+      expected_sha:
+        description: Full 40-character commit SHA selected for this run
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: release-image-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build_and_scan:
+    name: Build, attest, and scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_name: ${{ steps.coordinates.outputs.image_name }}
+      image_tag: ${{ steps.coordinates.outputs.image_tag }}
+      digest: ${{ steps.immutable.outputs.digest }}
+      image_ref: ${{ steps.immutable.outputs.image_ref }}
+
+    steps:
+      - name: Require explicit release confirmation
+        shell: bash
+        env:
+          CONFIRM_RELEASE: ${{ inputs.confirm_release }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [[ "$CONFIRM_RELEASE" != "PUBLISH" ]]; then
+            echo "Release confirmation must be exactly PUBLISH." >&2
+            exit 1
+          fi
+          if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || [[ "$EXPECTED_SHA" != "$GITHUB_SHA" ]]; then
+            echo "expected_sha must exactly match the selected workflow commit." >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_REF" != "refs/heads/${DEFAULT_BRANCH}" ]]; then
+            echo "Image releases are restricted to the repository default branch." >&2
+            exit 1
+          fi
+
+      - name: Check out the confirmed commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Define lowercase GHCR coordinates
+        id: coordinates
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_name="ghcr.io/${GITHUB_REPOSITORY,,}"
+          image_tag="sha-${GITHUB_SHA}"
+          if [[ "$image_name" != "${image_name,,}" ]] || [[ ! "$image_name" =~ ^ghcr\.io/[a-z0-9._/-]+$ ]]; then
+            echo "Derived GHCR image name is invalid." >&2
+            exit 1
+          fi
+          echo "image_name=${image_name}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${image_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image with attestations
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/amd64
+          pull: true
+          push: true
+          tags: ${{ steps.coordinates.outputs.image_name }}:${{ steps.coordinates.outputs.image_tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.coordinates.outputs.image_tag }}
+          sbom: true
+          provenance: mode=max
+
+      - name: Resolve immutable image reference
+        id: immutable
+        shell: bash
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE_NAME: ${{ steps.coordinates.outputs.image_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Buildx did not return a valid image digest." >&2
+            exit 1
+          fi
+          image_ref="${IMAGE_NAME}@${DIGEST}"
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "image_ref=${image_ref}" >> "$GITHUB_OUTPUT"
+
+      - name: Collect image, SBOM, and provenance evidence
+        shell: bash
+        env:
+          IMAGE_NAME: ${{ steps.coordinates.outputs.image_name }}
+          IMAGE_TAG: ${{ steps.coordinates.outputs.image_tag }}
+          IMAGE_REF: ${{ steps.immutable.outputs.image_ref }}
+          DIGEST: ${{ steps.immutable.outputs.digest }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-evidence
+          jq -n \
+            --arg image_name "$IMAGE_NAME" \
+            --arg image_tag "$IMAGE_TAG" \
+            --arg image_ref "$IMAGE_REF" \
+            --arg digest "$DIGEST" \
+            --arg commit "$GITHUB_SHA" \
+            --arg source_ref "$GITHUB_REF" \
+            --arg run_url "$RUN_URL" \
+            '{image_name: $image_name, image_tag: $image_tag, image_ref: $image_ref, digest: $digest, commit: $commit, source_ref: $source_ref, run_url: $run_url}' \
+            > release-evidence/image.json
+          docker buildx imagetools inspect "$IMAGE_REF" --raw > release-evidence/image-index.json
+          docker buildx imagetools inspect "$IMAGE_REF" --format '{{ json .SBOM.SPDX }}' > release-evidence/sbom.spdx.json
+          docker buildx imagetools inspect "$IMAGE_REF" --format '{{ json .Provenance.SLSA }}' > release-evidence/provenance.slsa.json
+          jq -e '.schemaVersion == 2' release-evidence/image-index.json >/dev/null
+          jq -e 'type == "object" and length > 0' release-evidence/sbom.spdx.json >/dev/null
+          jq -e 'type == "object" and length > 0' release-evidence/provenance.slsa.json >/dev/null
+
+      - name: Scan the exact image digest for HIGH and CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: ${{ steps.immutable.outputs.image_ref }}
+          format: json
+          output: release-evidence/trivy.json
+          scanners: vuln
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: "1"
+
+      - name: Finalize build and scan evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -d release-evidence ]]; then
+            find release-evidence -type f ! -name SHA256SUMS -print | sort | while IFS= read -r file; do
+              sha256sum "$file"
+            done > release-evidence/SHA256SUMS
+          fi
+
+      - name: Upload non-sensitive build and scan evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-image-build-scan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release-evidence/
+          if-no-files-found: warn
+          retention-days: 90
+
+  sign:
+    name: Keyless sign verified digest
+    needs: build_and_scan
+    if: ${{ needs.build_and_scan.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    steps:
+      - name: Validate immutable signing target
+        shell: bash
+        env:
+          IMAGE_REF: ${{ needs.build_and_scan.outputs.image_ref }}
+          DIGEST: ${{ needs.build_and_scan.outputs.digest }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-evidence
+          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || [[ "$IMAGE_REF" != *@"$DIGEST" ]]; then
+            echo "Signing target is not the verified immutable digest." >&2
+            exit 1
+          fi
+
+      - name: Log in to GHCR for signature publication
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
+
+      - name: Keyless sign and verify the scanned digest
+        shell: bash
+        env:
+          IMAGE_REF: ${{ needs.build_and_scan.outputs.image_ref }}
+          DIGEST: ${{ needs.build_and_scan.outputs.digest }}
+          CERTIFICATE_IDENTITY: ${{ github.server_url }}/${{ github.workflow_ref }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          cosign sign --yes --bundle release-evidence/cosign-bundle.json "$IMAGE_REF"
+          cosign verify \
+            --certificate-identity "$CERTIFICATE_IDENTITY" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            --output json \
+            "$IMAGE_REF" > release-evidence/cosign-verification.json
+          jq -n \
+            --arg image_ref "$IMAGE_REF" \
+            --arg digest "$DIGEST" \
+            --arg certificate_identity "$CERTIFICATE_IDENTITY" \
+            --arg oidc_issuer "https://token.actions.githubusercontent.com" \
+            --arg run_url "$RUN_URL" \
+            '{image_ref: $image_ref, digest: $digest, certificate_identity: $certificate_identity, oidc_issuer: $oidc_issuer, run_url: $run_url}' \
+            > release-evidence/signature.json
+
+      - name: Finalize signature evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          find release-evidence -type f ! -name SHA256SUMS -print | sort | while IFS= read -r file; do
+            sha256sum "$file"
+          done > release-evidence/SHA256SUMS
+
+      - name: Upload non-sensitive signature evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-image-signature-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release-evidence/
+          if-no-files-found: warn
+          retention-days: 90
