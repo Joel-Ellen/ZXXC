@@ -622,6 +622,44 @@ class ElasticsearchKnowledgeBaseClient:
                 )
             raise
 
+    def lexical_search(
+        self,
+        query: str,
+        *,
+        top_k: int = 10,
+        filters: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Retrieve text chunks without requiring an embedding runtime.
+
+        Worker-side resource generation must be able to use the course KB even
+        when a local sentence-transformer is intentionally not loaded.  This
+        bounded BM25 path is also the safe fallback for an index whose vector
+        dimensions are not known to the application process.
+        """
+        client = self._ensure_client()
+        return client.search(
+            index=self._config.index_name,
+            size=top_k,
+            query={
+                "bool": {
+                    "must": [{
+                        "multi_match": {
+                            "query": query,
+                            "fields": [
+                                "content^4",
+                                "title_path^3",
+                                "chapter^2",
+                                "section^2",
+                                "knowledge_point^2",
+                                "language_tags",
+                            ],
+                        }
+                    }],
+                    "filter": self._build_filter_clauses(filters or {}),
+                }
+            },
+        )
+
     def hybrid_search_client_rrf(
         self,
         *,

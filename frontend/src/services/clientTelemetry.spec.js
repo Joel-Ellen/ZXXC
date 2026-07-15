@@ -5,6 +5,8 @@ import {
   markLoginSuccess,
   reportClientSessionStarted,
   reportNextTaskReady,
+  reportResourceCacheRead,
+  reportResourceConceptReady,
   reportClientMetric,
 } from "./clientTelemetry";
 
@@ -110,5 +112,28 @@ describe("client telemetry", () => {
       duration_ms: 3200,
     });
     await expect(reportNextTaskReady({ now: 4300, storage, surface: "app" })).resolves.toBe(false);
+  });
+
+  it("reports resource read and concept readiness timings without node identity", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await reportResourceCacheRead({ durationMs: 185, cacheHit: true });
+    await reportResourceConceptReady({ durationMs: 940, cacheHit: false });
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      event: "resource_cache_read",
+      surface: "learn",
+      duration_ms: 185,
+      cache_hit: true,
+      outcome: "success",
+    });
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+      event: "resource_concept_ready",
+      surface: "learn",
+      duration_ms: 940,
+      cache_hit: false,
+      outcome: "success",
+    });
   });
 });

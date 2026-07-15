@@ -49,6 +49,7 @@
         :node-title="nodeTitle"
         :path-nodes="pathNodes"
         :loading="isLoadingNode"
+        :card-states="resourceCardStates"
         :overall-progress="overallProgress"
         :mastered-count="masteredCount"
         :last-diagnostic="lastDiagnostic"
@@ -172,6 +173,7 @@ const props = defineProps({
   sessionId: { type: String, default: "" },
   currentNode: { type: String, default: "" },
   cards: { type: Array, default: () => [] },
+  resourceCardStates: { type: Object, default: () => ({}) },
   pathNodes: { type: Array, default: () => [] },
   nodeTitle: { type: String, default: "" },
   messages: { type: Array, default: () => [] },

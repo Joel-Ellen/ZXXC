@@ -123,11 +123,25 @@ class InMemoryMetrics:
         with self._lock:
             bucket = self._histograms.setdefault(
                 key,
-                {"count": 0.0, "sum": 0.0, "max": 0.0},
+                {"count": 0.0, "sum": 0.0, "max": 0.0, "samples": []},
             )
             bucket["count"] += 1.0
             bucket["sum"] += float(value)
             bucket["max"] = max(bucket["max"], float(value))
+            samples = bucket["samples"]
+            samples.append(float(value))
+            # Keep percentile calculations bounded for the in-process metric
+            # backend while retaining a representative rolling sample.
+            if len(samples) > 2048:
+                del samples[: len(samples) - 2048]
+
+    @staticmethod
+    def _percentile(samples: list[float], percentile: float) -> float:
+        if not samples:
+            return 0.0
+        ordered = sorted(samples)
+        index = min(len(ordered) - 1, max(0, int((len(ordered) - 1) * percentile)))
+        return ordered[index]
 
     def counter_value(self, name: str, **labels: Any) -> int:
         key = _metric_key(name, labels)
@@ -168,6 +182,8 @@ class InMemoryMetrics:
                         "labels": dict(label_items),
                         "count": count,
                         "avg": round(avg, 3),
+                        "p50": round(self._percentile(bucket.get("samples", []), 0.50), 3),
+                        "p95": round(self._percentile(bucket.get("samples", []), 0.95), 3),
                         "max": round(bucket["max"], 3),
                     }
                 )

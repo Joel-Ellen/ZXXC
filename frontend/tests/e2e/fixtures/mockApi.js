@@ -231,6 +231,16 @@ function json(route, body, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
+function sse(route, events) {
+  const body = events.map(({ event, data, id }) => {
+    const lines = [];
+    if (id) lines.push(`id: ${id}`);
+    lines.push(`event: ${event}`, `data: ${JSON.stringify(data)}`);
+    return `${lines.join("\n")}\n\n`;
+  }).join("");
+  return route.fulfill({ status: 200, contentType: "text/event-stream", body });
+}
+
 function requestBody(request) {
   try {
     return request.postDataJSON() || {};
@@ -282,6 +292,8 @@ export async function installMockApi(page, options = {}) {
     clientEvents: [],
     assetPatches: [],
     resourceRequests: [],
+    resourceGenerationRequests: [],
+    resourceGenerationJobs: new Map(),
     unhandledRequests: [],
     assets: emptyAssets(),
     assetRevision: 1,
@@ -567,31 +579,82 @@ export async function installMockApi(page, options = {}) {
 
     if (method === "GET" && /\/api\/sessions\/[^/]+\/resources\/[^/]+$/.test(pathname)) {
       const nodeId = decodeURIComponent(pathname.split("/").at(-1));
-      const cardType = url.searchParams.get("card_type") || "";
       state.resourceRequests.push({
         nodeId,
-        cardType,
-        force: url.searchParams.get("force") === "true",
+        cardType: "",
+        force: false,
       });
-      if (cardType && state.failResourceGenerationAttempts > 0) {
+      return json(route, { status: "already_exists", resources: state.resourcesByNode[nodeId] || [] });
+    }
+
+    if (method === "POST" && /\/api\/sessions\/[^/]+\/resources\/[^/]+\/generation$/.test(pathname)) {
+      const nodeId = decodeURIComponent(pathname.split("/").at(-2));
+      const body = requestBody(request);
+      const cardTypes = Array.isArray(body.card_types) ? body.card_types : [];
+      const force = Boolean(body.force);
+      state.resourceGenerationRequests.push({ nodeId, cardTypes, force, priority: body.priority || "" });
+      cardTypes.forEach((cardType) => {
+        state.resourceRequests.push({ nodeId, cardType, force });
+      });
+      if (cardTypes.length && state.failResourceGenerationAttempts > 0) {
         state.failResourceGenerationAttempts -= 1;
         return json(route, { detail: "资源服务暂时不可用，请原位重试。" }, 503);
       }
-      if (cardType === "diagnostic_quiz" && state.failRetestResourceAttempts > 0) {
+      if (cardTypes.includes("diagnostic_quiz") && state.failRetestResourceAttempts > 0) {
         state.failRetestResourceAttempts -= 1;
         return json(route, { detail: "复测题资源暂时不可用，请原位重试。" }, 503);
       }
-      if (options.generateResourceOnRequest && cardType === "concept_map") {
-        state.resourcesByNode[nodeId] = [mockConceptResource];
+
+      const existingResources = state.resourcesByNode[nodeId] || [];
+      const generatedResources = [];
+      if (options.generateResourceOnRequest && cardTypes.includes("concept_map")) {
+        generatedResources.push(mockConceptResource);
       }
-      if (options.withReviewItem && cardType === "diagnostic_quiz" && state.retestCreationCount > 0) {
-        const existing = state.resourcesByNode[nodeId] || [];
+      if (options.withReviewItem && cardTypes.includes("diagnostic_quiz") && state.retestCreationCount > 0) {
+        generatedResources.push(mockRetestQuizResource);
+      }
+      if (generatedResources.length) {
+        const generatedTypes = new Set(generatedResources.map((resource) => resource.resource_type));
         state.resourcesByNode[nodeId] = [
-          ...existing.filter((resource) => resource.resource_type !== "diagnostic_quiz"),
-          mockRetestQuizResource,
+          ...existingResources.filter((resource) => !generatedTypes.has(resource.resource_type)),
+          ...generatedResources,
         ];
       }
-      return json(route, { status: "already_exists", resources: state.resourcesByNode[nodeId] || [] });
+
+      const jobId = `resource-job-${state.resourceGenerationRequests.length}`;
+      state.resourceGenerationJobs.set(jobId, {
+        nodeId,
+        cardTypes,
+        resources: generatedResources,
+      });
+      return json(route, {
+        job_id: jobId,
+        status: "queued",
+        existing_resources: existingResources,
+        missing_resources: cardTypes.filter((cardType) => !existingResources.some(
+          (resource) => resource.resource_type === cardType,
+        )),
+      });
+    }
+
+    if (method === "GET" && /^\/api\/resource-generation-jobs\/[^/]+\/events$/.test(pathname)) {
+      const jobId = decodeURIComponent(pathname.split("/").at(-2));
+      const job = state.resourceGenerationJobs.get(jobId);
+      if (!job) return json(route, { detail: "Generation job not found" }, 404);
+      const events = [
+        { id: `${jobId}-queued`, event: "queued", data: { job_id: jobId } },
+        ...job.resources.map((resource, index) => ({
+          id: `${jobId}-card-${index}`,
+          event: "card_ready",
+          data: {
+            card_type: resource.resource_type,
+            card: resource,
+            progress: index + 1,
+          },
+        })),
+        { id: `${jobId}-completed`, event: "completed", data: { job_id: jobId } },
+      ];
+      return sse(route, events);
     }
 
     if (method === "GET" && /\/api\/sessions\/[^/]+\/practice\/problems\/[^/]+$/.test(pathname)) {

@@ -78,8 +78,10 @@ class ResourceContract(BaseModel):
     structured_payload: Dict[str, Any] = Field(default_factory=dict)
     artifacts: Dict[str, Any] = Field(default_factory=dict)
     difficulty: float = 0.5
+    difficulty_basis: Dict[str, Any] = Field(default_factory=dict)
     personalization_basis: Dict[str, Any] = Field(default_factory=dict)
     generation: Dict[str, Any] = Field(default_factory=dict)
+    content_version: str = ""
     validation: ResourceValidation = Field(default_factory=ResourceValidation)
     safety: ResourceSafety = Field(default_factory=ResourceSafety)
     source_refs: List[Dict[str, Any]] = Field(default_factory=list)

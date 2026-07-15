@@ -17,11 +17,18 @@ import {
   refreshToken,
   register,
   resetSession,
+  requestResourceGeneration,
+  streamResourceGeneration,
   streamSessionTutor,
   submitSessionLearningEvent,
   submitSessionProfileInput,
   switchCourse,
 } from "../services/eduAgentApi";
+import {
+  reportResourceCacheRead,
+  reportResourceConceptReady,
+} from "../services/clientTelemetry";
+import { RESOURCE_GENERATION_ASYNC_ENABLED } from "../services/resourceGenerationConfig";
 import { useLearningAssetsStore } from "../stores/learningAssets";
 
 let sharedEduAgent;
@@ -43,6 +50,17 @@ const LEARNING_EVENT_MAX_ATTEMPTS = 2;
 const LEARNING_EVENT_RETRY_DELAY_MS = 300;
 const TUTOR_STREAM_IDLE_TIMEOUT_MS = 45_000;
 const TUTOR_STREAM_MAX_DURATION_MS = 120_000;
+const RESOURCE_CARD_TYPES = [
+  "concept_map",
+  "code_snippet",
+  "interactive_exercise",
+  "video_summary",
+  "diagnostic_quiz",
+];
+const RESOURCE_STREAM_MAX_RECONNECTS = 2;
+const RESOURCE_STREAM_RECONNECT_DELAY_MS = 500;
+const RESOURCE_GENERATION_POLL_INTERVAL_MS = 750;
+const RESOURCE_GENERATION_POLL_MAX_ATTEMPTS = 80;
 
 function isRetryableLearningEventError(error) {
   const status = Number(error?.response?.status);
@@ -151,6 +169,7 @@ function createEduAgent() {
   const probeCollected = ref(0);
   const probeTotal = ref(6);
   const resources = ref({});
+  const resourceGenerationStates = ref({});
   const agentFeedback = ref([]);
   const lastDiagnostic = ref(null);
   const lastMasteryAttribution = ref(null);
@@ -164,6 +183,9 @@ function createEduAgent() {
   ]);
 
   const currentCards = computed(() => resources.value[currentNode.value] ?? []);
+  const currentResourceCardStates = computed(() => (
+    resourceGenerationStates.value[currentNode.value]?.cards ?? {}
+  ));
   const currentNodeTitle = computed(() => nodeTitles.value[currentNode.value] || currentNode.value || "未选择");
   const masteredCount = computed(() => Object.values(mastery.value).filter((value) => (value ?? 0) >= 0.65).length);
   const overallProgress = computed(() => (
@@ -188,6 +210,8 @@ function createEduAgent() {
   let routeEnhancementGeneration = 0;
   let scheduledRouteEnhancement = null;
   const inFlightResourceRequests = new Map();
+  const inFlightGenerationRequests = new Map();
+  const resourceGenerationStreams = new Map();
 
   function invalidateRouteEnhancements() {
     routeEnhancementGeneration += 1;
@@ -195,6 +219,7 @@ function createEduAgent() {
       clearTimeout(scheduledRouteEnhancement);
       scheduledRouteEnhancement = null;
     }
+    cancelResourceGenerationStreams();
     isLoadingNode.value = false;
     return routeEnhancementGeneration;
   }
@@ -213,6 +238,21 @@ function createEduAgent() {
       courseId: normalizedCourseId,
       nodeId: normalizedNodeId,
       sessionId: targetSessionId,
+      resourceTimingStartedAt: monotonicNow(),
+      cacheReadReported: false,
+      conceptReadyReported: false,
+    };
+  }
+
+  function createCurrentResourceContext(nodeId) {
+    return {
+      generation: routeEnhancementGeneration,
+      courseId: courseId.value,
+      nodeId: String(nodeId || ""),
+      sessionId: sessionId.value,
+      resourceTimingStartedAt: monotonicNow(),
+      cacheReadReported: false,
+      conceptReadyReported: false,
     };
   }
 
@@ -237,7 +277,21 @@ function createEduAgent() {
     const existingRequest = inFlightResourceRequests.get(requestKey);
     if (existingRequest) return existingRequest;
 
-    const request = fetchSessionResources(context.sessionId, context.nodeId, normalizeResourceOptions())
+    const startedAt = monotonicNow();
+    const request = fetchSessionResources(context.sessionId, context.nodeId)
+      .then((result) => {
+        reportRouteCacheRead(context, result, {
+          durationMs: Math.max(0, Math.round(monotonicNow() - startedAt)),
+        });
+        return result;
+      })
+      .catch((error) => {
+        reportRouteCacheRead(context, null, {
+          durationMs: Math.max(0, Math.round(monotonicNow() - startedAt)),
+          outcome: "failure",
+        });
+        throw error;
+      })
       .finally(() => {
         if (inFlightResourceRequests.get(requestKey) === request) {
           inFlightResourceRequests.delete(requestKey);
@@ -278,15 +332,18 @@ function createEduAgent() {
   }
 
   function normalizeResourceOptions(options = {}) {
-    if (typeof options === "boolean") return { force: options, cardType: "" };
+    if (typeof options === "boolean") return { force: options, cardType: "", cardTypes: [] };
+    const cardType = typeof options?.cardType === "string" ? options.cardType : "";
+    const cardTypes = normalizeCardTypes(options?.cardTypes ?? cardType);
     return {
       force: Boolean(options?.force),
-      cardType: typeof options?.cardType === "string" ? options.cardType : "",
+      cardType,
+      cardTypes,
     };
   }
 
-  async function fetchCurrentNodeResources(nodeId, options = {}) {
-    return fetchSessionResources(sessionId.value, nodeId, normalizeResourceOptions(options));
+  async function fetchCurrentNodeResources(nodeId) {
+    return fetchSessionResources(sessionId.value, nodeId);
   }
 
   function resourceCardType(resource) {
@@ -310,6 +367,475 @@ function createEduAgent() {
       ...resources.value,
       [nodeId]: [...retainedResources, ...incomingResources],
     };
+    markResourceCardsReady(nodeId, incomingResources);
+  }
+
+  function normalizeCardTypes(cardTypes) {
+    const values = Array.isArray(cardTypes) ? cardTypes : [cardTypes];
+    return [...new Set(values
+      .map((cardType) => String(cardType || "").trim())
+      .filter((cardType) => RESOURCE_CARD_TYPES.includes(cardType)))];
+  }
+
+  function resourceListFromResponse(response) {
+    const candidates = [
+      response?.resources,
+      response?.existing_resources,
+      response?.data?.resources,
+      response?.data?.existing_resources,
+    ];
+    return candidates.find((value) => Array.isArray(value)) ?? [];
+  }
+
+  function resourceTimingDuration(context) {
+    const startedAt = Number(context?.resourceTimingStartedAt);
+    if (!Number.isFinite(startedAt)) return 0;
+    return Math.max(0, Math.round(monotonicNow() - startedAt));
+  }
+
+  function hasConceptMap(resourceCards) {
+    return (Array.isArray(resourceCards) ? resourceCards : []).some((resource) => (
+      resourceCardType(resource) === "concept_map"
+    ));
+  }
+
+  function reportRouteCacheRead(context, response, {
+    durationMs = 0,
+    outcome = "success",
+  } = {}) {
+    if (!context || context.cacheReadReported) return;
+    context.cacheReadReported = true;
+    void reportResourceCacheRead({
+      durationMs,
+      cacheHit: outcome === "success" && hasConceptMap(resourceListFromResponse(response)),
+      outcome,
+    });
+  }
+
+  function reportConceptReady(context, { cacheHit = false } = {}) {
+    if (!context || context.conceptReadyReported) return;
+    context.conceptReadyReported = true;
+    void reportResourceConceptReady({
+      durationMs: resourceTimingDuration(context),
+      cacheHit,
+      outcome: "success",
+    });
+  }
+
+  function responseCardTypes(response, field) {
+    const values = response?.[field];
+    if (!Array.isArray(values)) return null;
+    return normalizeCardTypes(values.map((value) => (
+      typeof value === "string" ? value : resourceCardType(value)
+    )));
+  }
+
+  function missingResourceCardTypes(nodeResources) {
+    const readyTypes = new Set((Array.isArray(nodeResources) ? nodeResources : [])
+      .map(resourceCardType)
+      .filter(Boolean));
+    return RESOURCE_CARD_TYPES.filter((cardType) => !readyTypes.has(cardType));
+  }
+
+  function resourceCardState(nodeId, cardType) {
+    return resourceGenerationStates.value[nodeId]?.cards?.[cardType] ?? null;
+  }
+
+  function updateResourceGenerationState(nodeId, updater) {
+    const previous = resourceGenerationStates.value[nodeId] ?? {
+      status: "idle",
+      jobId: "",
+      cards: {},
+    };
+    const next = updater({ ...previous, cards: { ...previous.cards } });
+    resourceGenerationStates.value = {
+      ...resourceGenerationStates.value,
+      [nodeId]: next,
+    };
+    return next;
+  }
+
+  function updateResourceCardStates(nodeId, cardTypes, update) {
+    const normalizedCardTypes = normalizeCardTypes(cardTypes);
+    if (!normalizedCardTypes.length) return;
+    updateResourceGenerationState(nodeId, (state) => {
+      const cards = { ...state.cards };
+      normalizedCardTypes.forEach((cardType) => {
+        const previous = cards[cardType] ?? { status: "idle", error: "", jobId: "" };
+        const patch = typeof update === "function" ? update(previous, cardType) : update;
+        cards[cardType] = { ...previous, ...patch };
+      });
+      return { ...state, cards };
+    });
+  }
+
+  function setResourceGenerationJob(nodeId, patch) {
+    updateResourceGenerationState(nodeId, (state) => ({ ...state, ...patch }));
+  }
+
+  function markResourceCardsReady(nodeId, resourceCards) {
+    const cardTypes = normalizeCardTypes((Array.isArray(resourceCards) ? resourceCards : [])
+      .map(resourceCardType));
+    updateResourceCardStates(nodeId, cardTypes, { status: "ready", error: "" });
+  }
+
+  function markResourceCardsQueued(nodeId, cardTypes, { jobId = "", status = "queued" } = {}) {
+    updateResourceCardStates(nodeId, cardTypes, { status, jobId, error: "" });
+  }
+
+  function markResourceCardsFailed(nodeId, cardTypes, error) {
+    const message = error instanceof Error ? error.message : String(error || "Resource generation failed.");
+    updateResourceCardStates(nodeId, cardTypes, { status: "failed", error: message });
+  }
+
+  function generationCardsFromEvent(data) {
+    const candidates = [
+      data?.resource,
+      data?.card,
+      ...(Array.isArray(data?.resources) ? data.resources : []),
+    ];
+    if (
+      data
+      && typeof data === "object"
+      && !Array.isArray(data)
+      && (data.resource_id || data.id || data.body_markdown || data.structured_payload)
+    ) {
+      candidates.push(data);
+    }
+    return candidates.filter((candidate) => (
+      candidate
+      && typeof candidate === "object"
+      && Boolean(resourceCardType(candidate))
+    ));
+  }
+
+  function generationCardTypesFromEvent(data, fallbackCardTypes = []) {
+    const eventTypes = generationCardsFromEvent(data).map(resourceCardType);
+    if (data?.card_type) eventTypes.push(data.card_type);
+    if (data?.resource_type) eventTypes.push(data.resource_type);
+    return normalizeCardTypes(eventTypes.length ? eventTypes : fallbackCardTypes);
+  }
+
+  function generationFailureMessage(data, fallback = "Resource generation failed.") {
+    return data?.error || data?.detail || data?.message || fallback;
+  }
+
+  function cancelResourceGenerationStreams() {
+    resourceGenerationStreams.forEach((entry) => {
+      entry.cancelled = true;
+      if (entry.retryTimer) clearTimeout(entry.retryTimer);
+      entry.controller?.abort();
+    });
+    resourceGenerationStreams.clear();
+  }
+
+  function releaseResourceGenerationStream(entry) {
+    if (entry.retryTimer) clearTimeout(entry.retryTimer);
+    if (resourceGenerationStreams.get(entry.jobId) === entry) {
+      resourceGenerationStreams.delete(entry.jobId);
+    }
+  }
+
+  function isActiveResourceGenerationStream(entry) {
+    return Boolean(
+      entry
+      && !entry.cancelled
+      && resourceGenerationStreams.get(entry.jobId) === entry
+      && isCurrentRouteEnhancement(entry.context),
+    );
+  }
+
+  function finishConceptLoading(entry, { notifyReady = true } = {}) {
+    if (!entry.cardTypes.includes("concept_map")) return;
+    if (notifyReady) reportConceptReady(entry.context);
+    finishRouteEnhancement(entry.context);
+    if (notifyReady && !entry.conceptReadyNotified) {
+      entry.conceptReadyNotified = true;
+      entry.onConceptReady?.();
+    }
+  }
+
+  function failUnresolvedGenerationCards(entry, error) {
+    const unresolvedTypes = entry.cardTypes.filter((cardType) => (
+      resourceCardState(entry.context.nodeId, cardType)?.status !== "ready"
+    ));
+    markResourceCardsFailed(entry.context.nodeId, unresolvedTypes, error);
+    if (unresolvedTypes.includes("concept_map")) finishConceptLoading(entry, { notifyReady: false });
+  }
+
+  function scheduleResourceGenerationReconnect(entry, error) {
+    if (!isActiveResourceGenerationStream(entry)) {
+      releaseResourceGenerationStream(entry);
+      return;
+    }
+    if (entry.reconnectAttempts >= RESOURCE_STREAM_MAX_RECONNECTS) {
+      failUnresolvedGenerationCards(entry, error);
+      setResourceGenerationJob(entry.context.nodeId, { status: "failed" });
+      releaseResourceGenerationStream(entry);
+      return;
+    }
+
+    entry.reconnectAttempts += 1;
+    entry.retryTimer = setTimeout(() => {
+      entry.retryTimer = null;
+      void consumeResourceGenerationStream(entry);
+    }, RESOURCE_STREAM_RECONNECT_DELAY_MS * entry.reconnectAttempts);
+  }
+
+  function scheduleResourceGenerationPoll(entry, error) {
+    if (!isActiveResourceGenerationStream(entry)) {
+      releaseResourceGenerationStream(entry);
+      return;
+    }
+    entry.pollAttempts += 1;
+    if (entry.pollAttempts >= RESOURCE_GENERATION_POLL_MAX_ATTEMPTS) {
+      failUnresolvedGenerationCards(entry, error);
+      setResourceGenerationJob(entry.context.nodeId, { status: "failed", jobId: entry.jobId });
+      releaseResourceGenerationStream(entry);
+      return;
+    }
+    entry.retryTimer = setTimeout(() => {
+      entry.retryTimer = null;
+      void consumeResourceGenerationPoll(entry);
+    }, RESOURCE_GENERATION_POLL_INTERVAL_MS);
+  }
+
+  async function consumeResourceGenerationPoll(entry) {
+    if (!isActiveResourceGenerationStream(entry)) {
+      releaseResourceGenerationStream(entry);
+      return;
+    }
+
+    try {
+      const response = await fetchRouteNodeResources(entry.context);
+      if (!isActiveResourceGenerationStream(entry)) {
+        releaseResourceGenerationStream(entry);
+        return;
+      }
+      const resourceCards = resourceListFromResponse(response);
+      if (resourceCards.length) mergeNodeResources(entry.context.nodeId, resourceCards);
+      if (hasConceptMap(resourceCards)) finishConceptLoading(entry);
+
+      const unresolvedTypes = entry.cardTypes.filter((cardType) => (
+        resourceCardState(entry.context.nodeId, cardType)?.status !== "ready"
+      ));
+      if (!unresolvedTypes.length) {
+        entry.terminal = true;
+        setResourceGenerationJob(entry.context.nodeId, { status: "completed", jobId: entry.jobId });
+        releaseResourceGenerationStream(entry);
+        return;
+      }
+      scheduleResourceGenerationPoll(entry, new Error("Resource generation is still pending."));
+    } catch (error) {
+      scheduleResourceGenerationPoll(entry, error);
+    }
+  }
+
+  async function consumeResourceGenerationStream(entry) {
+    if (!isActiveResourceGenerationStream(entry)) {
+      releaseResourceGenerationStream(entry);
+      return;
+    }
+
+    entry.controller = typeof AbortController === "undefined" ? null : new AbortController();
+    let streamError = null;
+    try {
+      await streamResourceGeneration(entry.jobId, {
+        signal: entry.controller?.signal,
+        lastEventId: entry.lastEventId,
+        onEvent: (event) => {
+          if (event?.id) entry.lastEventId = event.id;
+        },
+        onQueued: () => {
+          if (!isActiveResourceGenerationStream(entry)) return;
+          setResourceGenerationJob(entry.context.nodeId, { status: "queued", jobId: entry.jobId });
+          markResourceCardsQueued(entry.context.nodeId, entry.cardTypes, { jobId: entry.jobId });
+        },
+        onCardReady: (data) => {
+          if (!isActiveResourceGenerationStream(entry)) return;
+          const resourceCards = generationCardsFromEvent(data);
+          if (!resourceCards.length) return;
+          mergeNodeResources(entry.context.nodeId, resourceCards);
+          if (resourceCards.some((resource) => resourceCardType(resource) === "concept_map")) {
+            finishConceptLoading(entry);
+          }
+        },
+        onCardFailed: (data) => {
+          if (!isActiveResourceGenerationStream(entry)) return;
+          const failedCardTypes = generationCardTypesFromEvent(data, entry.cardTypes);
+          markResourceCardsFailed(entry.context.nodeId, failedCardTypes, generationFailureMessage(data));
+          if (failedCardTypes.includes("concept_map")) {
+            finishConceptLoading(entry, { notifyReady: false });
+          }
+          setResourceGenerationJob(entry.context.nodeId, { status: "partial_failed", jobId: entry.jobId });
+        },
+        onCompleted: (data) => {
+          if (!isActiveResourceGenerationStream(entry)) return;
+          entry.terminal = true;
+          failUnresolvedGenerationCards(entry, "The generation job completed without a card payload.");
+          setResourceGenerationJob(entry.context.nodeId, { status: "completed", jobId: entry.jobId });
+
+          // The backend owns the concept-map -> supporting-bundle handoff so
+          // a page close or SSE disconnect cannot suppress the remaining
+          // cards. Subscribe to the durable child job when this page is live.
+          const followUpJobId = String(data?.follow_up_job_id || "");
+          const followUpCardTypes = normalizeCardTypes(data?.follow_up_card_types);
+          const pendingFollowUpCardTypes = followUpCardTypes.filter((cardType) => (
+            resourceCardState(entry.context.nodeId, cardType)?.status !== "ready"
+          ));
+          if (followUpJobId && pendingFollowUpCardTypes.length) {
+            markResourceCardsQueued(entry.context.nodeId, pendingFollowUpCardTypes, { jobId: followUpJobId });
+            setResourceGenerationJob(entry.context.nodeId, { status: "queued", jobId: followUpJobId });
+            startResourceGenerationStream(entry.context, followUpJobId, {
+              cardTypes: pendingFollowUpCardTypes,
+            });
+          }
+        },
+        onFailed: (data) => {
+          if (!isActiveResourceGenerationStream(entry)) return;
+          entry.terminal = true;
+          const failedCardTypes = generationCardTypesFromEvent(data, entry.cardTypes);
+          markResourceCardsFailed(entry.context.nodeId, failedCardTypes, generationFailureMessage(data));
+          if (failedCardTypes.includes("concept_map")) finishConceptLoading(entry, { notifyReady: false });
+          setResourceGenerationJob(entry.context.nodeId, { status: "failed", jobId: entry.jobId });
+        },
+        onError: (error) => {
+          streamError = error;
+        },
+      });
+    } catch (error) {
+      streamError = error;
+    }
+
+    if (!isActiveResourceGenerationStream(entry) || entry.terminal) {
+      releaseResourceGenerationStream(entry);
+      return;
+    }
+    scheduleResourceGenerationReconnect(entry, streamError || new Error("Resource generation stream disconnected."));
+  }
+
+  function startResourceGenerationStream(context, jobId, options = {}) {
+    if (!jobId || !isCurrentRouteEnhancement(context)) return null;
+    const existing = resourceGenerationStreams.get(jobId);
+    if (existing) return existing;
+
+    const entry = {
+      context,
+      jobId,
+      cardTypes: normalizeCardTypes(options.cardTypes),
+      onConceptReady: options.onConceptReady,
+      transport: RESOURCE_GENERATION_ASYNC_ENABLED ? "sse" : "poll",
+      conceptReadyNotified: false,
+      reconnectAttempts: 0,
+      pollAttempts: 0,
+      retryTimer: null,
+      controller: null,
+      lastEventId: "",
+      terminal: false,
+      cancelled: false,
+    };
+    resourceGenerationStreams.set(jobId, entry);
+    if (entry.transport === "sse") {
+      void consumeResourceGenerationStream(entry);
+    } else {
+      void consumeResourceGenerationPoll(entry);
+    }
+    return entry;
+  }
+
+  function generationRequestKey(context, cardTypes, force, priority) {
+    return `${context.sessionId}:${context.nodeId}:${Boolean(force)}:${String(priority || "normal")}:${normalizeCardTypes(cardTypes).sort().join(",")}`;
+  }
+
+  async function requestGenerationForContext(context, cardTypes, {
+    force = false,
+    priority = "",
+    onConceptReady,
+  } = {}) {
+    const requestedCardTypes = normalizeCardTypes(cardTypes);
+    if (!requestedCardTypes.length || !isCurrentRouteEnhancement(context)) return null;
+
+    const requestKey = generationRequestKey(context, requestedCardTypes, force, priority);
+    const inFlightRequest = inFlightGenerationRequests.get(requestKey);
+    if (inFlightRequest) return inFlightRequest;
+
+    const request = (async () => {
+      try {
+        const result = await requestResourceGeneration(context.sessionId, context.nodeId, {
+          cardTypes: requestedCardTypes,
+          force,
+          priority,
+        });
+        if (!isCurrentRouteEnhancement(context)) return { ...result, stale: true };
+
+        const existingResources = resourceListFromResponse(result);
+        if (existingResources.length) mergeNodeResources(context.nodeId, existingResources);
+
+        const resultTypes = new Set(existingResources.map(resourceCardType));
+        const acceptedCardTypes = responseCardTypes(result, "requested_card_types") ?? requestedCardTypes;
+        const missingCardTypes = responseCardTypes(result, "missing_card_types")
+          ?? responseCardTypes(result, "missing_resources");
+        const pendingCardTypes = missingCardTypes ?? acceptedCardTypes.filter((cardType) => (
+          force || !resultTypes.has(cardType)
+        ));
+        const excludedCardTypes = requestedCardTypes.filter((cardType) => !acceptedCardTypes.includes(cardType));
+        const retainedResources = (resources.value[context.nodeId] ?? []).filter((resource) => (
+          excludedCardTypes.includes(resourceCardType(resource))
+        ));
+        if (retainedResources.length) markResourceCardsReady(context.nodeId, retainedResources);
+        const jobId = String(result?.job_id || "");
+        if (pendingCardTypes.length) {
+          markResourceCardsQueued(context.nodeId, pendingCardTypes, { jobId });
+        }
+        setResourceGenerationJob(context.nodeId, {
+          status: result?.status || (jobId ? "queued" : "completed"),
+          jobId,
+        });
+
+        let conceptReadyNotified = false;
+        const notifyConceptReady = ({ cacheHit = false } = {}) => {
+          if (conceptReadyNotified || !requestedCardTypes.includes("concept_map")) return;
+          conceptReadyNotified = true;
+          reportConceptReady(context, { cacheHit });
+          finishRouteEnhancement(context);
+          onConceptReady?.();
+        };
+        if (!force && resultTypes.has("concept_map")) notifyConceptReady({ cacheHit: true });
+
+        if (jobId && pendingCardTypes.length) {
+          const monitoredCardTypes = !RESOURCE_GENERATION_ASYNC_ENABLED
+            && requestedCardTypes.length === 1
+            && requestedCardTypes[0] === "concept_map"
+            ? RESOURCE_CARD_TYPES
+            : pendingCardTypes;
+          startResourceGenerationStream(context, jobId, {
+            cardTypes: monitoredCardTypes,
+            onConceptReady: () => notifyConceptReady(),
+          });
+        } else if (pendingCardTypes.length) {
+          markResourceCardsFailed(
+            context.nodeId,
+            pendingCardTypes,
+            "The resource generation service did not return a job id.",
+          );
+          if (pendingCardTypes.includes("concept_map")) finishRouteEnhancement(context);
+        }
+        return result;
+      } catch (error) {
+        if (isCurrentRouteEnhancement(context)) {
+          markResourceCardsFailed(context.nodeId, requestedCardTypes, error);
+          if (requestedCardTypes.includes("concept_map")) finishRouteEnhancement(context);
+        }
+        throw error;
+      }
+    })().finally(() => {
+      if (inFlightGenerationRequests.get(requestKey) === request) {
+        inFlightGenerationRequests.delete(requestKey);
+      }
+    });
+
+    inFlightGenerationRequests.set(requestKey, request);
+    return request;
   }
 
   async function fetchCurrentProbe() {
@@ -334,6 +860,8 @@ function createEduAgent() {
     knowledgeGraph.value = { nodes: [], edges: [] };
     nodeTitles.value = {};
     resources.value = {};
+    resourceGenerationStates.value = {};
+    inFlightGenerationRequests.clear();
     agentFeedback.value = [];
     lastDiagnostic.value = null;
     lastMasteryAttribution.value = null;
@@ -707,6 +1235,9 @@ function createEduAgent() {
     capabilityRadar.value = state.dynamic_profile?.capability_radar ?? capabilityRadar.value;
     diagnosticReport.value = state.dynamic_profile?.diagnostic_report_md ?? "";
     resources.value = resourcesFromDto(state);
+    Object.entries(resources.value).forEach(([nodeId, nodeResources]) => {
+      markResourceCardsReady(nodeId, Array.isArray(nodeResources) ? nodeResources : []);
+    });
     agentFeedback.value = state.agent_feedback ?? [];
 
     // 从持久化的 pipeline_log 提取最新 Agent 运行记录
@@ -1051,40 +1582,70 @@ function createEduAgent() {
       return { nodeId: context.nodeId, stale: true };
     }
 
-    const diagnostic = await restoreLatestDiagnostic(context.nodeId, {
+    const diagnosticPromise = restoreLatestDiagnostic(context.nodeId, {
       targetSessionId: context.sessionId,
       shouldApply: () => isCurrentRouteEnhancement(context),
     });
-    if (!isCurrentRouteEnhancement(context)) {
-      finishRouteEnhancement(context);
-      return { nodeId: context.nodeId, diagnostic, stale: true };
-    }
-
     const nodeLabel = nodeTitles.value[context.nodeId] || context.nodeId;
     try {
       const resourceResult = await fetchRouteNodeResources(context);
       if (!isCurrentRouteEnhancement(context)) {
-        return { nodeId: context.nodeId, diagnostic, resourceResult, stale: true };
+        return { nodeId: context.nodeId, resourceResult, stale: true };
       }
-      const nodeResources = Array.isArray(resourceResult?.resources) ? resourceResult.resources : [];
-      if (!isCurrentRouteEnhancement(context)) {
-        return { nodeId: context.nodeId, diagnostic, resourceResult, stale: true };
-      }
+      const nodeResources = resourceListFromResponse(resourceResult);
       mergeNodeResources(context.nodeId, nodeResources);
+      if (!isCurrentRouteEnhancement(context)) {
+        return { nodeId: context.nodeId, resourceResult, stale: true };
+      }
+
+      const missingCardTypes = missingResourceCardTypes(resources.value[context.nodeId] ?? []);
+      const missingSupportingCardTypes = missingCardTypes.filter((cardType) => cardType !== "concept_map");
+      let supportingRequested = false;
+      const requestSupportingCards = () => {
+        if (supportingRequested || !isCurrentRouteEnhancement(context)) return;
+        supportingRequested = true;
+        const requestedCardTypes = missingSupportingCardTypes.filter((cardType) => (
+          resourceCardState(context.nodeId, cardType)?.status !== "ready"
+        ));
+        if (!requestedCardTypes.length) return;
+        markResourceCardsQueued(context.nodeId, requestedCardTypes);
+        void requestGenerationForContext(context, requestedCardTypes, {
+          priority: "supporting_bundle",
+        }).catch((error) => {
+          if (!isCurrentRouteEnhancement(context)) return;
+          const message = error?.response?.data?.detail || error?.message || "Unknown error";
+          setInfo(`Could not start supporting resources: ${message}`, 10000);
+        });
+      };
+
+      if (missingCardTypes.includes("concept_map")) {
+        markResourceCardsQueued(context.nodeId, ["concept_map"]);
+        markResourceCardsQueued(context.nodeId, missingSupportingCardTypes, { status: "waiting" });
+        await requestGenerationForContext(context, ["concept_map"], {
+          priority: "concept_map",
+        });
+      } else {
+        reportConceptReady(context, { cacheHit: true });
+        finishRouteEnhancement(context);
+        requestSupportingCards();
+      }
+
+      const diagnostic = await diagnosticPromise;
       if (!isCurrentRouteEnhancement(context)) {
         return { nodeId: context.nodeId, diagnostic, resourceResult, stale: true };
       }
       const cardCount = nodeResources.length || (resources.value[context.nodeId] || []).length;
-      if (!silent) setInfo(cardCount ? `${nodeLabel}: ${cardCount} resources loaded.` : `${nodeLabel}: resources synchronized.`);
+      if (!silent) {
+        setInfo(cardCount ? `${nodeLabel}: ${cardCount} resources loaded.` : `${nodeLabel}: resources synchronized.`);
+      }
       return { nodeId: context.nodeId, diagnostic, resourceResult };
     } catch (error) {
       if (isCurrentRouteEnhancement(context)) {
         const message = error?.response?.data?.detail || error?.message || "Unknown error";
-        setInfo(`Could not synchronize resources: ${message}`, 10000);
+        setInfo(`资源生成失败：${message}`, 10000);
       }
-      return { nodeId: context.nodeId, diagnostic, error };
-    } finally {
       finishRouteEnhancement(context);
+      return { nodeId: context.nodeId, error };
     }
   }
 
@@ -1212,29 +1773,27 @@ function createEduAgent() {
       return;
     }
 
-    currentNode.value = nodeId;
-    isLoadingNode.value = true;
+    const context = createRouteEnhancementContext(nodeId);
     const nodeLabel = nodeTitles.value[nodeId] || nodeId;
     setInfo(`正在为「${nodeLabel}」生成学习资源...`);
+    let delegatedToResourceFlow = false;
 
     try {
       await startLearningSession({ nodeId });
-      const resourceResult = await fetchCurrentNodeResources(nodeId);
+      if (!isCurrentRouteEnhancement(context)) return { nodeId, stale: true };
       const state = await fetchCurrentSession();
+      if (!isCurrentRouteEnhancement(context)) return { nodeId, stale: true };
       hydrateState(state, { preservePathOrder: true });
-      currentNode.value = currentNodeFromDto(state) || nodeId;
-      const nodeResources = Array.isArray(resourceResult?.resources) ? resourceResult.resources : [];
-      mergeNodeResources(nodeId, nodeResources);
-      const cardCount = nodeResources.length || (resourcesFromDto(state)?.[currentNode.value] || []).length;
-      if (!silent) {
-        setInfo(cardCount ? `${nodeLabel} 已加载 ${cardCount} 份资源。` : `${nodeLabel} 资源生成完成。`);
-      }
+      currentNode.value = nodeId;
+      delegatedToResourceFlow = true;
+      return runRouteEnhancements(context, { silent });
     } catch (e) {
       const message = e?.response?.data?.detail || e?.message || "未知错误";
       setInfo(`资源生成失败：${message}`, 10000);
       console.error("loadNode failed:", e);
+      return { nodeId, error: e };
     } finally {
-      isLoadingNode.value = false;
+      if (!delegatedToResourceFlow) finishRouteEnhancement(context);
       refreshStatuses();
     }
   }
@@ -1363,28 +1922,61 @@ function createEduAgent() {
   async function refreshNodeResources(nodeId, options = {}) {
     if (!nodeId) return { ok: false, error: new Error("Missing learning node.") };
 
-    const { force, cardType } = normalizeResourceOptions(options);
+    const { force, cardType, cardTypes } = normalizeResourceOptions(options);
     const nodeLabel = nodeTitles.value[nodeId] || nodeId;
-    isLoadingNode.value = true;
-    setInfo(force ? `正在重新生成「${nodeLabel}」的学习资源...` : `正在生成「${nodeLabel}」的学习资源...`);
+    const requestedCardTypes = cardTypes.length
+      ? cardTypes
+      : (cardType ? normalizeCardTypes(cardType) : RESOURCE_CARD_TYPES);
+    const context = createCurrentResourceContext(nodeId);
+    if (!isCurrentRouteEnhancement(context)) {
+      return { ok: false, error: new Error("The learning node changed before generation started.") };
+    }
+
+    setInfo(
+      force
+        ? `正在重新生成「${nodeLabel}」的学习资源...`
+        : `正在同步「${nodeLabel}」的学习资源...`,
+    );
 
     try {
-      const result = await fetchCurrentNodeResources(nodeId, { force, cardType });
-      const nodeResources = Array.isArray(result.resources) ? result.resources : [];
-      mergeNodeResources(nodeId, nodeResources, cardType);
-      const cardCount = nodeResources.length;
-      setInfo(
-        result.status === "already_exists"
-          ? `「${nodeLabel}」资源已就绪（${cardCount} 份），无需重新生成。`
-          : `「${nodeLabel}」已生成 ${cardCount} 份新资源。`
-      );
-      return { ok: true, result, resources: nodeResources };
+      const readResult = await fetchCurrentNodeResources(nodeId);
+      if (!isCurrentRouteEnhancement(context)) {
+        return { ok: false, stale: true, error: new Error("The learning node changed during synchronization.") };
+      }
+      const existingResources = resourceListFromResponse(readResult);
+      if (existingResources.length) mergeNodeResources(nodeId, existingResources);
+
+      const existingTypes = new Set(existingResources.map(resourceCardType));
+      const cardTypesToGenerate = force
+        ? requestedCardTypes
+        : requestedCardTypes.filter((type) => !existingTypes.has(type));
+      if (!cardTypesToGenerate.length) {
+        setInfo(`「${nodeLabel}」资源已就绪，无需重新生成。`);
+        return { ok: true, result: readResult, resources: existingResources, status: "already_exists" };
+      }
+
+      markResourceCardsQueued(nodeId, cardTypesToGenerate, { status: "queued" });
+      const startsConceptFirstBundle = !force
+        && cardTypesToGenerate.length === 1
+        && cardTypesToGenerate[0] === "concept_map";
+      if (startsConceptFirstBundle) {
+        markResourceCardsQueued(
+          nodeId,
+          missingResourceCardTypes(resources.value[nodeId] ?? []).filter((cardType) => cardType !== "concept_map"),
+          { status: "waiting" },
+        );
+      }
+      const result = await requestGenerationForContext(context, cardTypesToGenerate, {
+        force,
+        priority: cardTypesToGenerate.includes("concept_map") ? "concept_map" : "card",
+      });
+      setInfo(`「${nodeLabel}」已提交 ${cardTypesToGenerate.length} 张资源的生成任务。`);
+      return { ok: true, result, resources: existingResources, status: result?.status || "queued" };
     } catch (e) {
       const message = e?.response?.data?.detail || e?.message || "未知错误";
       setInfo(`资源生成失败：${message}`, 10000);
       return { ok: false, error: e };
     } finally {
-      isLoadingNode.value = false;
       refreshStatuses();
     }
   }
@@ -1599,9 +2191,11 @@ function createEduAgent() {
     probeCollected,
     probeTotal,
     resources,
+    resourceGenerationStates,
     lastDiagnostic,
     lastMasteryAttribution,
     currentCards,
+    currentResourceCardStates,
     currentNodeTitle,
     currentPathNodes,
     messages,

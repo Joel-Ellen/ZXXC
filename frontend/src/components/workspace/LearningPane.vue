@@ -14,6 +14,7 @@
       :node-title="nodeTitle"
       :path-nodes="pathNodes"
       :loading="loading"
+      :card-states="cardStates"
       :overall-progress="overallProgress"
       :mastered-count="masteredCount"
       :last-diagnostic="lastDiagnostic"
@@ -51,6 +52,7 @@ defineProps({
   nodeTitle: { type: String, default: "" },
   pathNodes: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
+  cardStates: { type: Object, default: () => ({}) },
   overallProgress: { type: Number, default: 0 },
   masteredCount: { type: Number, default: 0 },
   lastDiagnostic: { type: Object, default: null },

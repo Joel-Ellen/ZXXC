@@ -178,26 +178,25 @@ def test_force_refresh_preserves_an_active_review_retest_quiz(monkeypatch) -> No
 
 
 @pytest.mark.asyncio
-async def test_session_resources_accepts_camel_case_card_type(monkeypatch) -> None:
+async def test_session_resources_is_read_only_and_accepts_camel_case_card_type(monkeypatch) -> None:
     from frontend import server
     from src.auth.security import SecurityManager
 
     called = {}
 
-    def fake_generate(user_id, course_id, node_id, force, *, card_type=None):
+    def fake_read(user_id, course_id, node_id, *, card_types=None):
         called.update({
             "user_id": user_id,
             "course_id": course_id,
             "node_id": node_id,
-            "force": force,
-            "card_type": card_type,
+            "card_types": card_types,
         })
         return {"status": "already_exists", "node_id": node_id, "resources": []}
 
     async def receive():
         return {"type": "http.request", "body": b"", "more_body": False}
 
-    monkeypatch.setattr(server.resource_service, "generate_current_node_resources", fake_generate)
+    monkeypatch.setattr(server.resource_service, "get_node_resources", fake_read)
     token = SecurityManager.create_token_pair("u1", "STUDENT")["access_token"]
     request = Request(
         {
@@ -221,8 +220,7 @@ async def test_session_resources_accepts_camel_case_card_type(monkeypatch) -> No
         "user_id": "u1",
         "course_id": "course1",
         "node_id": "N01",
-        "force": True,
-        "card_type": "diagnostic_quiz",
+        "card_types": ["diagnostic_quiz"],
     }
 
 
@@ -231,14 +229,14 @@ async def test_session_resource_generation_does_not_block_the_event_loop(monkeyp
     from frontend import server
     from src.auth.security import SecurityManager
 
-    def slow_generate(user_id, course_id, node_id, force, *, card_type=None):
+    def slow_read(user_id, course_id, node_id, *, card_types=None):
         time.sleep(0.2)
         return {"status": "already_exists", "node_id": node_id, "resources": []}
 
     async def receive():
         return {"type": "http.request", "body": b"", "more_body": False}
 
-    monkeypatch.setattr(server.resource_service, "generate_current_node_resources", slow_generate)
+    monkeypatch.setattr(server.resource_service, "get_node_resources", slow_read)
     token = SecurityManager.create_token_pair("u1", "STUDENT")["access_token"]
     request = Request(
         {

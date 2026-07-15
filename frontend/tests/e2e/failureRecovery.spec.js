@@ -167,22 +167,18 @@ test.describe("in-place recovery for critical learning requests", () => {
     });
     await page.goto("/learn/course-a/arrays");
     await expect(page.getByText("当前学习节点等待装配", { exact: true })).toBeVisible();
-
-    const generate = page.getByRole("button", { name: "生成", exact: true });
-    await generate.click();
-
     await expect(page.locator(".session-header__notice")).toContainText("资源生成失败：资源服务暂时不可用，请原位重试。");
     await expect(page).toHaveURL(/\/learn\/course-a\/arrays$/);
+    const generate = page.getByRole("button", { name: "重试生成", exact: true });
     await expect(generate).toBeEnabled();
-    await expect.poll(() => api.resourceRequests.filter((request) => request.cardType).length).toBe(1);
-
+    await expect.poll(() => api.resourceRequests.filter((request) => request.cardType === "concept_map").length).toBe(1);
     await generate.click();
 
     const conceptCard = page.locator('[data-resource-type="concept_map"]');
     await expect(conceptCard).toBeVisible();
     await expect(conceptCard.getByText("从零开始的索引把位置映射到数组元素。", { exact: true }).first()).toBeVisible();
-    await expect.poll(() => api.resourceRequests.filter((request) => request.cardType).length).toBe(2);
-    const generationRequests = api.resourceRequests.filter((request) => request.cardType);
+    await expect.poll(() => api.resourceRequests.filter((request) => request.cardType === "concept_map").length).toBe(2);
+    const generationRequests = api.resourceRequests.filter((request) => request.cardType === "concept_map");
     expect(generationRequests).toEqual([
       { nodeId: "arrays", cardType: "concept_map", force: false },
       { nodeId: "arrays", cardType: "concept_map", force: false },

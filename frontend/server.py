@@ -4838,6 +4838,13 @@ async def api_user_delete_account(request: Request) -> JSONResponse:
         if state_repo is not None and hasattr(state_repo, "delete_all"):
             state_repo.delete_all(user_id)
 
+    def _delete_resource_generation_data() -> None:
+        # Jobs may carry personalized cache entries and event payloads. Course
+        # base cache is intentionally shared and remains after account deletion.
+        from src.database.resource_generation_repo import ResourceGenerationRepo
+
+        ResourceGenerationRepo().delete_all(user_id)
+
     cleanup_steps = []
     if _db_available and SessionSnapshotRepo is not None:
         cleanup_steps.append(("session_snapshots", lambda: SessionSnapshotRepo().delete_all(user_id)))
@@ -4845,6 +4852,7 @@ async def api_user_delete_account(request: Request) -> JSONResponse:
         cleanup_steps.append(("sessions", lambda: SessionRepo().delete_all(user_id)))
     cleanup_steps.extend([
         ("learning_state", _delete_state_data),
+        ("resource_generation", _delete_resource_generation_data),
         ("enrollments", lambda: _get_enrollment_repo().delete_all(user_id)),
         ("profile", lambda: _get_profile_repo().delete(user_id)),
     ])
@@ -5158,6 +5166,10 @@ async def api_compat_generate_node_resources(request: Request) -> JSONResponse:
 
 
 # Legacy import names are bridges too; only routes below define the supported HTTP surface.
+# Keep the historical synchronous five-card handler unreachable as well: a direct
+# import of its old name must use the resource-service bridge instead of reviving
+# the in-module generator retained above for source-history context.
+api_generate_node_resources = api_compat_generate_node_resources
 api_ask_tutor = api_compat_ask_tutor
 api_ask_tutor_stream = api_compat_ask_tutor_stream
 
@@ -5454,12 +5466,6 @@ _CODE_EXECUTION_CAPACITY = threading.BoundedSemaphore(
     _concurrency_environment("EDUAGENT_CODE_MAX_CONCURRENT", 2)
 )
 _CODE_EXECUTION_USER_CAPACITY = KeyedConcurrencyLimiter(1)
-_RESOURCE_GENERATION_CAPACITY = threading.BoundedSemaphore(
-    _concurrency_environment("EDUAGENT_RESOURCE_MAX_CONCURRENT", 3)
-)
-_RESOURCE_GENERATION_USER_CAPACITY = KeyedConcurrencyLimiter(1)
-
-
 def _capacity_response(surface: str) -> JSONResponse:
     incr_metric("runtime.capacity_reject_total", surface=surface)
     return JSONResponse(
@@ -5513,6 +5519,22 @@ def _code_practice_rollout(user_id: str) -> tuple[RolloutDecision, Optional[JSON
     )
     response.headers["X-EduAgent-Feature-Cohort"] = decision.cohort
     return decision, response
+
+
+def _resource_generation_rollout(user_id: str) -> RolloutDecision:
+    """Assign the durable job/SSE surface to a stable learner cohort."""
+    default_percent = 0.0 if is_production() else 100.0
+    decision = rollout_decision(
+        "resource_generation",
+        user_id,
+        default_percent=default_percent,
+    )
+    incr_metric(
+        "release.rollout_decision_total",
+        feature="resource_generation",
+        cohort=decision.cohort,
+    )
+    return decision
 
 
 def _attach_rollout_header(response: JSONResponse, decision: RolloutDecision) -> JSONResponse:
@@ -5711,63 +5733,182 @@ async def api_session_resources(request: Request) -> JSONResponse:
     if auth_error is not None:
         return auth_error
     node_id = request.path_params.get("node_id", "")
-    force = request.query_params.get("force", "false").lower() in {"1", "true", "yes"}
     card_type = request.query_params.get("card_type") or request.query_params.get("cardType")
-    card_type_label = str(card_type or "all").strip()
-    if card_type_label not in {
-        "all",
-        "concept_map",
-        "code_snippet",
-        "interactive_exercise",
-        "video_summary",
-        "diagnostic_quiz",
-    }:
-        card_type_label = "invalid"
-    global_acquired = _RESOURCE_GENERATION_CAPACITY.acquire(blocking=False)
-    user_acquired = global_acquired and _RESOURCE_GENERATION_USER_CAPACITY.acquire(user_id)
-    if not global_acquired or not user_acquired:
-        if global_acquired:
-            _RESOURCE_GENERATION_CAPACITY.release()
-        incr_metric("resource.generate_total", outcome="failure", card_type=card_type_label)
-        return _capacity_response("resource_generation")
+    started = time.perf_counter()
     try:
-        try:
-            result = await asyncio.to_thread(
-                resource_service.generate_current_node_resources,
-                user_id,
-                course_id,
-                node_id,
-                force,
-                card_type=card_type,
-            )
-        except Exception as exc:
-            incr_metric("resource.generate_total", outcome="failure", card_type=card_type_label)
-            log_event(
-                "resource.generate.failed",
-                level="error",
-                card_type=card_type_label,
-                error_type=type(exc).__name__,
-            )
-            raise
-    finally:
-        _RESOURCE_GENERATION_USER_CAPACITY.release(user_id)
-        _RESOURCE_GENERATION_CAPACITY.release()
+        result = await asyncio.to_thread(
+            resource_service.get_node_resources,
+            user_id,
+            course_id,
+            node_id,
+            card_types=[card_type] if card_type else None,
+        )
+    except Exception as exc:
+        incr_metric("resource.read_total", outcome="failure")
+        log_event("resource.read.failed", level="error", error_type=type(exc).__name__)
+        raise
     status_code = int(result.pop("status_code", 200))
-    generation = result.get("generation") if isinstance(result.get("generation"), dict) else {}
-    generation_status = str(generation.get("status") or result.get("status") or "")
-    if status_code >= 400:
-        outcome = "failure"
-    elif "fallback" in generation_status:
-        outcome = "degraded"
-    else:
-        outcome = "success"
-    incr_metric("resource.generate_total", outcome=outcome, card_type=card_type_label)
+    observe_metric("resource.read.duration_ms", round((time.perf_counter() - started) * 1000, 3))
+    incr_metric("resource.read_total", outcome="failure" if status_code >= 400 else "success")
     return JSONResponse(result, status_code=status_code)
+
+
+async def api_session_resource_generation(request: Request) -> JSONResponse:
+    """Create or join a background generation job; never wait for model work."""
+    user_id, course_id = _session_ids(request.path_params.get("session_id", ""))
+    auth_error = _event_session_auth_error(request, user_id)
+    if auth_error is not None:
+        return auth_error
+    node_id = request.path_params.get("node_id", "")
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JSONResponse({"detail": "INVALID_GENERATION_REQUEST"}, status_code=422)
+    if not isinstance(body, dict):
+        return JSONResponse({"detail": "INVALID_GENERATION_REQUEST"}, status_code=422)
+    raw_types = body.get("card_types", body.get("cardTypes", body.get("card_type", body.get("cardType", []))))
+    if isinstance(raw_types, str):
+        card_types = [raw_types]
+    elif isinstance(raw_types, list):
+        card_types = raw_types
+    else:
+        return JSONResponse({"detail": "INVALID_CARD_TYPES"}, status_code=422)
+    force = body.get("force", False)
+    if not isinstance(force, bool):
+        return JSONResponse({"detail": "INVALID_FORCE"}, status_code=422)
+
+    # The read boundary remains available to every cohort so a holdback user
+    # can still render a previously cached concept map.  Do not revive the
+    # synchronous compatibility generator here: a disabled cohort is strictly
+    # cache-only until it is admitted to the durable-job rollout.
+    rollout = _resource_generation_rollout(user_id)
+    if not rollout.enabled:
+        cached = await asyncio.to_thread(
+            resource_service.get_node_resources,
+            user_id,
+            course_id,
+            node_id,
+            card_types=card_types,
+        )
+        cached_status = int(cached.pop("status_code", 200))
+        resources = list(cached.get("resources") or [])
+        response = JSONResponse(
+            {
+                "job_id": None,
+                "status": "rollout_holdback",
+                "task_status": "rollout_holdback",
+                "generation_available": False,
+                "feature": "resource_generation",
+                "existing_resources": resources,
+                "resources": resources,
+                "missing_card_types": list(cached.get("missing_card_types") or card_types),
+                "requested_card_types": card_types,
+                "node_id": node_id,
+                "created": False,
+            },
+            status_code=cached_status,
+            headers={"Cache-Control": "no-store"},
+        )
+        incr_metric("resource.generation_rollout_holdback_total", cohort=rollout.cohort)
+        return _attach_rollout_header(response, rollout)
+
+    started = time.perf_counter()
+    result = await asyncio.to_thread(
+        resource_service.request_generation,
+        user_id,
+        course_id,
+        node_id,
+        card_types=card_types,
+        force=force,
+        priority=str(body.get("priority") or "normal"),
+    )
+    status_code = int(result.pop("status_code", 200))
+    observe_metric("resource.generation_request.duration_ms", round((time.perf_counter() - started) * 1000, 3))
+    outcome = "failure" if status_code >= 400 else "success"
+    incr_metric("resource.generation_request_total", outcome=outcome)
+    # Keep the launch aggregate continuous while generation moves off the
+    # request thread. This measures whether a generation request was accepted;
+    # card-level outcomes remain available through the job event stream.
+    incr_metric(
+        "resource.generate_total",
+        outcome=outcome,
+        card_type=card_types[0] if len(card_types) == 1 else "bundle",
+    )
+    return _attach_rollout_header(JSONResponse(result, status_code=status_code), rollout)
+
+
+async def api_resource_generation_events(request: Request) -> EventSourceResponse | JSONResponse:
+    """Replay durable job events and wait for later cards for reconnecting clients."""
+    job_id = str(request.path_params.get("job_id", "")).strip()
+    principal, auth_error = _access_principal(request)
+    if auth_error is not None:
+        return auth_error
+    user_id = str((principal or {}).get("sub") or "")
+    rollout = _resource_generation_rollout(user_id)
+    if not rollout.enabled:
+        incr_metric("resource.generation_rollout_holdback_total", cohort=rollout.cohort)
+        return _attach_rollout_header(
+            JSONResponse(
+                {"detail": "RESOURCE_GENERATION_ROLLOUT_HOLDBACK", "feature": "resource_generation"},
+                status_code=404,
+                headers={"Cache-Control": "no-store"},
+            ),
+            rollout,
+        )
+    job = await asyncio.to_thread(resource_service.get_generation_job, job_id)
+    if job is None:
+        return JSONResponse({"detail": "RESOURCE_GENERATION_JOB_NOT_FOUND"}, status_code=404)
+    if str(job.get("user_id") or "") != user_id:
+        return JSONResponse({"detail": "RESOURCE_GENERATION_JOB_FORBIDDEN"}, status_code=403)
+    try:
+        after_event_id = int(request.headers.get("last-event-id") or request.query_params.get("after") or 0)
+    except (TypeError, ValueError):
+        after_event_id = 0
+
+    async def event_generator():
+        cursor = max(0, after_event_id)
+        terminal_statuses = {"completed", "failed", "cancelled"}
+        while True:
+            events = await asyncio.to_thread(
+                resource_service.list_generation_events,
+                job_id,
+                after_event_id=cursor,
+                user_id=user_id,
+            )
+            for event in events:
+                event_id = int(event.get("event_id") or cursor)
+                cursor = max(cursor, event_id)
+                event_type = str(event.get("event_type") or event.get("event") or "message")
+                payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+                yield {
+                    "id": str(event_id),
+                    "event": event_type,
+                    "data": json.dumps(payload, ensure_ascii=False),
+                }
+                if event_type in {"completed", "failed"}:
+                    return
+            latest = await asyncio.to_thread(resource_service.get_generation_job, job_id, user_id=user_id)
+            if latest is None:
+                return
+            if str(latest.get("status") or "") in terminal_statuses:
+                # A completed job may have no new events only if an old client
+                # reconnects after its terminal event; it has nothing left to wait for.
+                return
+            if await request.is_disconnected():
+                return
+            await asyncio.sleep(0.25)
+
+    return EventSourceResponse(
+        event_generator(),
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 _CLIENT_TELEMETRY_SURFACES = frozenset({"app", "auth", "learn", "other"})
 _CLIENT_EXCEPTION_KINDS = frozenset({"api", "bootstrap", "unhandled_rejection", "vue", "window"})
 _CLIENT_RECOVERY_OUTCOMES = frozenset({"failure", "success"})
+_CLIENT_RESOURCE_CACHE_READ_OUTCOMES = frozenset({"failure", "success"})
+_CLIENT_RESOURCE_CONCEPT_READY_OUTCOMES = frozenset({"success"})
 
 
 def _ops_token_matches(request: Request) -> bool:
@@ -5845,6 +5986,31 @@ async def api_ops_client_event(request: Request) -> JSONResponse:
         outcome = "within_5s" if duration_ms <= 5000 else "over_5s"
         incr_metric("frontend.next_task_ready_total", surface=surface, outcome=outcome)
         observe_metric("frontend.next_task_ready_ms", duration_ms, surface=surface)
+    elif event in {"resource_cache_read", "resource_concept_ready"}:
+        duration_ms = body.get("duration_ms")
+        cache_hit = body.get("cache_hit")
+        outcome = str(body.get("outcome") or "").strip().lower()
+        allowed_outcomes = (
+            _CLIENT_RESOURCE_CACHE_READ_OUTCOMES
+            if event == "resource_cache_read"
+            else _CLIENT_RESOURCE_CONCEPT_READY_OUTCOMES
+        )
+        if (
+            isinstance(duration_ms, bool)
+            or not isinstance(duration_ms, int)
+            or not 0 <= duration_ms <= 600_000
+            or not isinstance(cache_hit, bool)
+            or outcome not in allowed_outcomes
+        ):
+            return JSONResponse({"status": "invalid_client_event"}, status_code=422)
+        metric_prefix = f"frontend.{event}"
+        labels = {
+            "surface": surface,
+            "cache_hit": "true" if cache_hit else "false",
+            "outcome": outcome,
+        }
+        incr_metric(f"{metric_prefix}_total", **labels)
+        observe_metric(f"{metric_prefix}_ms", float(duration_ms), **labels)
     else:
         return JSONResponse({"status": "unsupported_client_event"}, status_code=422)
     return JSONResponse({"status": "accepted"}, status_code=202)
@@ -5940,6 +6106,26 @@ async def _captcha_backend_unavailable_response(
     )
 
 
+_RETIRED_RESOURCE_GENERATION_PATHS = frozenset({
+    "/api/resources/generate",
+    "/api/resources/generate-all",
+})
+
+# ``new_routes`` still exports the historical synchronous agent-chain routes
+# for import compatibility.  Never mount them into the application: the
+# canonical session API owns resource generation now.
+_MOUNTED_NEW_ROUTES = tuple(
+    route
+    for route in new_routes
+    if getattr(route, "path", "") not in _RETIRED_RESOURCE_GENERATION_PATHS
+)
+
+
+async def api_retired_resource_generation(_request: Request) -> JSONResponse:
+    """Tombstone historical synchronous resource-generator HTTP paths."""
+    return JSONResponse({"detail": "NOT_FOUND"}, status_code=404, headers={"Cache-Control": "no-store"})
+
+
 app = Starlette(
     debug=not is_production(),
     exception_handlers={
@@ -5969,7 +6155,9 @@ app = Starlette(
         # Short-term deprecated alias. Main app and new clients must use /tutor with stream=true or Accept: text/event-stream.
         Route("/api/sessions/{session_id}/tutor-stream", api_session_tutor_stream, methods=["POST"]),
         Route("/api/sessions/{session_id}/replan", api_session_replan, methods=["POST"]),
+        Route("/api/sessions/{session_id}/resources/{node_id}/generation", api_session_resource_generation, methods=["POST"]),
         Route("/api/sessions/{session_id}/resources/{node_id}", api_session_resources, methods=["GET"]),
+        Route("/api/resource-generation-jobs/{job_id}/events", api_resource_generation_events, methods=["GET"]),
 
         # Course, user, and shared support APIs used by the main app.
         Route("/api/courses", api_list_courses, methods=["GET"]),
@@ -5988,6 +6176,12 @@ app = Starlette(
         Route("/api/ops/metrics", api_ops_metrics, methods=["GET"]),
         Route("/api/ready", api_readiness, methods=["GET"]),
         Route("/api/reset", api_reset, methods=["POST"]),
+
+        # These paths previously reached a second synchronous agent chain.
+        # Keep deterministic 404 tombstones so stale callers cannot fall
+        # through to the SPA or silently revive that generator.
+        Route("/api/resources/generate", api_retired_resource_generation, methods=["POST"]),
+        Route("/api/resources/generate-all", api_retired_resource_generation, methods=["POST"]),
 
         # Compat/internal legacy learning endpoints.
         # Frozen bridge paths for old clients and diagnostics only.
@@ -6018,7 +6212,7 @@ app = Starlette(
         Route("/api/auth/sessions/{session_id}", api_auth_session_revoke, methods=["DELETE"]),
 
         # Additional API routes merged from backend modules.
-        *new_routes,
+        *_MOUNTED_NEW_ROUTES,
         Mount("/", app=SpaStaticFiles(directory=str(static_dir), html=True)),
     ],
 )
@@ -6045,12 +6239,20 @@ _COMPAT_INTERNAL_PATHS = frozenset({
     "/api/resources/generate-node",
 }) | frozenset(
     route.path
-    for route in new_routes
+    for route in _MOUNTED_NEW_ROUTES
     if route.path != "/api/health"
 )
 
 
 def _compat_request_allowed(request: Request) -> bool:
+    # The old synchronous resource bridge is retained only for deliberate
+    # diagnostics/migrations.  Enabling generic compat APIs must not expose
+    # it accidentally.
+    if request.url.path == "/api/resources/generate-node" and not operational_switch(
+        "legacy_resource_generation",
+        default=False,
+    ):
+        return False
     enabled = operational_switch("compat_api", default=not is_production())
     if not enabled:
         return False
@@ -6325,8 +6527,21 @@ async def _preload_services() -> None:
         except Exception as exc:
             print(f"[Startup] ES warmup skipped: {exc}")
 
+    async def _recover_resource_jobs_in_background() -> None:
+        try:
+            recovered = await asyncio.to_thread(resource_service.recover_pending_generation_jobs)
+            if recovered:
+                log_event("resource.generation.recovered", job_count=len(recovered))
+        except Exception as exc:
+            log_event(
+                "resource.generation.recovery_failed",
+                level="warning",
+                error_type=type(exc).__name__,
+            )
+
     # 不阻塞应用启动；知识库可用时自动增强，不可用时保持降级链路可用。
     asyncio.create_task(_warm_es_in_background())
+    asyncio.create_task(_recover_resource_jobs_in_background())
 
 
 def _register_startup_handler() -> None:

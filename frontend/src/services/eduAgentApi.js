@@ -3,7 +3,8 @@ import { normalizeLearningEvent } from "../contracts/learning";
 import { normalizeTutorRequest } from "../contracts/tutor";
 import { createRefreshRecoveryReporter } from "./clientTelemetry";
 
-const RESOURCE_GENERATION_TIMEOUT_MS = 120_000;
+const RESOURCE_READ_TIMEOUT_MS = 15_000;
+const RESOURCE_GENERATION_REQUEST_TIMEOUT_MS = 15_000;
 const refreshRecoveryReporter = createRefreshRecoveryReporter();
 
 // ── 认证 ──
@@ -167,14 +168,42 @@ export async function replanSession(sessionId, payload = {}) {
   return data;
 }
 
-export async function fetchSessionResources(sessionId, nodeId, { force = false, cardType = "" } = {}) {
-  const params = { force };
-  if (cardType) params.card_type = cardType;
+export async function fetchSessionResources(sessionId, nodeId) {
   const { data } = await apiClient.get(`/sessions/${sessionPath(sessionId)}/resources/${encodeURIComponent(nodeId)}`, {
-    params,
-    timeout: RESOURCE_GENERATION_TIMEOUT_MS,
+    timeout: RESOURCE_READ_TIMEOUT_MS,
   });
   return data;
+}
+
+export async function requestResourceGeneration(
+  sessionId,
+  nodeId,
+  { cardTypes = [], force = false, priority = "" } = {},
+) {
+  const normalizedCardTypes = [...new Set(
+    (Array.isArray(cardTypes) ? cardTypes : [cardTypes])
+      .map((cardType) => String(cardType || "").trim())
+      .filter(Boolean),
+  )];
+  const payload = {
+    card_types: normalizedCardTypes,
+    force: Boolean(force),
+  };
+  if (priority) payload.priority = priority;
+
+  const { data } = await apiClient.post(
+    `/sessions/${sessionPath(sessionId)}/resources/${encodeURIComponent(nodeId)}/generation`,
+    payload,
+    { timeout: RESOURCE_GENERATION_REQUEST_TIMEOUT_MS },
+  );
+  return data;
+}
+
+export async function streamResourceGeneration(jobId, handlers = {}) {
+  return streamSseGet(
+    `/api/resource-generation-jobs/${encodeURIComponent(jobId)}/events`,
+    handlers,
+  );
 }
 
 export async function fetchSessionPracticeProblem(sessionId, problemOrResourceId) {
@@ -300,6 +329,104 @@ async function streamSsePost(url, payload, { onToken, onDone, onReset, onError, 
     }
   } catch (err) {
     if (err?.name !== "AbortError") onError?.(err);
+  }
+}
+
+async function streamSseGet(url, {
+  onEvent,
+  onQueued,
+  onCardReady,
+  onCardFailed,
+  onCompleted,
+  onFailed,
+  onError,
+  signal,
+  lastEventId = "",
+} = {}) {
+  const token = tokenStore.getAccessToken();
+  let response;
+  try {
+    response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Accept: "text/event-stream",
+        "X-Request-ID": createRequestId(),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(lastEventId ? { "Last-Event-ID": lastEventId } : {}),
+      },
+      credentials: "include",
+      signal,
+    });
+  } catch (error) {
+    if (error?.name !== "AbortError") onError?.(error);
+    return;
+  }
+
+  if (!response.ok || !response.body) {
+    onError?.(new Error(`SSE request failed: HTTP ${response.status}`));
+    return;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+  let receivedTerminalEvent = false;
+
+  const dispatch = (rawEvent) => {
+    let eventName = "message";
+    let eventId = "";
+    const dataLines = [];
+    for (const line of rawEvent.split("\n")) {
+      if (line.startsWith("event:")) {
+        eventName = line.slice(6).trim();
+      } else if (line.startsWith("id:")) {
+        eventId = line.slice(3).trim();
+      } else if (line.startsWith("data:")) {
+        dataLines.push(line.slice(5).trimStart());
+      }
+    }
+    if (!dataLines.length) return;
+
+    let data;
+    try {
+      data = JSON.parse(dataLines.join("\n"));
+    } catch {
+      return;
+    }
+
+    const event = { event: eventName, data, id: eventId };
+    onEvent?.(event);
+    if (eventName === "queued") onQueued?.(data, event);
+    if (eventName === "card_ready") onCardReady?.(data, event);
+    if (eventName === "card_failed") onCardFailed?.(data, event);
+    if (eventName === "completed") {
+      receivedTerminalEvent = true;
+      onCompleted?.(data, event);
+    }
+    if (eventName === "failed") {
+      receivedTerminalEvent = true;
+      onFailed?.(data, event);
+    }
+  };
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+      let separatorIndex;
+      while ((separatorIndex = buffer.indexOf("\n\n")) !== -1) {
+        const rawEvent = buffer.slice(0, separatorIndex);
+        buffer = buffer.slice(separatorIndex + 2);
+        if (rawEvent.trim()) dispatch(rawEvent);
+      }
+    }
+    if (buffer.trim()) dispatch(buffer);
+    if (!receivedTerminalEvent && !signal?.aborted) {
+      onError?.(new Error("Resource generation stream ended before completion."));
+    }
+  } catch (error) {
+    if (error?.name !== "AbortError") onError?.(error);
   }
 }
 

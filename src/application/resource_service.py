@@ -3,14 +3,33 @@
 
 from __future__ import annotations
 
+import concurrent.futures
+import json
+import hashlib
 import inspect
+import os
 import re
+import threading
 import time
-from typing import Any, Dict, Optional
+from contextlib import contextmanager
+from dataclasses import replace
+from datetime import datetime, timezone
+from typing import Any, Dict, Iterable, Iterator, Optional
 
 from src.adapters.domain_to_response import resource_response
 from src.adapters.state_to_domain import resource_contract_from_card
+from src.database.resource_generation_repo import ResourceGenerationRepo
 from src.observability import bind_context, incr_metric, log_event, observe_metric
+from src.orchestration_runtime import get_runtime
+from src.resource_generation import (
+    CARD_TYPES,
+    GeneratedResourcePayload,
+    ResourceContext,
+    ResourceGenerator,
+    build_resource_context,
+    validate_resource_payload,
+)
+from src.resource_generation.prompts import render_markdown
 from src.state.agent_state import ResourceCard
 from src.validation.pipeline import get_validation_pipeline
 
@@ -29,6 +48,7 @@ _TEMPLATE_FALLBACK_NOTICE = (
     "> Generation status: local fallback template. "
     "This card was not produced by a model response.\n\n"
 )
+_COURSE_BASE_CACHE_POLICY = "generic-context-v1"
 
 _KNOWN_SEMANTIC_KEYWORDS: Dict[tuple[str, str], tuple[str, ...]] = {
     ("data_structures", "N01"): (
@@ -593,7 +613,7 @@ def _attach_generation_summary(
     }
 
 
-def generate_current_node_resources(
+def _legacy_generate_current_node_resources(
     user_id: str,
     course_id: str = "data_structures",
     node_id: Optional[str] = None,
@@ -860,3 +880,1490 @@ def generate_current_node_resources(
         if active_retest_resource_id:
             payload["preserved_retest_resource_id"] = active_retest_resource_id
         return payload
+
+
+# The legacy implementation above remains as a rollback reference while the
+# public entry points below are used by the HTTP API and background workers.
+_RESOURCE_JOB_REPO: Optional[ResourceGenerationRepo] = None
+_RESOURCE_JOB_REPO_LOCK = threading.Lock()
+_RESOURCE_JOB_FUTURES: Dict[str, concurrent.futures.Future[Any]] = {}
+_RESOURCE_JOB_FUTURES_LOCK = threading.Lock()
+_RESOURCE_JOB_RETRY_TIMERS: Dict[str, threading.Timer] = {}
+_RESOURCE_JOB_RETRY_TIMERS_LOCK = threading.Lock()
+_RESOURCE_SESSION_LOCKS: Dict[tuple[str, str], threading.RLock] = {}
+_RESOURCE_SESSION_LOCKS_LOCK = threading.Lock()
+
+
+def _resource_job_worker_count() -> int:
+    try:
+        configured = int(os.environ.get("EDUAGENT_RESOURCE_JOB_WORKERS", "3"))
+    except (TypeError, ValueError):
+        configured = 3
+    return max(1, min(8, configured))
+
+
+def _resource_global_generation_max_concurrency() -> int:
+    """Return the cross-process generation ceiling.
+
+    Local executor workers only constrain one application instance.  Production
+    deployments can set this independently when several instances share the
+    PostgreSQL coordinator; retaining the old worker count as the default
+    keeps a single-instance deployment behaviorally unchanged.
+    """
+    raw = os.environ.get(
+        "EDUAGENT_RESOURCE_GLOBAL_MAX_CONCURRENCY",
+        str(_RESOURCE_JOB_WORKER_COUNT),
+    )
+    try:
+        configured = int(raw)
+    except (TypeError, ValueError):
+        configured = _RESOURCE_JOB_WORKER_COUNT
+    return max(1, min(256, configured))
+
+
+def _resource_global_slot_retry_delay_seconds() -> float:
+    """Bound a delayed requeue so a saturated slot never blocks a worker."""
+    try:
+        configured = float(os.environ.get("EDUAGENT_RESOURCE_SLOT_RETRY_SECONDS", "0.25"))
+    except (TypeError, ValueError):
+        configured = 0.25
+    return max(0.05, min(5.0, configured))
+
+
+def _resource_job_recovery_stale_seconds() -> float:
+    """Return the startup lease timeout for workers that died while running."""
+    try:
+        configured = float(os.environ.get("EDUAGENT_RESOURCE_JOB_STALE_SECONDS", "90"))
+    except (TypeError, ValueError):
+        configured = 90.0
+    # The normal concept + supporting phases are bounded to roughly 40 seconds.
+    # Keep a small positive floor but let operators choose a larger lease for a
+    # slower provider or deployment rollout.
+    return max(1.0, min(3600.0, configured))
+
+
+_RESOURCE_JOB_WORKER_COUNT = _resource_job_worker_count()
+
+# Keep one worker reserved for the first visible learning surface. The normal
+# pool owns the remaining configured capacity, so a queued supporting bundle
+# cannot consume every worker while a concept map is waiting. With a one-worker
+# deployment all jobs share the reserved worker; that preserves the configured
+# concurrency ceiling even though it cannot provide preemption.
+_RESOURCE_CONCEPT_JOB_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=1,
+    thread_name_prefix="eduagent-resource-concept",
+)
+_RESOURCE_JOB_EXECUTOR: Optional[concurrent.futures.ThreadPoolExecutor] = (
+    concurrent.futures.ThreadPoolExecutor(
+        max_workers=_RESOURCE_JOB_WORKER_COUNT - 1,
+        thread_name_prefix="eduagent-resource-job",
+    )
+    if _RESOURCE_JOB_WORKER_COUNT > 1
+    else None
+)
+
+
+def get_resource_generation_repo() -> ResourceGenerationRepo:
+    """Return the process-level coordination repository used by workers."""
+    global _RESOURCE_JOB_REPO
+    with _RESOURCE_JOB_REPO_LOCK:
+        if _RESOURCE_JOB_REPO is None:
+            _RESOURCE_JOB_REPO = ResourceGenerationRepo()
+        return _RESOURCE_JOB_REPO
+
+
+@contextmanager
+def _resource_session_lock(user_id: str, course_id: str) -> Iterator[None]:
+    key = (str(user_id), str(course_id))
+    with _RESOURCE_SESSION_LOCKS_LOCK:
+        lock = _RESOURCE_SESSION_LOCKS.setdefault(key, threading.RLock())
+    with lock:
+        yield
+
+
+def _normalise_requested_types(
+    card_types: Optional[Iterable[str]] = None,
+    *,
+    card_type: Optional[str] = None,
+) -> tuple[Optional[list[str]], Optional[str]]:
+    if card_types is None:
+        values: list[Any] = [card_type] if card_type and str(card_type).strip() else list(CARD_TYPES)
+    elif isinstance(card_types, str):
+        values = [card_types]
+    else:
+        values = list(card_types)
+    if not values:
+        values = list(CARD_TYPES)
+    requested = list(dict.fromkeys(str(value).strip() for value in values if str(value).strip()))
+    invalid = [value for value in requested if value not in CARD_TYPES]
+    if invalid:
+        return None, f"Unsupported card_type '{invalid[0]}'"
+    return [card_type for card_type in RESOURCE_CARD_ORDER if card_type in requested], None
+
+
+def _read_session(user_id: str, course_id: str) -> Any:
+    """Read a session without initializing the expensive orchestration runtime.
+
+    The learning route establishes its session before requesting resources. A
+    direct resource GET must not create a graph/LLM runtime merely to discover
+    that no cards exist, otherwise a cache read can inherit remote startup
+    latency. It also must not hydrate a persisted session here: restoring a
+    snapshot replaces process runtime state, which turns a nominal GET into a
+    stateful operation. Session bootstrap owns that recovery path.
+    """
+    from src import orchestration_runtime
+
+    # Unit tests and embedded deployments can inject a lightweight runtime
+    # through this module. It must win even when another surface has already
+    # initialized the process singleton, otherwise a synchronous compatibility
+    # bridge writes one session and reads an unrelated one back.
+    if get_runtime is not orchestration_runtime.get_runtime:
+        try:
+            runtime = get_runtime()
+        except Exception:
+            runtime = None
+    else:
+        runtime = getattr(orchestration_runtime, "_runtime", None)
+    if runtime is None:
+        return None
+    peek_session = getattr(runtime, "peek_session", None)
+    session = peek_session(user_id, course_id) if callable(peek_session) else None
+    return session
+
+
+def _resource_payload(
+    node_id: str,
+    cards: Iterable[ResourceCard],
+    *,
+    requested_types: Iterable[str],
+    status: str = "ok",
+    include_legacy: bool = False,
+) -> Dict[str, Any]:
+    cards = list(cards)
+    response = resource_response(
+        node_id,
+        [resource_contract_from_card(card) for card in cards],
+        status=status,
+    )
+    payload = response.to_compatible_dict() if include_legacy else response.to_dto_dict()
+    present = {card.card_type for card in cards}
+    payload["missing_card_types"] = [
+        card_type for card_type in requested_types if card_type not in present
+    ]
+    return payload
+
+
+def _cache_record_payload(record: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(record, dict):
+        return None
+    payload = record.get("payload")
+    if isinstance(payload, dict) and isinstance(payload.get("card"), dict):
+        payload = payload["card"]
+    return dict(payload) if isinstance(payload, dict) else None
+
+
+def _cache_record_source_refs(record: Dict[str, Any], card: ResourceCard) -> list[Dict[str, Any]]:
+    metadata = card.metadata if isinstance(card.metadata, dict) else {}
+    raw_refs = metadata.get("source_refs")
+    if not isinstance(raw_refs, list):
+        raw_refs = record.get("source_refs")
+    if not isinstance(raw_refs, list):
+        return []
+    return [
+        dict(ref)
+        for ref in raw_refs
+        if isinstance(ref, dict) and str(ref.get("id") or "").strip()
+    ]
+
+
+def _is_generic_base_cache(record: Any) -> bool:
+    """Only permit explicitly sanitized course-cache records across learners."""
+    if not isinstance(record, dict):
+        return False
+    metadata = record.get("metadata")
+    if (
+        isinstance(metadata, dict)
+        and metadata.get("cache_scope") == "course_base"
+        and metadata.get("cache_policy") == _COURSE_BASE_CACHE_POLICY
+    ):
+        return True
+    payload = _cache_record_payload(record)
+    card_metadata = payload.get("metadata") if isinstance(payload, dict) else None
+    return (
+        isinstance(card_metadata, dict)
+        and card_metadata.get("cache_scope") == "course_base"
+        and card_metadata.get("cache_policy") == _COURSE_BASE_CACHE_POLICY
+    )
+
+
+def _cache_read_context(
+    user_id: str,
+    course_id: str,
+    node_id: str,
+    state: Any,
+    *,
+    locale: str,
+) -> ResourceContext:
+    """Build a local-only context for cache validation without a runtime."""
+    context = build_resource_context(
+        None,
+        state,
+        course_id,
+        node_id,
+        node_title=node_id,
+        locale=locale,
+    )
+    # A persisted state should already agree, but the request identity is the
+    # boundary used for a personal-cache lookup.
+    return replace(context, user_id=str(user_id))
+
+
+def _validated_cached_card(
+    record: Any,
+    context: ResourceContext,
+    card_type: str,
+    *,
+    cache_scope: str,
+) -> Optional[ResourceCard]:
+    """Validate a cached card before exposing it without writing it anywhere."""
+    if not isinstance(record, dict):
+        return None
+    if str(record.get("content_version") or "") != str(context.content_version):
+        return None
+    if str(record.get("locale") or "") != str(context.locale):
+        return None
+    if str(record.get("knowledge_index_version") or "") != str(context.knowledge_index_version):
+        return None
+    payload = _cache_record_payload(record)
+    if payload is None:
+        return None
+    try:
+        card = ResourceCard.model_validate(payload)
+    except Exception:
+        return None
+    if card.card_type != card_type or card.node_id != context.node_id:
+        return None
+
+    metadata = dict(card.metadata or {})
+    if str(metadata.get("content_version") or "") != str(context.content_version):
+        return None
+    if str(metadata.get("knowledge_index_version") or "") != str(context.knowledge_index_version):
+        return None
+    if str(metadata.get("locale") or "") != str(context.locale):
+        return None
+    cached_generation = metadata.get("generation")
+    if not isinstance(cached_generation, dict) or not str(cached_generation.get("source") or "").strip():
+        return None
+    structured_payload = metadata.get("structured_payload")
+    if not isinstance(structured_payload, dict):
+        return None
+    source_refs = _cache_record_source_refs(record, card)
+    if not source_refs:
+        return None
+    binding = metadata.get("semantic_binding")
+    if not isinstance(binding, dict):
+        return None
+    if (
+        str(binding.get("course_id") or "") != str(context.course_id)
+        or str(binding.get("node_id") or "") != str(context.node_id)
+        or not str(binding.get("title") or "").strip()
+    ):
+        return None
+
+    validation_context = replace(
+        context,
+        node_title=str(binding["title"]),
+        knowledge_refs=source_refs,
+    )
+    structured_validation = validate_resource_payload(card_type, structured_payload, validation_context)
+    if not structured_validation.valid or structured_validation.payload is None:
+        return None
+
+    generation = dict(metadata.get("generation") or {})
+    rendered = _truthful_generated_content(
+        render_markdown(card_type, structured_validation.payload),
+        generation,
+    )
+    metadata.update({
+        "title": str(structured_validation.payload.get("title") or binding["title"]),
+        "structured_payload": structured_validation.payload,
+        "body_markdown": rendered,
+        "source_refs": source_refs,
+    })
+    candidate = card.model_copy(update={"content": rendered, "metadata": metadata})
+    try:
+        validated, _validation = get_validation_pipeline().validate_resource_card(candidate)
+    except Exception:
+        return None
+    if validated is None:
+        return None
+
+    validated_metadata = dict(validated.metadata or {})
+    validated_generation = dict(validated_metadata.get("generation") or {})
+    validated_generation.update({"cache_hit": True, "cache_scope": cache_scope})
+    validated_metadata["generation"] = validated_generation
+    validated_metadata["personalization_basis"] = {
+        "mastery_bucket": context.mastery_bucket,
+        "error_signature": context.error_signature,
+        "cognitive_style": context.cognitive_style,
+    }
+    validated_metadata["difficulty_rationale"] = {
+        "mastery": round(float(context.mastery), 3),
+        "mastery_bucket": context.mastery_bucket,
+        "learning_stage": context.learning_stage,
+        "source": "cache_read",
+    }
+    return validated.model_copy(update={
+        "difficulty": max(0.1, min(1.0, 1.0 - float(context.mastery))),
+        "cognitive_style": context.cognitive_style,
+        "metadata": validated_metadata,
+    })
+
+
+def _read_cached_card_for_get(
+    repo: ResourceGenerationRepo,
+    context: ResourceContext,
+    card_type: str,
+    *,
+    allow_personal: bool,
+) -> Optional[ResourceCard]:
+    """Read matching cache records without table setup, writes, or job creation."""
+    if allow_personal:
+        personal_reader = getattr(repo, "read_personal_cache", None)
+        if callable(personal_reader):
+            personal = personal_reader(
+                context.user_id,
+                context.course_id,
+                context.node_id,
+                card_type,
+                mastery_bucket=context.mastery_bucket,
+                error_signature=context.error_signature,
+                cognitive_style=context.cognitive_style,
+                content_version=context.content_version,
+                locale=context.locale,
+                knowledge_index_version=context.knowledge_index_version,
+            )
+            card = _validated_cached_card(personal, context, card_type, cache_scope="personal")
+            if card is not None:
+                return card
+
+    base_reader = getattr(repo, "read_base_cache", None)
+    if not callable(base_reader):
+        return None
+    base = base_reader(
+        context.course_id,
+        context.node_id,
+        card_type,
+        content_version=context.content_version,
+        locale=context.locale,
+        knowledge_index_version=context.knowledge_index_version,
+    )
+    if not _is_generic_base_cache(base):
+        return None
+    return _validated_cached_card(base, context, card_type, cache_scope="course_base")
+
+
+def get_node_resources(
+    user_id: str,
+    course_id: str = "data_structures",
+    node_id: Optional[str] = None,
+    *,
+    card_types: Optional[Iterable[str]] = None,
+    card_type: Optional[str] = None,
+    include_legacy: bool = False,
+    locale: str = "zh-CN",
+    repo: Optional[ResourceGenerationRepo] = None,
+) -> Dict[str, Any]:
+    """Return persisted or validated cached cards without generating or persisting."""
+    requested_types, error = _normalise_requested_types(card_types, card_type=card_type)
+    if error:
+        return {"error": error, "status_code": 400}
+    session = _read_session(user_id, course_id)
+    state = getattr(session, "agent_state", None)
+    target_node = str(node_id or getattr(state, "current_node_id", "") or "")
+    if not target_node:
+        return {"error": "node_id is required", "status_code": 400}
+    cards = list(getattr(state, "generated_resources", {}).get(target_node, [])) if state else []
+    selected_by_type = {
+        card.card_type: card
+        for card in cards
+        if card.card_type in (requested_types or [])
+    }
+    missing_types = [
+        requested_type
+        for requested_type in requested_types or []
+        if requested_type not in selected_by_type
+    ]
+    if missing_types:
+        try:
+            context = _cache_read_context(user_id, course_id, target_node, state, locale=locale)
+            repository = repo or get_resource_generation_repo()
+            for requested_type in missing_types:
+                cached = _read_cached_card_for_get(
+                    repository,
+                    context,
+                    requested_type,
+                    allow_personal=state is not None,
+                )
+                if cached is not None:
+                    selected_by_type[requested_type] = cached
+        except Exception:
+            # Cache infrastructure is an acceleration path.  A read failure
+            # must remain a cold read, not mutate session state or enqueue work.
+            pass
+    selected = [
+        selected_by_type[requested_type]
+        for requested_type in requested_types or []
+        if requested_type in selected_by_type
+    ]
+    return _resource_payload(
+        target_node,
+        selected,
+        requested_types=requested_types or [],
+        include_legacy=include_legacy,
+    )
+
+
+def get_generation_job(
+    job_id: str,
+    *,
+    user_id: Optional[str] = None,
+    repo: Optional[ResourceGenerationRepo] = None,
+) -> Optional[Dict[str, Any]]:
+    """Read a job, optionally applying the caller's ownership boundary."""
+    job = (repo or get_resource_generation_repo()).get_job(str(job_id))
+    if job is None or (user_id is not None and str(job.get("user_id")) != str(user_id)):
+        return None
+    return job
+
+
+def list_generation_events(
+    job_id: str,
+    *,
+    after_event_id: int = 0,
+    limit: int = 100,
+    user_id: Optional[str] = None,
+    repo: Optional[ResourceGenerationRepo] = None,
+) -> list[Dict[str, Any]]:
+    """Read reconnectable generation events without changing job state."""
+    repository = repo or get_resource_generation_repo()
+    if get_generation_job(job_id, user_id=user_id, repo=repository) is None:
+        return []
+    return repository.list_events(str(job_id), after_event_id=after_event_id, limit=limit)
+
+
+def _generation_context(
+    runtime: Any,
+    state: Any,
+    course_id: str,
+    node_id: str,
+    locale: str,
+    *,
+    allow_remote_retrieval: bool = True,
+) -> tuple[Dict[str, Any], Any]:
+    binding = _canonical_node_binding(runtime, course_id, node_id)
+    context = build_resource_context(
+        runtime,
+        state,
+        course_id,
+        node_id,
+        node_title=str(binding["title"]),
+        locale=locale,
+        allow_remote_retrieval=allow_remote_retrieval,
+    )
+    return binding, context
+
+
+def _idempotency_key(
+    *,
+    user_id: str,
+    course_id: str,
+    node_id: str,
+    card_types: Iterable[str],
+    force: bool,
+    use_cache: bool,
+    priority: str,
+    context: Any,
+) -> str:
+    request = {
+        "user_id": str(user_id),
+        "course_id": str(course_id),
+        "node_id": str(node_id),
+        "card_types": list(card_types),
+        "force": bool(force),
+        "use_cache": bool(use_cache),
+        # Priority changes scheduling semantics. It is therefore part of the
+        # request identity rather than something a later caller can silently
+        # lose when joining an active low-priority job.
+        "priority": str(priority or "normal"),
+        "content_version": str(context.content_version),
+        "knowledge_index_version": str(context.knowledge_index_version),
+        "locale": str(context.locale),
+        "personalization": str(context.personalization_cache_key),
+    }
+    return hashlib.sha256(json.dumps(request, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _invalidate_requested_caches(
+    repo: ResourceGenerationRepo,
+    user_id: str,
+    course_id: str,
+    node_id: str,
+    card_types: Iterable[str],
+) -> None:
+    for card_type in card_types:
+        # A force refresh deliberately has card scope. A full refresh asks for
+        # all five types and therefore invalidates the full node package.
+        repo.delete_base_cache(course_id, node_id, resource_type=card_type)
+        repo.delete_personal_cache(user_id, course_id, node_id, resource_type=card_type)
+
+
+def _is_concept_priority_job(job: Optional[Dict[str, Any]]) -> bool:
+    """Return whether a persisted job belongs on the reserved concept lane."""
+    if not isinstance(job, dict):
+        return False
+    priority = str(job.get("priority") or "").strip().lower()
+    card_types = [
+        str(card_type)
+        for card_type in job.get("card_types", [])
+        if str(card_type) in CARD_TYPES
+    ]
+    # The explicit priority is durable and is the public scheduling contract.
+    # A supporting bundle must never enter the reserved lane, even if an old
+    # client labels a full-card request as ``concept_map``.
+    return priority == "concept_map" and card_types == ["concept_map"]
+
+
+def _generation_executor_for_job(job: Optional[Dict[str, Any]]) -> concurrent.futures.ThreadPoolExecutor:
+    if _is_concept_priority_job(job):
+        return _RESOURCE_CONCEPT_JOB_EXECUTOR
+    # On an intentionally single-worker installation there is no background
+    # pool. Both lanes share the one executor to retain the configured limit.
+    return _RESOURCE_JOB_EXECUTOR or _RESOURCE_CONCEPT_JOB_EXECUTOR
+
+
+def _submit_generation_job(
+    job_id: str,
+    *,
+    repo: Optional[ResourceGenerationRepo] = None,
+    replace_active: bool = False,
+) -> None:
+    repository = repo or get_resource_generation_repo()
+    executor = _generation_executor_for_job(repository.get_job(job_id))
+
+    def clear(completed: concurrent.futures.Future[Any]) -> None:
+        with _RESOURCE_JOB_FUTURES_LOCK:
+            if _RESOURCE_JOB_FUTURES.get(job_id) is completed:
+                _RESOURCE_JOB_FUTURES.pop(job_id, None)
+
+    with _RESOURCE_JOB_FUTURES_LOCK:
+        existing = _RESOURCE_JOB_FUTURES.get(job_id)
+        if existing is not None and not existing.done() and not replace_active:
+            return
+        future = executor.submit(run_generation_job, job_id, repo=repository)
+        _RESOURCE_JOB_FUTURES[job_id] = future
+    # ``Future.add_done_callback`` invokes immediately for a fast completed
+    # task, so it must run after releasing the non-reentrant futures lock.
+    future.add_done_callback(clear)
+
+
+def _schedule_generation_job_retry(
+    job_id: str,
+    *,
+    repo: ResourceGenerationRepo,
+) -> None:
+    """Resubmit a slot-contended job after a short worker-side delay."""
+    normalized_job_id = str(job_id)
+
+    def retry() -> None:
+        with _RESOURCE_JOB_RETRY_TIMERS_LOCK:
+            if _RESOURCE_JOB_RETRY_TIMERS.get(normalized_job_id) is timer:
+                _RESOURCE_JOB_RETRY_TIMERS.pop(normalized_job_id, None)
+        job = repo.get_job(normalized_job_id)
+        if job is None or str(job.get("status") or "") not in {"queued", "retrying"}:
+            return
+        _submit_generation_job(normalized_job_id, repo=repo)
+
+    with _RESOURCE_JOB_RETRY_TIMERS_LOCK:
+        existing = _RESOURCE_JOB_RETRY_TIMERS.get(normalized_job_id)
+        if existing is not None and existing.is_alive():
+            return
+        timer = threading.Timer(_resource_global_slot_retry_delay_seconds(), retry)
+        timer.daemon = True
+        _RESOURCE_JOB_RETRY_TIMERS[normalized_job_id] = timer
+    timer.start()
+
+
+def request_generation(
+    user_id: str,
+    course_id: str = "data_structures",
+    node_id: Optional[str] = None,
+    *,
+    card_types: Optional[Iterable[str]] = None,
+    force: bool = False,
+    priority: str = "normal",
+    locale: str = "zh-CN",
+    use_cache: bool = True,
+    submit: bool = True,
+    repo: Optional[ResourceGenerationRepo] = None,
+) -> Dict[str, Any]:
+    """Create or merge a background generation job without doing model work."""
+    requested_types, error = _normalise_requested_types(card_types)
+    if error:
+        return {"error": error, "status_code": 400}
+    normalized_priority = str(priority or "normal").strip().lower() or "normal"
+    session = get_session(user_id, course_id)
+    state = session.agent_state
+    target_node = str(node_id or state.current_node_id or (state.active_path[0] if state.active_path else "") or "")
+    if not target_node:
+        return {"error": "node_id is required", "status_code": 400}
+
+    active_retest_resource_id = _active_retest_resource_id(state, target_node)
+    if force and active_retest_resource_id and "diagnostic_quiz" in (requested_types or []):
+        if (requested_types or []) == ["diagnostic_quiz"]:
+            return {
+                "status": "review_retest_active",
+                "error": "An active review retest must be completed before replacing its diagnostic quiz.",
+                "status_code": 409,
+                "node_id": target_node,
+                "retest_resource_id": active_retest_resource_id,
+            }
+        requested_types = [card_type for card_type in requested_types or [] if card_type != "diagnostic_quiz"]
+
+    runtime = get_runtime()
+    context_started = time.perf_counter()
+    _binding, context = _generation_context(
+        runtime,
+        state,
+        course_id,
+        target_node,
+        locale,
+        allow_remote_retrieval=False,
+    )
+    observe_metric("resource.generation.context_ms", round((time.perf_counter() - context_started) * 1000, 3))
+    existing_cards = list(state.generated_resources.get(target_node, []))
+    existing_types = {card.card_type for card in existing_cards}
+    types_to_generate = list(requested_types or []) if force else [
+        card_type for card_type in requested_types or [] if card_type not in existing_types
+    ]
+    # A cold-node concept request is the only request shape that fans out
+    # automatically. Targeted force refreshes remain strictly card-scoped;
+    # full refreshes retain their explicit all-card request.
+    auto_supporting_card_types = (
+        [
+            card_type
+            for card_type in RESOURCE_CARD_ORDER
+            if card_type != "concept_map" and card_type not in existing_types
+        ]
+        if (
+            not force
+            and normalized_priority == "concept_map"
+            and requested_types == ["concept_map"]
+            and types_to_generate == ["concept_map"]
+        )
+        else []
+    )
+    existing_payload = _resource_payload(
+        target_node,
+        existing_cards,
+        requested_types=requested_types or [],
+    )
+    if not types_to_generate:
+        return {
+            "job_id": None,
+            "status": "completed",
+            "task_status": "completed",
+            "existing_resources": existing_payload["resources"],
+            "resources": existing_payload["resources"],
+            "missing_card_types": [],
+            "requested_card_types": requested_types or [],
+            "node_id": target_node,
+            "created": False,
+        }
+
+    repository = repo or get_resource_generation_repo()
+    if force:
+        try:
+            _invalidate_requested_caches(repository, user_id, course_id, target_node, types_to_generate)
+        except Exception as exc:
+            # Force jobs bypass cache reads, so an unavailable cache must not
+            # prevent a fresh card from being created.
+            state.record_error(f"resource_cache_invalidate_failed:{target_node}:{type(exc).__name__}")
+            incr_metric("resource.generation.cache_invalidate_failed_total")
+    key = _idempotency_key(
+        user_id=user_id,
+        course_id=course_id,
+        node_id=target_node,
+        card_types=types_to_generate,
+        force=force,
+        use_cache=use_cache,
+        priority=normalized_priority,
+        context=context,
+    )
+    job, created = repository.create_or_get_active_job(
+        user_id,
+        course_id,
+        target_node,
+        key,
+        card_types=types_to_generate,
+        force=force,
+        priority=normalized_priority,
+        request_params={
+            "requested_card_types": requested_types,
+            "locale": context.locale,
+            "use_cache": bool(use_cache),
+            "auto_supporting_card_types": auto_supporting_card_types,
+        },
+        content_version=context.content_version,
+        knowledge_index_version=context.knowledge_index_version,
+        locale=context.locale,
+        max_retries=1,
+    )
+    if submit and (created or str(job.get("status") or "") in {"queued", "retrying"}):
+        _submit_generation_job(str(job["job_id"]), repo=repository)
+    result = {
+        "job_id": job["job_id"],
+        "status": job["status"],
+        "task_status": job["status"],
+        "existing_resources": existing_payload["resources"],
+        "resources": existing_payload["resources"],
+        "missing_card_types": types_to_generate,
+        "requested_card_types": requested_types or [],
+        "node_id": target_node,
+        "created": created,
+    }
+    if active_retest_resource_id:
+        result["preserved_retest_resource_id"] = active_retest_resource_id
+    return result
+
+
+def recover_pending_generation_jobs(
+    job_ids: Optional[Iterable[str]] = None,
+    *,
+    repo: Optional[ResourceGenerationRepo] = None,
+    stale_after_seconds: Optional[float] = None,
+) -> list[str]:
+    """Requeue pending jobs after a process restart or worker loss.
+
+    The durable repository intentionally owns job discovery. It may expose a
+    ``list_pending_jobs`` method in deployments with an external queue; this
+    service also accepts explicit ids so a server lifespan hook can recover
+    jobs it observed before shutdown without coupling to storage internals.
+    """
+    repository = repo or get_resource_generation_repo()
+    if job_ids is None:
+        recover_stale = getattr(repository, "recover_stale_running_jobs", None)
+        if callable(recover_stale):
+            if stale_after_seconds is None:
+                lease_seconds = _resource_job_recovery_stale_seconds()
+            else:
+                try:
+                    lease_seconds = max(0.0, float(stale_after_seconds))
+                except (TypeError, ValueError):
+                    lease_seconds = _resource_job_recovery_stale_seconds()
+            recover_stale(stale_after_seconds=lease_seconds)
+        list_pending = getattr(repository, "list_pending_jobs", None)
+        jobs = list_pending() if callable(list_pending) else []
+        job_ids = [job.get("job_id") for job in jobs if isinstance(job, dict)]
+    recovered: list[str] = []
+    for candidate in job_ids:
+        job_id = str(candidate or "").strip()
+        if not job_id:
+            continue
+        job = repository.get_job(job_id)
+        if job is None or str(job.get("status") or "") not in {"queued", "retrying"}:
+            continue
+        _submit_generation_job(job_id, repo=repository)
+        recovered.append(job_id)
+    return recovered
+
+
+def _cache_card_for_context(
+    repo: ResourceGenerationRepo,
+    context: Any,
+    card_type: str,
+) -> Optional[ResourceCard]:
+    personal = repo.get_personal_cache(
+        context.user_id,
+        context.course_id,
+        context.node_id,
+        card_type,
+        mastery_bucket=context.mastery_bucket,
+        error_signature=context.error_signature,
+        cognitive_style=context.cognitive_style,
+        content_version=context.content_version,
+        locale=context.locale,
+        knowledge_index_version=context.knowledge_index_version,
+    )
+    card = _validated_cached_card(personal, context, card_type, cache_scope="personal")
+    if card is not None:
+        return card
+
+    base = repo.get_base_cache(
+        context.course_id,
+        context.node_id,
+        card_type,
+        content_version=context.content_version,
+        locale=context.locale,
+        knowledge_index_version=context.knowledge_index_version,
+    )
+    if not _is_generic_base_cache(base):
+        return None
+    return _validated_cached_card(base, context, card_type, cache_scope="course_base")
+
+
+def _is_generic_course_context(context: ResourceContext) -> bool:
+    """Whether a generated card is safe to share through the course base cache.
+
+    Resource prompts deliberately receive learner-specific state.  A course
+    cache must therefore only store output made from the neutral baseline,
+    otherwise adapted wording or diagnostic material can leak to another
+    learner.  Personal cache entries retain every other generation.
+    """
+    try:
+        mastery = float(context.mastery)
+    except (TypeError, ValueError):
+        return False
+    if abs(mastery - 0.5) > 1e-9 or str(context.mastery_bucket) != "developing":
+        return False
+    if str(context.error_signature or "").strip().lower() not in {"", "none"}:
+        return False
+    if str(context.cognitive_style or "").strip().lower() not in {"", "textual"}:
+        return False
+    if context.completed_resource_types:
+        return False
+    if isinstance(context.recent_diagnostic, dict) and any(
+        value not in (None, "", [], {}, ())
+        for value in context.recent_diagnostic.values()
+    ):
+        return False
+    return str(context.learning_stage or "").strip().upper() in {
+        "",
+        "PRACTICE",
+        "STANDARD",
+        "STANDARD_PATH",
+    }
+
+
+def _course_base_cache_card(context: ResourceContext, card: ResourceCard) -> Optional[ResourceCard]:
+    """Strip learner-specific cache fields before storing a course-level card."""
+    if not _is_generic_course_context(context):
+        return None
+    metadata = dict(card.metadata or {})
+    structured_payload = metadata.get("structured_payload")
+    if not isinstance(structured_payload, dict):
+        return None
+    base_payload = dict(structured_payload)
+    if card.card_type == "interactive_exercise":
+        # This is the only first-class learner signal in a card payload.  Do
+        # not carry a previous learner's error signature into the base layer.
+        base_payload["error_signature"] = "none"
+
+    for key, value in base_payload.items():
+        metadata[key] = value
+    if card.card_type == "diagnostic_quiz":
+        metadata["questions"] = list(base_payload.get("questions") or [])
+        metadata["quiz_revision"] = 1
+    generation = dict(metadata.get("generation") or {})
+    generation.pop("job_id", None)
+    metadata.update({
+        "structured_payload": base_payload,
+        "body_markdown": _truthful_generated_content(
+            render_markdown(card.card_type, base_payload),
+            generation,
+        ),
+        "generation": generation,
+        "cache_scope": "course_base",
+        "cache_policy": _COURSE_BASE_CACHE_POLICY,
+        "personalization_basis": {
+            "scope": "course_base",
+            "policy": _COURSE_BASE_CACHE_POLICY,
+        },
+        "difficulty_rationale": {"source": "course_base_cache"},
+    })
+    return card.model_copy(update={
+        "content": metadata["body_markdown"],
+        "difficulty": 0.5,
+        "cognitive_style": "textual",
+        "metadata": metadata,
+    })
+
+
+def _store_card_in_caches(repo: ResourceGenerationRepo, context: Any, card: ResourceCard) -> None:
+    metadata = dict(card.metadata or {})
+    payload = card.model_dump(mode="json")
+    source_refs = metadata.get("source_refs") if isinstance(metadata.get("source_refs"), list) else []
+    cache_metadata = {
+        "generation": metadata.get("generation", {}),
+        "content_version": metadata.get("content_version", context.content_version),
+        "knowledge_index_version": metadata.get("knowledge_index_version", context.knowledge_index_version),
+    }
+    base_card = _course_base_cache_card(context, card)
+    if base_card is not None:
+        base_metadata = dict(base_card.metadata or {})
+        base_source_refs = (
+            base_metadata.get("source_refs")
+            if isinstance(base_metadata.get("source_refs"), list)
+            else []
+        )
+        repo.upsert_base_cache(
+            context.course_id,
+            context.node_id,
+            card.card_type,
+            base_card.model_dump(mode="json"),
+            content_version=context.content_version,
+            locale=context.locale,
+            knowledge_index_version=context.knowledge_index_version,
+            source_refs=base_source_refs,
+            metadata={
+                "generation": base_metadata.get("generation", {}),
+                "content_version": base_metadata.get("content_version", context.content_version),
+                "knowledge_index_version": base_metadata.get(
+                    "knowledge_index_version",
+                    context.knowledge_index_version,
+                ),
+                "cache_scope": "course_base",
+                "cache_policy": _COURSE_BASE_CACHE_POLICY,
+            },
+        )
+    repo.upsert_personal_cache(
+        context.user_id,
+        context.course_id,
+        context.node_id,
+        card.card_type,
+        payload,
+        mastery_bucket=context.mastery_bucket,
+        error_signature=context.error_signature,
+        cognitive_style=context.cognitive_style,
+        content_version=context.content_version,
+        locale=context.locale,
+        knowledge_index_version=context.knowledge_index_version,
+        metadata={**cache_metadata, "cache_scope": "personal"},
+    )
+
+
+def _from_runtime_result(
+    generator: ResourceGenerator,
+    context: Any,
+    card_type: str,
+    result: Any,
+) -> GeneratedResourcePayload:
+    content, metadata = _generation_metadata(result)
+    source = str(metadata.get("source") or "unknown")
+    raw_payload = (
+        result.get("structured_payload") if isinstance(result, dict) else getattr(result, "structured_payload", None)
+    )
+    if isinstance(raw_payload, dict):
+        generated = generator._result_from_payload(  # noqa: SLF001 - shared generator owns validation
+            card_type,
+            raw_payload,
+            context,
+            source=source,
+            provider=metadata.get("provider"),
+            model=metadata.get("model"),
+            fallback_reason=metadata.get("fallback_reason"),
+            elapsed_ms=float(metadata.get("elapsed_ms") or 0.0),
+        )
+        return replace(generated, attempt_count=int(metadata.get("attempt_count") or generated.attempt_count))
+    fallback = generator.template(context, card_type, str(metadata.get("fallback_reason") or "legacy_unstructured_output"))
+    return replace(
+        fallback,
+        body_markdown=_truthful_generated_content(content or fallback.body_markdown, metadata),
+        source=source,
+        provider=metadata.get("provider"),
+        model=metadata.get("model"),
+        attempt_count=int(metadata.get("attempt_count") or 0),
+        fallback_reason=metadata.get("fallback_reason") or fallback.fallback_reason,
+        elapsed_ms=float(metadata.get("elapsed_ms") or 0.0),
+    )
+
+
+def _generate_phase(
+    runtime: Any,
+    context: Any,
+    card_types: list[str],
+) -> Dict[str, GeneratedResourcePayload]:
+    if not card_types:
+        return {}
+    generator = ResourceGenerator()
+    difficulty = max(0.1, 1.0 - float(context.mastery))
+    runtime_generate = getattr(runtime, "generate_resource_contents", None)
+    if callable(runtime_generate):
+        kwargs: Dict[str, Any] = {}
+        if _call_supports_keyword(runtime_generate, "course_id"):
+            kwargs["course_id"] = context.course_id
+        if _call_supports_keyword(runtime_generate, "node_title"):
+            kwargs["node_title"] = context.node_title
+        if _call_supports_keyword(runtime_generate, "resource_context"):
+            kwargs["resource_context"] = context
+        raw = runtime_generate(context.node_id, card_types, difficulty, **kwargs)
+        if isinstance(raw, dict):
+            return {
+                card_type: _from_runtime_result(generator, context, card_type, raw.get(card_type))
+                for card_type in card_types
+                if raw.get(card_type) is not None
+            }
+    llm = runtime.get_llm() if callable(getattr(runtime, "get_llm", None)) else None
+    if card_types == ["concept_map"]:
+        return {"concept_map": generator.generate(llm, context, "concept_map", max_tokens=1600, timeout_sec=18.0)}
+    return generator.generate_bundle(llm, context, card_types, max_tokens=2800, timeout_sec=20.0)
+
+
+def _quiz_payload_with_stable_answers(payload: Dict[str, Any], node_id: str, revision: int) -> Dict[str, Any]:
+    result = dict(payload)
+    questions = []
+    seed = sum(ord(char) for char in node_id) + revision
+    for index, value in enumerate(result.get("questions", []), start=1):
+        question = dict(value) if isinstance(value, dict) else value
+        if not isinstance(question, dict):
+            questions.append(question)
+            continue
+        options = list(question.get("options") or [])
+        try:
+            original = int(question.get("answer_index", 0))
+        except (TypeError, ValueError):
+            original = 0
+        if len(options) == 4 and 0 <= original < 4:
+            desired = (seed + index) % 4
+            correct = options.pop(original)
+            options.insert(desired, correct)
+            question["options"] = options
+            question["answer_index"] = desired
+        questions.append(question)
+    result["questions"] = questions
+    return result
+
+
+def _resource_card_from_generated(
+    generated: GeneratedResourcePayload,
+    *,
+    context: Any,
+    binding: Dict[str, Any],
+    existing_cards: list[ResourceCard],
+    force: bool,
+    job_id: str,
+) -> ResourceCard:
+    card_type = generated.card_type
+    quiz_revision = _diagnostic_quiz_revision(existing_cards, force) if card_type == "diagnostic_quiz" else 1
+    payload = dict(generated.structured_payload)
+    if card_type == "diagnostic_quiz":
+        payload = _quiz_payload_with_stable_answers(payload, context.node_id, quiz_revision)
+    # Older extension runtimes can still return Markdown without the shared
+    # structured payload. Preserve it long enough for the local semantic gate
+    # to reject a wrong-topic response; modern runtime paths always render
+    # from the validated payload below.
+    if generated.fallback_reason == "legacy_unstructured_output":
+        body_markdown = generated.body_markdown
+    else:
+        body_markdown = render_markdown(card_type, payload)
+    if generated.source == "template":
+        body_markdown = _truthful_generated_content(body_markdown, {"source": "template"})
+    source_ids = {str(value) for value in payload.get("source_ref_ids", [])}
+    source_refs = [
+        dict(ref) for ref in context.source_refs
+        if not source_ids or str(ref.get("id") or "") in source_ids
+    ]
+    generation = generated.generation_metadata()
+    generation.update({"job_id": job_id, "phase": "concept" if card_type == "concept_map" else "supporting_bundle"})
+    metadata: Dict[str, Any] = {
+        **payload,
+        "structured_payload": dict(payload),
+        "body_markdown": body_markdown,
+        "title": str(payload.get("title") or binding["title"]),
+        "render_type": card_type,
+        "resource_type": card_type,
+        "contract_version": 2,
+        "source_refs": source_refs,
+        "generation": generation,
+        "content_version": context.content_version,
+        "knowledge_index_version": context.knowledge_index_version,
+        "locale": context.locale,
+        "semantic_binding": dict(binding),
+        "difficulty_rationale": {
+            "mastery": round(float(context.mastery), 3),
+            "mastery_bucket": context.mastery_bucket,
+            "learning_stage": context.learning_stage,
+        },
+        "personalization_basis": {
+            "mastery_bucket": context.mastery_bucket,
+            "error_signature": context.error_signature,
+            "cognitive_style": context.cognitive_style,
+        },
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if card_type == "diagnostic_quiz":
+        metadata["quiz_revision"] = quiz_revision
+        metadata["questions"] = payload.get("questions", [])
+    elif card_type == "interactive_exercise":
+        metadata.update(_interactive_exercise_metadata(context.node_id, str(binding["title"])))
+    elif card_type == "code_snippet":
+        practice = dict(context.code_practice) if isinstance(context.code_practice, dict) else {}
+        if not practice:
+            practice = problem_binding_for_node(context.node_id)
+        metadata.update({
+            "practice": practice,
+            "practice_problem_id": practice["problem_id"],
+            "practice_version": practice["version"],
+            "starter_code": practice["starter_code"],
+        })
+    resource_id = f"{context.node_id}_{card_type}_supp"
+    if card_type == "diagnostic_quiz" and quiz_revision > 1:
+        resource_id = f"{resource_id}_r{quiz_revision}"
+    return ResourceCard(
+        resource_id=resource_id,
+        node_id=context.node_id,
+        card_type=card_type,
+        content=body_markdown,
+        difficulty=max(0.1, min(1.0, 1.0 - float(context.mastery))),
+        cognitive_style=context.cognitive_style,
+        metadata=metadata,
+    )
+
+
+def _persist_ready_card(
+    *,
+    repo: ResourceGenerationRepo,
+    job_id: str,
+    session: Any,
+    context: Any,
+    binding: Dict[str, Any],
+    card: ResourceCard,
+) -> tuple[Optional[ResourceCard], Optional[Dict[str, Any]]]:
+    state = session.agent_state
+    validation_pipeline = get_validation_pipeline()
+    validation_started = time.perf_counter()
+    validated, validation = validation_pipeline.validate_resource_card(card)
+    observe_metric(
+        "resource.generation.validation_ms",
+        round((time.perf_counter() - validation_started) * 1000, 3),
+        card_type=card.card_type,
+    )
+    if validated is None:
+        issue_codes = _record_resource_rejection(state, context.node_id, card.card_type, validation, stage="resource_job_output")
+        fallback_generation = _fallback_generation(dict(card.metadata.get("generation") or {}), issue_codes)
+        fallback_generated = replace(
+            ResourceGenerator().template(
+                context,
+                card.card_type,
+                str(fallback_generation.get("fallback_reason") or "resource_validation_failed"),
+            ),
+            fallback_reason=str(fallback_generation.get("fallback_reason") or "resource_validation_failed"),
+            validation_issues=tuple(issue_codes),
+        )
+        fallback = _resource_card_from_generated(
+            fallback_generated,
+            context=context,
+            binding=binding,
+            existing_cards=list(state.generated_resources.get(context.node_id, [])),
+            force=False,
+            job_id=job_id,
+        )
+        fallback_metadata = dict(fallback.metadata or {})
+        fallback_provenance = dict(fallback_metadata.get("generation") or {})
+        fallback_provenance.update(fallback_generation)
+        fallback_metadata["generation"] = fallback_provenance
+        if card.card_type == "diagnostic_quiz":
+            fallback_metadata["quiz_revision"] = int(card.metadata.get("quiz_revision") or 1)
+        fallback = fallback.model_copy(update={"resource_id": card.resource_id, "metadata": fallback_metadata})
+        validated, fallback_validation = validation_pipeline.validate_resource_card(fallback)
+        if validated is None:
+            fallback_codes = _record_resource_rejection(state, context.node_id, card.card_type, fallback_validation, stage="resource_job_template")
+            return None, {"code": "validation_failed", "issues": issue_codes + fallback_codes}
+    started = time.perf_counter()
+    upsert_resource_card(state, validated)
+    persist_session(session)
+    observe_metric("resource.generation.persist_ms", round((time.perf_counter() - started) * 1000, 3))
+    try:
+        _store_card_in_caches(repo, context, validated)
+    except Exception as exc:
+        # The card is already durable in the session snapshot. Cache loss must
+        # only cost a later regeneration, never suppress card_ready.
+        state.record_error(f"resource_cache_write_failed:{context.node_id}:{card.card_type}:{type(exc).__name__}")
+        incr_metric("resource.generation.cache_write_failed_total", card_type=card.card_type)
+    repo.mark_card_ready(job_id, validated.card_type, resource_contract_from_card(validated).model_dump())
+    return validated, None
+
+
+def run_generation_job(job_id: str, *, repo: Optional[ResourceGenerationRepo] = None) -> Optional[Dict[str, Any]]:
+    """Run one job under the cross-process generation capacity limit."""
+    repository = repo or get_resource_generation_repo()
+    normalized_job_id = str(job_id)
+    queued_job = repository.get_job(normalized_job_id)
+    if queued_job is None or str(queued_job.get("status") or "") not in {"queued", "retrying"}:
+        return queued_job
+
+    acquire_slot = getattr(repository, "try_acquire_generation_slot", None)
+    release_slot = getattr(repository, "release_generation_slot", None)
+    lease = None
+    if callable(acquire_slot):
+        lease = acquire_slot(
+            _resource_global_generation_max_concurrency(),
+            concept_priority=_is_concept_priority_job(queued_job),
+        )
+        if lease is None:
+            incr_metric(
+                "resource.generation.global_slot_contention_total",
+                lane="concept" if _is_concept_priority_job(queued_job) else "supporting",
+            )
+            _schedule_generation_job_retry(normalized_job_id, repo=repository)
+            return queued_job
+
+    try:
+        return _run_claimed_generation_job(normalized_job_id, repo=repository)
+    finally:
+        if lease is not None and callable(release_slot):
+            release_slot(lease)
+
+
+def _run_claimed_generation_job(
+    job_id: str,
+    *,
+    repo: Optional[ResourceGenerationRepo] = None,
+) -> Optional[Dict[str, Any]]:
+    """Claim a slot-admitted job, then persist and publish each card."""
+    repository = repo or get_resource_generation_repo()
+    job = repository.claim_job(str(job_id))
+    if job is None:
+        return repository.get_job(str(job_id))
+    user_id = str(job["user_id"])
+    course_id = str(job["course_id"])
+    try:
+        # State inspection and card persistence remain serialized. Model work
+        # deliberately sits outside this lock so a long supporting bundle does
+        # not delay a concept-map job for the same learner and course.
+        with _resource_session_lock(user_id, course_id):
+            session = get_session(user_id, course_id)
+            state = session.agent_state
+            runtime = get_runtime()
+            locale = str(job.get("locale") or "zh-CN")
+            context_started = time.perf_counter()
+            binding, context = _generation_context(runtime, state, course_id, str(job["node_id"]), locale)
+            observe_metric("resource.generation.context_ms", round((time.perf_counter() - context_started) * 1000, 3))
+            requested = [card_type for card_type in job.get("card_types", []) if card_type in CARD_TYPES]
+            force = bool(job.get("force"))
+            request_params = job.get("request_params") if isinstance(job.get("request_params"), dict) else {}
+            use_cache = bool(request_params.get("use_cache", True))
+            existing_cards = list(state.generated_resources.get(context.node_id, []))
+            existing_by_type = {card.card_type: card for card in existing_cards}
+            unresolved: list[str] = []
+            for card_type in requested:
+                if not force and card_type in existing_by_type:
+                    repo_card = resource_contract_from_card(existing_by_type[card_type]).model_dump()
+                    repository.mark_card_ready(str(job_id), card_type, repo_card)
+                    continue
+                if not force and use_cache:
+                    try:
+                        cached = _cache_card_for_context(repository, context, card_type)
+                    except Exception as exc:
+                        state.record_error(f"resource_cache_read_failed:{context.node_id}:{card_type}:{type(exc).__name__}")
+                        incr_metric("resource.generation.cache_read_failed_total", card_type=card_type)
+                        cached = None
+                    if cached is not None:
+                        incr_metric("resource.generation.cache_hit_total", card_type=card_type)
+                        persisted, error = _persist_ready_card(
+                            repo=repository, job_id=str(job_id), session=session, context=context, binding=binding, card=cached,
+                        )
+                        if persisted is None:
+                            repository.mark_card_failed(str(job_id), card_type, error or {"code": "cache_card_invalid"})
+                        continue
+                if force and card_type == "diagnostic_quiz" and _active_retest_resource_id(state, context.node_id):
+                    repository.mark_card_failed(str(job_id), card_type, {"code": "review_retest_active"})
+                    continue
+                unresolved.append(card_type)
+
+        def process(generated: GeneratedResourcePayload) -> bool:
+            card_type = generated.card_type
+            try:
+                with _resource_session_lock(user_id, course_id):
+                    state = session.agent_state
+                    card = _resource_card_from_generated(
+                        generated,
+                        context=context,
+                        binding=binding,
+                        existing_cards=list(state.generated_resources.get(context.node_id, [])),
+                        force=force,
+                        job_id=str(job_id),
+                    )
+                    persisted, error = _persist_ready_card(
+                        repo=repository, job_id=str(job_id), session=session, context=context, binding=binding, card=card,
+                    )
+                    if persisted is None:
+                        repository.mark_card_failed(str(job_id), card_type, error or {"code": "card_persist_failed"})
+                        return False
+                    return True
+            except Exception as exc:
+                with _resource_session_lock(user_id, course_id):
+                    session.agent_state.record_error(
+                        f"resource_generation_card_failed:{context.node_id}:{card_type}:{type(exc).__name__}"
+                    )
+                repository.mark_card_failed(str(job_id), card_type, {"code": "card_exception", "error": type(exc).__name__})
+                return False
+
+        completed_before_generation = set(
+            (repository.get_job(str(job_id)) or {}).get("progress", {}).get("completed_card_types", [])
+        )
+        concept_ready = "concept_map" in completed_before_generation
+        if "concept_map" in unresolved:
+            model_started = time.perf_counter()
+            generated = _generate_phase(runtime, context, ["concept_map"]).get("concept_map")
+            observe_metric("resource.generation.model_ms", round((time.perf_counter() - model_started) * 1000, 3), card_type="concept_map")
+            if generated is None:
+                repository.mark_card_failed(str(job_id), "concept_map", {"code": "generator_returned_no_card"})
+            else:
+                concept_ready = process(generated)
+        supporting = [card_type for card_type in unresolved if card_type != "concept_map"]
+        if supporting:
+            model_started = time.perf_counter()
+            generated_cards = _generate_phase(runtime, context, supporting)
+            observe_metric("resource.generation.model_ms", round((time.perf_counter() - model_started) * 1000, 3), card_type="supporting_bundle")
+            for card_type in supporting:
+                generated = generated_cards.get(card_type)
+                if generated is None:
+                    repository.mark_card_failed(str(job_id), card_type, {"code": "generator_returned_no_card"})
+                else:
+                    process(generated)
+
+        follow_up_payload: Dict[str, Any] = {}
+        auto_supporting_card_types = [
+            card_type
+            for card_type in request_params.get("auto_supporting_card_types", [])
+            if card_type in CARD_TYPES and card_type != "concept_map"
+        ]
+        if concept_ready and auto_supporting_card_types:
+            try:
+                supporting_job = request_generation(
+                    user_id,
+                    course_id,
+                    context.node_id,
+                    card_types=auto_supporting_card_types,
+                    force=False,
+                    priority="supporting_bundle",
+                    locale=context.locale,
+                    use_cache=use_cache,
+                    repo=repository,
+                )
+                follow_up_job_id = str(supporting_job.get("job_id") or "")
+                if follow_up_job_id:
+                    follow_up_payload = {
+                        "follow_up_job_id": follow_up_job_id,
+                        "follow_up_card_types": auto_supporting_card_types,
+                    }
+            except Exception as exc:
+                with _resource_session_lock(user_id, course_id):
+                    session.agent_state.record_error(
+                        f"resource_supporting_bundle_enqueue_failed:{context.node_id}:{type(exc).__name__}"
+                    )
+                follow_up_payload = {"follow_up_error": type(exc).__name__}
+                incr_metric("resource.generation.supporting_enqueue_failed_total")
+        return repository.mark_completed(str(job_id), event_payload=follow_up_payload)
+    except Exception as exc:
+        error = {"code": "job_exception", "error": type(exc).__name__}
+        current = repository.get_job(str(job_id)) or {}
+        if int(current.get("retry_count") or 0) < int(current.get("max_retries") or 0):
+            retried = repository.retry_job(str(job_id), error=error)
+            if retried is not None:
+                _submit_generation_job(str(job_id), repo=repository, replace_active=True)
+                return retried
+        return repository.mark_failed(str(job_id), error)
+
+
+def _repair_legacy_cards(
+    session: Any,
+    runtime: Any,
+    course_id: str,
+    node_id: str,
+    requested_types: list[str],
+) -> bool:
+    """Repair older persisted cards only for synchronous compatibility calls."""
+    state = session.agent_state
+    binding = _canonical_node_binding(runtime, course_id, node_id)
+    pipeline = get_validation_pipeline()
+    repaired = False
+    for existing in list(state.generated_resources.get(node_id, [])):
+        if existing.card_type not in requested_types:
+            continue
+        bound = _with_semantic_binding(existing, binding)
+        bound = _refresh_unconsumed_diagnostic_metadata(state, bound, binding)
+        bound, practice_changed = _refresh_interactive_exercise_metadata(bound, binding)
+        validated, validation = pipeline.validate_resource_card(bound)
+        if validated is not None:
+            if practice_changed or validated.metadata != existing.metadata:
+                upsert_resource_card(state, validated)
+                repaired = repaired or practice_changed
+            continue
+        issue_codes = _record_resource_rejection(state, node_id, existing.card_type, validation, stage="legacy_resource_read")
+        fallback = _resource_card(
+            resource_id=existing.resource_id,
+            binding=binding,
+            card_type=existing.card_type,
+            content=_bound_template_content(binding, existing.card_type),
+            difficulty=existing.difficulty,
+            cognitive_style=existing.cognitive_style,
+            quiz_revision=int((existing.metadata or {}).get("quiz_revision", 1) or 1),
+            generation=_fallback_generation(dict((existing.metadata or {}).get("generation") or {}), issue_codes),
+        )
+        validated, fallback_validation = pipeline.validate_resource_card(fallback)
+        if validated is not None:
+            upsert_resource_card(state, validated)
+            repaired = True
+        else:
+            _record_resource_rejection(state, node_id, existing.card_type, fallback_validation, stage="legacy_resource_template")
+    if repaired:
+        persist_session(session)
+    return repaired
+
+
+def generate_current_node_resources(
+    user_id: str,
+    course_id: str = "data_structures",
+    node_id: Optional[str] = None,
+    force: bool = False,
+    include_legacy: bool = False,
+    card_type: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Synchronous compatibility bridge over the job-based generation path."""
+    requested_types, error = _normalise_requested_types(card_type=card_type)
+    if error:
+        return {"error": error, "status_code": 400}
+    session = get_session(user_id, course_id)
+    target_node = str(node_id or session.agent_state.current_node_id or (session.agent_state.active_path[0] if session.agent_state.active_path else "") or "")
+    if not target_node:
+        return {"error": "node_id is required", "status_code": 400}
+    repaired = False
+    if not force:
+        repaired = _repair_legacy_cards(session, get_runtime(), course_id, target_node, requested_types or [])
+    requested = request_generation(
+        user_id,
+        course_id,
+        target_node,
+        card_types=requested_types,
+        force=force,
+        priority="legacy_sync",
+        use_cache=False,
+        submit=False,
+    )
+    if requested.get("status_code"):
+        return requested
+    job_id = requested.get("job_id")
+    if job_id:
+        run_generation_job(str(job_id))
+    visible_types = requested.get("requested_card_types") or requested_types or []
+    payload = get_node_resources(
+        user_id,
+        course_id,
+        target_node,
+        card_types=visible_types,
+        include_legacy=include_legacy,
+    )
+    if payload.get("status_code"):
+        return payload
+    payload["status"] = "repaired_fallback" if repaired else ("generated" if job_id else "already_exists")
+    generations = {
+        card.card_type: dict((card.metadata or {}).get("generation") or {})
+        for card in session.agent_state.generated_resources.get(target_node, [])
+        if card.card_type in visible_types
+    }
+    _attach_generation_summary(payload, generations)
+    if requested.get("preserved_retest_resource_id"):
+        payload["preserved_retest_resource_id"] = requested["preserved_retest_resource_id"]
+    return payload

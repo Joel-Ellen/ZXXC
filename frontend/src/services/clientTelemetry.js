@@ -7,10 +7,13 @@ const ALLOWED_EVENTS = new Set([
   "frontend_exception",
   "next_task_ready",
   "refresh_recovery",
+  "resource_cache_read",
+  "resource_concept_ready",
 ]);
 const ALLOWED_SURFACES = new Set(["app", "auth", "learn", "other"]);
 const ALLOWED_KINDS = new Set(["api", "bootstrap", "unhandled_rejection", "vue", "window"]);
 const ALLOWED_OUTCOMES = new Set(["failure", "success"]);
+const RESOURCE_TIMING_EVENTS = new Set(["resource_cache_read", "resource_concept_ready"]);
 
 export function currentTelemetrySurface(pathname = globalThis.location?.pathname || "") {
   if (pathname.startsWith("/learn/")) return "learn";
@@ -51,6 +54,17 @@ function normalizedPayload(event, details = {}) {
     if (!Number.isFinite(durationMs) || durationMs < 0 || durationMs > 600_000) return null;
     return { event, surface, duration_ms: Math.round(durationMs) };
   }
+  if (RESOURCE_TIMING_EVENTS.has(event)) {
+    const durationMs = Number(details.durationMs);
+    if (!Number.isFinite(durationMs) || durationMs < 0 || durationMs > 600_000) return null;
+    return {
+      event,
+      surface,
+      duration_ms: Math.round(durationMs),
+      cache_hit: Boolean(details.cacheHit),
+      outcome: ALLOWED_OUTCOMES.has(details.outcome) ? details.outcome : "success",
+    };
+  }
   if (!ALLOWED_OUTCOMES.has(details.outcome)) return null;
   return { event, surface, outcome: details.outcome };
 }
@@ -80,6 +94,34 @@ export function reportNextTaskReady({
     return Promise.resolve(false);
   }
   return reportClientMetric("next_task_ready", { surface, durationMs: now - startedAt });
+}
+
+export function reportResourceCacheRead({
+  durationMs,
+  cacheHit = false,
+  outcome = "success",
+  surface = "learn",
+} = {}) {
+  return reportClientMetric("resource_cache_read", {
+    durationMs,
+    cacheHit,
+    outcome,
+    surface,
+  });
+}
+
+export function reportResourceConceptReady({
+  durationMs,
+  cacheHit = false,
+  outcome = "success",
+  surface = "learn",
+} = {}) {
+  return reportClientMetric("resource_concept_ready", {
+    durationMs,
+    cacheHit,
+    outcome,
+    surface,
+  });
 }
 
 export function reportClientMetric(event, details = {}) {

@@ -32,12 +32,21 @@
             {{ focusMode ? "退出聚焦" : "聚焦模式" }}
           </button>
           <button
+            v-if="activeCardType"
+            type="button"
+            class="workspace-shell-btn focus-ring min-h-11 px-3 py-2 text-[11px] font-semibold"
+            :disabled="!currentNode || isCardPending(activeCardType)"
+            @click="$emit('generate-card', { nodeId: currentNode, cardType: activeCardType, force: true })"
+          >
+            {{ isCardPending(activeCardType) ? "重新生成中..." : "重新生成当前卡" }}
+          </button>
+          <button
             type="button"
             class="workspace-shell-btn workspace-shell-btn--accent focus-ring min-h-11 px-3 py-2 text-[11px] font-semibold"
-            :disabled="!currentNode || loading"
+            :disabled="!currentNode || isAllCardsPending"
             @click="$emit('refresh')"
           >
-            {{ loading ? "生成中..." : "刷新资源" }}
+            {{ isAllCardsPending ? "重新生成中..." : "重新生成全部" }}
           </button>
         </div>
       </div>
@@ -87,7 +96,7 @@
           class="workspace-shell-btn focus-ring min-h-11 shrink-0 px-3 py-2 text-[11px] font-semibold"
           :class="slot.card?.resource_id === activeCardId ? 'workspace-shell-btn--accent' : ''"
           :aria-selected="String(slot.card?.resource_id === activeCardId)"
-          :disabled="!slot.card || loading"
+          :disabled="!slot.card || isSlotPending(slot)"
           @click="slot.card && activateCard(slot.card.resource_id)"
         >
           {{ taskStageLabel(slot.type) }}
@@ -147,9 +156,9 @@
               class="h-full"
               :agent-name="agentLabel(resourceType(card))"
               :title="cardLabel(resourceType(card))"
-              :progress-text="loading ? '栅格同步' : '资源就绪'"
+              :progress-text="slotProgressText(slot)"
               :progress="null"
-              :is-ready="!loading"
+              :is-ready="!isSlotPending(slot)"
               :is-active="card.resource_id === activeCardId"
               :is-expanded="isCardHydrated(card.resource_id)"
               :is-bookmarked="isBookmarked(card)"
@@ -546,6 +555,7 @@
           <!-- Case 2: empty slot — show placeholder with generate button -->
           <div
             v-else
+            :data-resource-type="slot.type"
             class="animate-cardIn h-full min-h-[240px] transition-all duration-300"
             :style="{ animationDelay: `${index * 40}ms` }"
             :class="getGridSpanClass(slot.type)"
@@ -553,22 +563,40 @@
             <div
               class="slot-empty group h-full rounded-[22px] border border-dashed border-subtle/50 bg-space-elevated/40 flex flex-col items-center justify-center gap-4 p-6"
               :style="{ '--rail-accent': slot.color }"
+              :aria-busy="isSlotPending(slot) ? 'true' : undefined"
             >
-              <span class="slot-empty-icon text-[2.25rem] opacity-40 group-hover:opacity-75 transition-opacity duration-300"
-                    :style="{ animationDelay: `${index * 0.4}s` }"
-                    aria-hidden="true">{{ slot.icon }}</span>
-              <div class="text-center space-y-0.5">
-                <p class="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted">{{ slot.label }}</p>
-                <p class="text-[11px] text-text-muted opacity-50">尚未生成</p>
-              </div>
-              <button
-                v-if="currentNode"
-                type="button"
-                class="btn-ripple workspace-shell-btn workspace-shell-btn--accent focus-ring px-4 py-2 text-[11px] font-semibold tracking-[0.06em] opacity-0 group-hover:opacity-100 translate-y-1 group-hover:translate-y-0 transition-all duration-200"
-                @click="$emit('generate-card', { nodeId: currentNode, cardType: slot.type })"
-              >
-                生成
-              </button>
+              <template v-if="isSlotPending(slot)">
+                <div class="w-full max-w-[16rem] space-y-3" role="status" aria-live="polite">
+                  <div class="h-3 w-2/5 overflow-hidden rounded bg-card">
+                    <div class="h-full w-1/2 animate-shimmer bg-gradient-to-r from-transparent via-[var(--text-muted)]/10 to-transparent" />
+                  </div>
+                  <div class="h-4 w-full overflow-hidden rounded bg-card">
+                    <div class="h-full w-1/2 animate-shimmer bg-gradient-to-r from-transparent via-[var(--text-muted)]/10 to-transparent" />
+                  </div>
+                  <div class="h-4 w-4/5 overflow-hidden rounded bg-card">
+                    <div class="h-full w-1/2 animate-shimmer bg-gradient-to-r from-transparent via-[var(--text-muted)]/10 to-transparent" />
+                  </div>
+                  <p class="pt-1 text-center text-[11px] text-text-muted">{{ slotProgressText(slot) }}</p>
+                </div>
+              </template>
+
+              <template v-else>
+                <span class="slot-empty-icon text-[2.25rem] opacity-40 group-hover:opacity-75 transition-opacity duration-300"
+                      :style="{ animationDelay: `${index * 0.4}s` }"
+                      aria-hidden="true">{{ slot.icon }}</span>
+                <div class="text-center space-y-0.5">
+                  <p class="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted">{{ slot.label }}</p>
+                  <p class="text-[11px] text-text-muted opacity-50">{{ slotErrorText(slot) || "尚未生成" }}</p>
+                </div>
+                <button
+                  v-if="currentNode"
+                  type="button"
+                  class="btn-ripple workspace-shell-btn workspace-shell-btn--accent focus-ring px-4 py-2 text-[11px] font-semibold tracking-[0.06em] opacity-0 group-hover:opacity-100 translate-y-1 group-hover:translate-y-0 transition-all duration-200"
+                  @click="$emit('generate-card', { nodeId: currentNode, cardType: slot.type })"
+                >
+                  {{ isSlotFailed(slot) ? "重试生成" : "生成" }}
+                </button>
+              </template>
             </div>
           </div>
 
@@ -597,6 +625,7 @@ const props = defineProps({
   nodeTitle: { type: String, default: "" },
   pathNodes: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
+  cardStates: { type: Object, default: () => ({}) },
   overallProgress: { type: Number, default: 0 },
   masteredCount: { type: Number, default: 0 },
   lastDiagnostic: { type: Object, default: null },
@@ -625,6 +654,7 @@ const emit = defineEmits([
 
 const orderedIds = ref([]);
 const activeCardId = ref("");
+const activeCardTypeHint = ref("");
 const focusMode = ref(false);
 const isExpanded = ref(false);
 const answers = ref({});
@@ -694,25 +724,66 @@ const cardsByType = computed(() => {
 const cardTypeSlots = computed(() => {
   const filtered = props.filterType && props.filterType !== "all"
     ? CARD_TYPES.filter((meta) => meta.sidebarKey === props.filterType)
-    : CARD_TYPES.filter((meta) => Boolean(cardsByType.value[meta.type]));
-  const visibleTypes = filtered.length ? filtered : CARD_TYPES.slice(0, 1);
+    : CARD_TYPES;
+  const visibleTypes = filtered.length ? filtered : CARD_TYPES;
   return visibleTypes.map((meta) => ({
     ...meta,
     card: cardsByType.value[meta.type] ?? null,
+    state: props.cardStates?.[meta.type] ?? { status: cardsByType.value[meta.type] ? "ready" : "idle" },
   }));
 });
 
-const cardsIdentityKey = computed(() => [
+const canvasContextKey = computed(() => [
   props.sessionId,
   props.currentNode,
-  ...props.cards.map((card) => card.resource_id || card.id || "").filter(Boolean),
 ].join("|"));
 
+const cardsIdentityKey = computed(() => props.cards
+  .map((card) => card.resource_id || card.id || "")
+  .filter(Boolean)
+  .join("|"));
+
+const cardsAndReviewKey = computed(() => [
+  cardsIdentityKey.value,
+  props.reviewItemId,
+  props.reviewPhase,
+].join("|"));
+
+let lastQuizResourceId = "";
+let lastReviewPracticeProgressKey = "";
+
+function syncCardsWithoutReset() {
+  const cards = props.cards;
+  const nextIds = cards.map((card) => resourceId(card)).filter(Boolean);
+  orderedIds.value = nextIds;
+
+  if (!nextIds.includes(activeCardId.value)) {
+    const savedCardId = restoreCanvasState(nextIds);
+    const replacementCard = cards.find((card) => resourceType(card) === activeCardTypeHint.value);
+    activeCardId.value = savedCardId || resourceId(replacementCard) || nextIds[0] || "";
+    activeCardTypeHint.value = resourceType(cards.find((card) => resourceId(card) === activeCardId.value));
+    hydrateCard(activeCardId.value);
+  }
+
+  const nextQuiz = cards.find((card) => resourceType(card) === "diagnostic_quiz");
+  const nextQuizResourceId = resourceId(nextQuiz);
+  if (nextQuizResourceId && nextQuizResourceId !== lastQuizResourceId) {
+    lastQuizResourceId = nextQuizResourceId;
+    restoreQuizProgress(nextQuizResourceId);
+  }
+
+  const reviewKey = reviewPracticeProgressKey();
+  if (reviewKey && reviewKey !== lastReviewPracticeProgressKey) {
+    lastReviewPracticeProgressKey = reviewKey;
+    restoreReviewPracticeProgress();
+  }
+}
+
 watch(
-  cardsIdentityKey,
+  canvasContextKey,
   () => {
     const cards = props.cards;
-    const nextIds = cards.map((card) => card.resource_id);
+    const nextIds = cards.map((card) => resourceId(card)).filter(Boolean);
     orderedIds.value = nextIds;
     hydratedCardIds.value = [];
     focusMode.value = false;
@@ -732,17 +803,27 @@ watch(
     reviewPracticeError.value = "";
     reviewPracticeEventId.value = "";
     reviewPracticeStartedAt.value = 0;
+    lastQuizResourceId = "";
+    lastReviewPracticeProgressKey = "";
 
     const savedCardId = restoreCanvasState(nextIds);
     activeCardId.value = savedCardId || nextIds[0] || "";
+    activeCardTypeHint.value = resourceType(cards.find((card) => resourceId(card) === activeCardId.value));
     hydrateCard(activeCardId.value);
 
     const nextQuiz = cards.find((card) => resourceType(card) === "diagnostic_quiz");
-    restoreQuizProgress(resourceId(nextQuiz));
-    restoreReviewPracticeProgress();
+    lastQuizResourceId = resourceId(nextQuiz);
+    if (lastQuizResourceId) restoreQuizProgress(lastQuizResourceId);
+    const reviewKey = reviewPracticeProgressKey();
+    if (reviewKey) {
+      lastReviewPracticeProgressKey = reviewKey;
+      restoreReviewPracticeProgress();
+    }
   },
   { immediate: true },
 );
+
+watch(cardsAndReviewKey, syncCardsWithoutReset);
 
 const sortedCards = computed(() => {
   const orderIndex = new Map(orderedIds.value.map((id, index) => [id, index]));
@@ -826,10 +907,17 @@ const currentMastery = computed(() =>
   Math.round((currentNodeMeta.value?.mastery ?? 0) * 100),
 );
 
+const activeCardType = computed(() => {
+  const activeCard = sortedCards.value.find((card) => resourceId(card) === activeCardId.value);
+  return resourceType(activeCard) || activeCardTypeHint.value;
+});
+
 const activeCardTitle = computed(() => {
   const activeCard = sortedCards.value.find((card) => card.resource_id === activeCardId.value) ?? sortedCards.value[0];
   return activeCard ? cardLabel(resourceType(activeCard)) : "当前内容";
 });
+
+const isAllCardsPending = computed(() => CARD_TYPES.every((meta) => isCardPending(meta.type)));
 
 const nextPendingNode = computed(() =>
   props.pathNodes.find((node) => (node.mastery ?? 0) < 0.65 && node.id !== props.currentNode) ?? null,
@@ -866,6 +954,33 @@ function resourceType(card) {
 
 function resourceId(card) {
   return card?.resource_id || card?.id || "";
+}
+
+function cardState(cardType) {
+  return props.cardStates?.[cardType] ?? { status: cardsByType.value[cardType] ? "ready" : "idle" };
+}
+
+function isCardPending(cardType) {
+  return ["waiting", "queued"].includes(cardState(cardType).status);
+}
+
+function isSlotPending(slot) {
+  return isCardPending(slot.type);
+}
+
+function isSlotFailed(slot) {
+  return cardState(slot.type).status === "failed";
+}
+
+function slotErrorText(slot) {
+  return isSlotFailed(slot) ? "生成失败，可重试" : "";
+}
+
+function slotProgressText(slot) {
+  if (cardState(slot.type).status === "waiting") return "等待概念图就绪";
+  if (isSlotPending(slot)) return "资源生成中";
+  if (isSlotFailed(slot)) return "生成失败";
+  return "资源就绪";
 }
 
 function bodyMarkdown(card) {
@@ -1371,6 +1486,7 @@ function setActiveCard(cardId, shouldHydrate = false) {
   }
 
   activeCardId.value = cardId;
+  activeCardTypeHint.value = resourceType(props.cards.find((card) => resourceId(card) === cardId));
 
   if (shouldHydrate) {
     hydrateCard(cardId);

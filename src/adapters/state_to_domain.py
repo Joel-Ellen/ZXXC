@@ -85,13 +85,57 @@ def resource_contract_from_card(card: ResourceCard) -> ResourceContract:
     safety_payload = metadata.get("safety") if isinstance(metadata.get("safety"), dict) else {}
     generation_payload = metadata.get("generation") if isinstance(metadata.get("generation"), dict) else {}
     artifacts = _redact_answer_keys(metadata.get("artifacts")) if isinstance(metadata.get("artifacts"), dict) else {}
-    source_refs = metadata.get("source_refs") if isinstance(metadata.get("source_refs"), list) else []
+    source_refs = [
+        dict(ref)
+        for ref in metadata.get("source_refs", [])
+        if isinstance(ref, dict)
+    ] if isinstance(metadata.get("source_refs"), list) else []
     created_at = metadata.get("created_at") or metadata.get("generated_at")
-    structured_payload = _redact_answer_keys({
-        key: value
-        for key, value in metadata.items()
-        if key not in {"generation", "validation", "safety", "artifacts", "source_refs"}
-    })
+    canonical_payload = metadata.get("structured_payload")
+    if isinstance(canonical_payload, dict):
+        structured_payload = _redact_answer_keys(canonical_payload)
+    else:
+        # Legacy cards stored renderer fields directly in metadata. Keep this
+        # fallback until old persisted sessions have naturally migrated.
+        structured_payload = _redact_answer_keys({
+            key: value
+            for key, value in metadata.items()
+            if key not in {
+                "generation", "validation", "safety", "artifacts", "source_refs",
+                "content_version", "knowledge_index_version", "difficulty_basis", "difficulty_rationale",
+                "personalization_basis", "cache_basis", "created_at", "generated_at",
+            }
+        })
+    personalization_basis = {"cognitive_style": card.cognitive_style}
+    if isinstance(metadata.get("personalization_basis"), dict):
+        personalization_basis.update(metadata["personalization_basis"])
+    # GET resource reads must remain non-mutating, including for cards saved
+    # before provenance/version fields existed. Normalize those fields only in
+    # the response so every visible card retains an auditable contract.
+    if not source_refs:
+        source_refs = [{
+            "id": f"legacy-course-node:{card.node_id}",
+            "type": "course_node",
+            "node_id": card.node_id,
+            "title": str(title),
+        }]
+    content_version = str(
+        metadata.get("content_version") or generation_payload.get("content_version") or "legacy-v1"
+    )
+    if not generation_payload.get("source"):
+        generation_payload = {**generation_payload, "source": "legacy"}
+    if content_version and "content_version" not in generation_payload:
+        generation_payload = {**generation_payload, "content_version": content_version}
+    difficulty_basis = (
+        metadata.get("difficulty_basis")
+        if isinstance(metadata.get("difficulty_basis"), dict)
+        else (metadata.get("difficulty_rationale") if isinstance(metadata.get("difficulty_rationale"), dict) else {})
+    )
+    if not difficulty_basis:
+        difficulty_basis = {
+            "source": "legacy_card",
+            "difficulty": card.difficulty,
+        }
     return ResourceContract(
         resource_id=card.resource_id,
         node_id=card.node_id,
@@ -101,8 +145,10 @@ def resource_contract_from_card(card: ResourceCard) -> ResourceContract:
         structured_payload=structured_payload,
         artifacts=artifacts,
         difficulty=card.difficulty,
-        personalization_basis={"cognitive_style": card.cognitive_style},
+        difficulty_basis=difficulty_basis,
+        personalization_basis=personalization_basis,
         generation=generation_payload,
+        content_version=content_version,
         validation=ResourceValidation(**validation_payload),
         safety=ResourceSafety(**safety_payload),
         source_refs=source_refs,
