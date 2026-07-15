@@ -16,8 +16,11 @@ import {
   login,
   refreshToken,
   register,
+  requestResourceGeneration,
   resetSession,
+  streamResourceGeneration,
   streamSessionTutor,
+  submitSessionLearningEvent,
   submitSessionProfileInput,
   switchCourse,
 } from "../services/eduAgentApi";
@@ -37,6 +40,14 @@ const AGENT_CN = {
   video_summary: "文档智能体",
   diagnostic_quiz: "评估智能体",
 };
+
+const RESOURCE_CARD_TYPES = [
+  "concept_map",
+  "code_snippet",
+  "interactive_exercise",
+  "video_summary",
+  "diagnostic_quiz",
+];
 
 export function useEduAgent() {
   const isLoggedIn = ref(false);
@@ -72,6 +83,9 @@ export function useEduAgent() {
     { key: "quiz", kind: "quiz", label: "评估智能体", phase: "等待中", progress: 0, active: false },
     { key: "path", kind: "path", label: "路径规划", phase: "未启动", progress: 0, active: false },
   ]);
+  let resourceGenerationVersion = 0;
+  let resourceGenerationController = null;
+  let quizStartedAt = Date.now();
 
   const currentCards = computed(() => resources.value[currentNode.value] ?? []);
   const currentNodeTitle = computed(() => nodeTitles.value[currentNode.value] || currentNode.value || "未选择");
@@ -97,7 +111,7 @@ export function useEduAgent() {
       if (error?.response?.status !== 404) {
         throw error;
       }
-      return createSession({ user_id: userId.value, course_id: courseId.value });
+      return createSession({ course_id: courseId.value });
     }
   }
 
@@ -105,8 +119,73 @@ export function useEduAgent() {
     return advanceSession(sessionId.value, payload);
   }
 
-  async function fetchCurrentNodeResources(nodeId, force = false) {
-    return fetchSessionResources(sessionId.value, nodeId, { force });
+  async function fetchCurrentNodeResources(nodeId) {
+    return fetchSessionResources(sessionId.value, nodeId);
+  }
+
+  function resourceCardType(resource) {
+    return resource?.resource_type || resource?.card_type || resource?.type || "";
+  }
+
+  function resourceListFromResponse(response) {
+    const candidates = [
+      response?.resources,
+      response?.existing_resources,
+      response?.data?.resources,
+      response?.data?.existing_resources,
+    ];
+    return candidates.find((value) => Array.isArray(value) && value.length)
+      ?? candidates.find(Array.isArray)
+      ?? [];
+  }
+
+  function mergeNodeResources(nodeId, incomingResources) {
+    if (!Array.isArray(incomingResources) || !incomingResources.length) return;
+    const incomingTypes = new Set(incomingResources.map(resourceCardType).filter(Boolean));
+    const incomingIds = new Set(incomingResources.map((resource) => resource?.resource_id).filter(Boolean));
+    const retained = (resources.value[nodeId] ?? []).filter((resource) => (
+      !incomingIds.has(resource?.resource_id) && !incomingTypes.has(resourceCardType(resource))
+    ));
+    resources.value = {
+      ...resources.value,
+      [nodeId]: [...retained, ...incomingResources],
+    };
+  }
+
+  function generationCardsFromEvent(data) {
+    const candidates = [
+      data?.resource,
+      data?.card,
+      ...(Array.isArray(data?.resources) ? data.resources : []),
+    ];
+    return candidates.filter((candidate) => candidate && resourceCardType(candidate));
+  }
+
+  function missingResourceCardTypes(nodeResources) {
+    const existingTypes = new Set((nodeResources ?? []).map(resourceCardType).filter(Boolean));
+    return RESOURCE_CARD_TYPES.filter((cardType) => !existingTypes.has(cardType));
+  }
+
+  function normalizeResourceOptions(options = {}) {
+    if (typeof options === "boolean") return { force: options, cardTypes: [] };
+    const values = options?.cardTypes ?? options?.cardType ?? [];
+    const cardTypes = [...new Set((Array.isArray(values) ? values : [values])
+      .map((value) => String(value || "").trim())
+      .filter((value) => RESOURCE_CARD_TYPES.includes(value)))];
+    return { force: Boolean(options?.force), cardTypes };
+  }
+
+  function createEventId(prefix = "event") {
+    const randomPart = typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID().replaceAll("-", "")
+      : Math.random().toString(16).slice(2);
+    return `${prefix}-${Date.now()}-${randomPart}`;
+  }
+
+  function abortResourceGeneration() {
+    resourceGenerationVersion += 1;
+    resourceGenerationController?.abort();
+    resourceGenerationController = null;
   }
 
   async function fetchCurrentProbe() {
@@ -124,6 +203,7 @@ export function useEduAgent() {
   }
 
   function resetLearningState() {
+    abortResourceGeneration();
     currentNode.value = "";
     activePath.value = [];
     mastery.value = {};
@@ -134,6 +214,7 @@ export function useEduAgent() {
     probe.value = null;
     probeCollected.value = 0;
     stepLogs.value = [];
+    quizStartedAt = Date.now();
   }
 
   function pathIdsFromDto(state) {
@@ -378,7 +459,7 @@ export function useEduAgent() {
   }
 
   async function initPathAndEnter() {
-    await createSession({ user_id: userId.value, course_id: courseId.value });
+    await createSession({ course_id: courseId.value });
     await initSessionPath(sessionId.value);
     const state = await fetchCurrentSession();
     hydrateState(state);
@@ -401,7 +482,7 @@ export function useEduAgent() {
 
   async function loadUserCourses() {
     try {
-      const result = await fetchUserCourses(userId.value);
+      const result = await fetchUserCourses();
       enrolledCourses.value = result.courses || [];
       if (result.active_course) {
         activeCourse.value = result.courses.find((course) => course.course_id === result.active_course) || null;
@@ -463,7 +544,7 @@ export function useEduAgent() {
   async function handleEnrollCourse(courseIdInput) {
     isBusy.value = true;
     try {
-      const result = await enrollCourse(userId.value, courseIdInput);
+      const result = await enrollCourse(courseIdInput);
       activeCourse.value = result.course;
       await loadUserCourses();
 
@@ -489,7 +570,7 @@ export function useEduAgent() {
 
     isBusy.value = true;
     try {
-      await switchCourse(userId.value, courseIdInput);
+      await switchCourse(courseIdInput);
       await loadUserCourses();
       resetLearningState();
 
@@ -542,6 +623,8 @@ export function useEduAgent() {
       return;
     }
 
+    abortResourceGeneration();
+    const loadGeneration = resourceGenerationVersion;
     currentNode.value = nodeId;
     isLoadingNode.value = true;
     const nodeLabel = nodeTitles.value[nodeId] || nodeId;
@@ -559,49 +642,74 @@ export function useEduAgent() {
       });
       const state = await fetchCurrentSession();
       hydrateState(state, { preservePathOrder: true });
-      currentNode.value = currentNodeFromDto(state) || nodeId;
-      const cardCount = (resourcesFromDto(state)?.[currentNode.value] || []).length;
-      if (!silent) {
-        setInfo(cardCount ? `${nodeLabel} 已加载 ${cardCount} 份资源。` : `${nodeLabel} 资源生成完成。`);
-      }
+      currentNode.value = nodeId;
+      quizStartedAt = Date.now();
+      await refreshNodeResources(nodeId, { force: false, silent });
     } catch (e) {
       const message = e?.response?.data?.detail || e?.message || "未知错误";
       setInfo(`资源生成失败：${message}`, 10000);
       console.error("loadNode failed:", e);
     } finally {
-      isLoadingNode.value = false;
+      if (loadGeneration === resourceGenerationVersion) {
+        isLoadingNode.value = false;
+      }
       refreshStatuses();
     }
   }
 
-  async function submitQuiz(score) {
+  async function submitQuiz(submission) {
+    const resourceId = String(submission?.resourceId || "");
+    const answers = Array.isArray(submission?.answers)
+      ? submission.answers.map((answer) => ({
+        question_id: String(answer?.questionId ?? answer?.question_id ?? ""),
+        answer_index: Number(answer?.selectedOptionIndex ?? answer?.answer_index),
+      })).filter((answer) => answer.question_id && Number.isInteger(answer.answer_index))
+      : [];
+    if (!resourceId || !answers.length) {
+      const error = new Error("诊断答题记录不完整，请重新作答。");
+      setInfo(error.message, 8000);
+      submission?.onFailure?.(error);
+      return null;
+    }
+
     isLoadingNode.value = true;
     const evaluatedNodeId = currentNode.value;
     const previousMastery = mastery.value[evaluatedNodeId] ?? 0;
 
     try {
-      const response = await advanceCurrentSession({
-        interaction_type: "diagnostic",
+      const response = await submitSessionLearningEvent(sessionId.value, {
+        event_id: String(submission?.eventId || createEventId("diagnostic")),
+        event_type: submission?.isReview ? "review_completed" : "lesson_completed",
         user_id: userId.value,
         course_id: courseId.value,
-        current_node_id: evaluatedNodeId,
-        correctness: score,
-        time_spent_ratio: 1.0,
-        code_pass_rate: score,
+        node_id: evaluatedNodeId,
+        resource_id: resourceId,
+        question_id: "",
+        duration_ms: Math.max(0, Math.round(Number(submission?.durationMs) || (Date.now() - quizStartedAt))),
+        attempt_number: Math.max(1, Math.round(Number(submission?.attemptNumber) || 1)),
+        used_hint: Boolean(submission?.usedHint),
+        result: {
+          evidence_type: "diagnostic_quiz",
+          answers,
+        },
       });
       const state = await fetchCurrentSession();
       hydrateState(state);
-      currentNode.value = currentNodeFromDto(state) || evaluatedNodeId;
+      currentNode.value = currentNodeFromDto(state) || response.current_node_id || evaluatedNodeId;
 
       const nextNodeId = response.next_node_id || currentNodeFromDto(state) || "";
       const responseLogs = logsFromDto(response, state);
       const responseFeedback = feedbackFromDto(response, state);
+      const attribution = response.mastery_attribution ?? response.attribution ?? null;
+      const verifiedEvidence = response.verified_evidence ?? response.event?.verified_evidence ?? attribution?.evidence ?? {};
       lastDiagnostic.value = {
-        score,
-        evaluatedNodeId: response.evaluated_node_id || evaluatedNodeId,
+        eventId: response.event_id || "",
+        score: response.effective_correctness ?? null,
+        questionResults: Array.isArray(verifiedEvidence?.question_results) ? verifiedEvidence.question_results : [],
+        evaluatedNodeId: response.evaluated_node_id || attribution?.node_id || evaluatedNodeId,
         evaluatedNodeTitle: nodeTitles.value[response.evaluated_node_id || evaluatedNodeId] || response.evaluated_node_id || evaluatedNodeId,
-        masteryBefore: response.previous_mastery ?? previousMastery,
-        masteryAfter: response.evaluated_node_mastery ?? masteryFromDto(state)?.[evaluatedNodeId] ?? previousMastery,
+        masteryBefore: response.mastery_before ?? attribution?.mastery_before ?? previousMastery,
+        masteryAfter: response.mastery_after ?? attribution?.mastery_after ?? response.knowledge_mastery?.[evaluatedNodeId] ?? masteryFromDto(state)?.[evaluatedNodeId] ?? previousMastery,
         advancedToNextNode: Boolean(response.advanced_to_next_node),
         nextNodeId,
         nextNodeTitle: nodeTitles.value[nextNodeId] || nextNodeId,
@@ -617,44 +725,112 @@ export function useEduAgent() {
       if (lastDiagnostic.value.advancedToNextNode) {
         setInfo(`诊断通过，已推进到「${lastDiagnostic.value.nextNodeTitle || "下一节点"}」。`);
       } else {
-        setInfo("诊断已记录，当前节点暂未达标，已保留并刷新本节点学习资源。");
+        setInfo("诊断已记录，系统已根据答题证据更新当前节点掌握度。");
       }
-    } catch {
-      setInfo("提交诊断失败。");
+      submission?.onRecorded?.(lastDiagnostic.value);
+      quizStartedAt = Date.now();
+      if (lastDiagnostic.value.advancedToNextNode && currentNode.value) {
+        await refreshNodeResources(currentNode.value, { force: false, silent: true });
+      }
+      return lastDiagnostic.value;
+    } catch (error) {
+      const message = error?.response?.data?.detail || error?.message || "提交诊断失败。";
+      setInfo(message, 8000);
+      submission?.onFailure?.(error);
+      return null;
     } finally {
       isLoadingNode.value = false;
       refreshStatuses();
     }
   }
 
-  async function refreshNodeResources(nodeId, force = false) {
-    if (!nodeId) return;
+  async function refreshNodeResources(nodeId, options = {}) {
+    if (!nodeId) return { ok: false };
 
+    const { force, cardTypes } = normalizeResourceOptions(options);
+    const silent = Boolean(options?.silent);
+    abortResourceGeneration();
+    const generation = resourceGenerationVersion;
+    const controller = typeof AbortController === "undefined" ? null : new AbortController();
+    resourceGenerationController = controller;
     const nodeLabel = nodeTitles.value[nodeId] || nodeId;
     isLoadingNode.value = true;
     setInfo(force ? `正在重新生成「${nodeLabel}」的学习资源...` : `正在生成「${nodeLabel}」的学习资源...`);
 
     try {
-      const result = await fetchCurrentNodeResources(nodeId, force);
-      const nodeResources = result.resources ?? [];
-      // 将后端返回的卡片合并进本地 resources
-      if (nodeResources.length) {
-        const updated = { ...resources.value };
-        updated[nodeId] = nodeResources;
-        resources.value = updated;
+      const cachedResult = await fetchCurrentNodeResources(nodeId);
+      if (generation !== resourceGenerationVersion || currentNode.value !== nodeId) {
+        return { ok: false, stale: true };
       }
-      const cardCount = nodeResources.length;
-      setInfo(
-        result.status === "already_exists"
-          ? `「${nodeLabel}」资源已就绪（${cardCount} 份），无需重新生成。`
-          : `「${nodeLabel}」已生成 ${cardCount} 份新资源。`
-      );
+      mergeNodeResources(nodeId, resourceListFromResponse(cachedResult));
+
+      const requestedTypes = cardTypes.length ? cardTypes : RESOURCE_CARD_TYPES;
+      const missingTypes = missingResourceCardTypes(resources.value[nodeId] ?? []);
+      const typesToGenerate = force
+        ? requestedTypes
+        : requestedTypes.filter((cardType) => missingTypes.includes(cardType));
+      if (!typesToGenerate.length) {
+        if (!silent) setInfo(`「${nodeLabel}」资源已就绪。`);
+        return { ok: true, status: "already_exists", resources: resources.value[nodeId] ?? [] };
+      }
+
+      const generationResult = await requestResourceGeneration(sessionId.value, nodeId, {
+        cardTypes: typesToGenerate,
+        force,
+        priority: typesToGenerate.includes("concept_map") ? "concept_map" : "card",
+      });
+      mergeNodeResources(nodeId, resourceListFromResponse(generationResult));
+      if (generation !== resourceGenerationVersion || currentNode.value !== nodeId) {
+        return { ok: false, stale: true };
+      }
+
+      let jobId = String(generationResult?.job_id || "");
+      let streamFailure = null;
+      while (jobId && generation === resourceGenerationVersion && currentNode.value === nodeId) {
+        let followUpJobId = "";
+        await streamResourceGeneration(jobId, {
+          signal: controller?.signal,
+          onCardReady(data) {
+            if (generation !== resourceGenerationVersion || currentNode.value !== nodeId) return;
+            mergeNodeResources(nodeId, generationCardsFromEvent(data));
+          },
+          onCardFailed(data) {
+            const message = data?.error || data?.detail || "部分资源生成失败";
+            setInfo(message, 8000);
+          },
+          onCompleted(data) {
+            followUpJobId = String(data?.follow_up_job_id || "");
+          },
+          onFailed(data) {
+            streamFailure = new Error(data?.error || data?.detail || "资源生成任务失败");
+          },
+          onError(error) {
+            streamFailure = error;
+          },
+        });
+        jobId = followUpJobId;
+      }
+
+      if (generation !== resourceGenerationVersion || currentNode.value !== nodeId) {
+        return { ok: false, stale: true };
+      }
+      const finalResult = await fetchCurrentNodeResources(nodeId);
+      mergeNodeResources(nodeId, resourceListFromResponse(finalResult));
+      const finalCards = resources.value[nodeId] ?? [];
+      if (streamFailure && !finalCards.length) throw streamFailure;
+      if (!silent) setInfo(`「${nodeLabel}」已加载 ${finalCards.length} 份学习资源。`);
+      return { ok: true, status: "completed", resources: finalCards };
     } catch (e) {
+      if (e?.name === "AbortError") return { ok: false, stale: true };
       const message = e?.response?.data?.detail || e?.message || "未知错误";
       setInfo(`资源生成失败：${message}`, 10000);
+      return { ok: false, error: e };
     } finally {
-      isLoadingNode.value = false;
-      refreshStatuses();
+      if (generation === resourceGenerationVersion) {
+        resourceGenerationController = null;
+        isLoadingNode.value = false;
+        refreshStatuses();
+      }
     }
   }
 

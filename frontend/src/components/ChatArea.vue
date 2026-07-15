@@ -7,9 +7,21 @@
           <h2 class="mt-1 truncate text-base font-bold text-text-primary">学习辅导</h2>
         </div>
 
-        <span class="workspace-shell-chip workspace-shell-chip--accent shrink-0 px-2.5 py-1 text-[10px] font-semibold">
-          {{ modeLabel }}
-        </span>
+        <div class="flex shrink-0 items-center gap-2">
+          <button
+            v-if="collapsible"
+            type="button"
+            class="workspace-shell-btn focus-ring min-h-9 px-2.5 text-[11px] font-semibold"
+            aria-label="收起辅导区域"
+            title="收起辅导区域"
+            @click="$emit('collapse')"
+          >
+            收起
+          </button>
+          <span class="workspace-shell-chip workspace-shell-chip--accent shrink-0 px-2.5 py-1 text-[10px] font-semibold">
+            {{ modeLabel }}
+          </span>
+        </div>
       </div>
 
       <div
@@ -178,9 +190,26 @@
           class="workspace-shell-input focus-ring w-full rounded-xl px-3 py-2 text-xs text-text-primary placeholder:text-text-muted"
           placeholder="粘贴报错信息..."
         />
+
+        <div class="mt-3 flex items-center justify-between gap-3">
+          <p class="text-[11px] leading-5 text-text-muted">代码片段为必填，错误信息可选。</p>
+          <button
+            type="button"
+            class="btn-ripple focus-ring btn-capsule shrink-0"
+            :disabled="busy || !codeSnippet.trim()"
+            @click="submitCodeDebug"
+          >
+            <span v-if="busy" class="flex items-center gap-1.5">
+              <span class="generating-dot" style="width:5px;height:5px" />
+              <span class="generating-dot" style="width:5px;height:5px;animation-delay:.15s" />
+              <span class="generating-dot" style="width:5px;height:5px;animation-delay:.3s" />
+            </span>
+            <span v-else>开始调试</span>
+          </button>
+        </div>
       </div>
 
-      <div class="workspace-shell-card rounded-[24px] p-2.5">
+      <div v-if="selectedContext !== 'code_debug'" class="workspace-shell-card rounded-[24px] p-2.5">
         <div class="flex items-end gap-3">
           <label class="sr-only" for="chat-input">辅导输入框</label>
           <textarea
@@ -231,9 +260,10 @@ const props = defineProps({
   busy: { type: Boolean, default: false },
   nodeTitle: { type: String, default: "" },
   suggestions: { type: Array, default: () => [] },
+  collapsible: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(["send", "submit-probe"]);
+const emit = defineEmits(["send", "submit-probe", "collapse"]);
 
 const draft = ref("");
 const scrollRoot = ref(null);
@@ -243,9 +273,9 @@ const isPinnedToBottom = ref(true);
 const contextTypes = [
   { value: "concept", label: "概念讲解" },
   { value: "problem_solving", label: "解题思路" },
-  { value: "code_debug", label: "代码调试" },
   { value: "study_advice", label: "学习建议" },
   { value: "exam_prep", label: "考前冲刺" },
+  { value: "code_debug", label: "代码调试" },
 ];
 const selectedContext = ref("concept");
 const codeSnippet = ref("");
@@ -333,6 +363,24 @@ function submit() {
     codeSnippet.value = "";
     errorMessage.value = "";
   }
+}
+
+function submitCodeDebug() {
+  const snippet = codeSnippet.value.trim();
+  if (!snippet || props.busy || props.bootMode === "probe") {
+    return;
+  }
+
+  const error = errorMessage.value.trim();
+  isPinnedToBottom.value = true;
+  emit("send", {
+    text: error ? "请根据错误信息调试这段代码" : "请分析并调试这段代码",
+    contextType: "code_debug",
+    codeSnippet: snippet,
+    errorMessage: error,
+  });
+  codeSnippet.value = "";
+  errorMessage.value = "";
 }
 
 function sendPrompt(prompt) {

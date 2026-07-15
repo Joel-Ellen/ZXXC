@@ -10,6 +10,7 @@
     @wheel="$emit('workspace-wheel', $event)"
   >
     <SidebarRail
+      v-if="showRail"
       :active-panel="activePanel"
       :drawer-open="drawerOpen"
       :panel-id="panelId"
@@ -44,6 +45,7 @@ const props = defineProps({
   reduceMotion: { type: Boolean, default: false },
   fontSize: { type: Number, default: 16 },
   busy: { type: Boolean, default: false },
+  showRail: { type: Boolean, default: true },
 });
 
 defineEmits(["select-panel", "workspace-wheel"]);
@@ -77,8 +79,8 @@ function scaledFontSize(size, scale) {
 <style scoped>
 .workspace-shell {
   width: 100%;
-  height: 100vh;
   height: 100dvh;
+  min-height: 100dvh;
   min-height: 0;
   padding-top: env(safe-area-inset-top, 0px);
   padding-right: env(safe-area-inset-right, 0px);
@@ -98,19 +100,20 @@ function scaledFontSize(size, scale) {
 }
 
 .workspace-shell__body {
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--space-panel) 82%, transparent), transparent 36%),
-    transparent;
+  width: 100%;
+  background: var(--space-bg);
 }
 
 .workspace-shell__main {
+  width: 100%;
   isolation: isolate;
 }
 
-/* Keep the hover trigger in a reserved band so it never covers the first line of content. */
-@media (min-width: 768px) {
-  .workspace-shell__body {
-    padding-top: 3rem;
+@media (max-width: 767px) {
+  .workspace-shell__body,
+  .workspace-shell__main {
+    max-width: 100vw;
+    overflow-x: hidden;
   }
 }
 

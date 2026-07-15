@@ -1,6 +1,6 @@
 <template>
   <div class="app-workspace-view text-text-primary font-sans relative">
-    <AuroraBackground :reduce-motion="false" />
+    <AuroraBackground v-if="bootMode !== 'ready' && bootMode !== 'course_selection'" :reduce-motion="false" />
 
     <div
       v-if="bootMode === 'loading'"
@@ -30,8 +30,10 @@
       v-else-if="bootMode === 'course_selection'"
       :courses="availableCourses"
       :enrolled="enrolledCourses"
+      :active-course="activeCourse"
       :loading="isBusy"
       @select="onCourseSelect"
+      @back="returnToWorkspace"
       @go-home="goHome"
     />
 
@@ -59,7 +61,6 @@
       :capability-radar="capabilityRadar"
       :overall-progress="overallProgress"
       :mastered-count="masteredCount"
-      :statuses="agentStatuses"
       :info-message="infoMessage"
       :is-busy="isBusy"
       :is-loading-node="isLoadingNode"
@@ -80,6 +81,7 @@
       @logout="handleLogout"
       @go-home="goHome"
       @switch-course="onSwitchCourse"
+      @browse-courses="openCourseSelection"
       @refresh-resources="() => refreshNodeResources(currentNode, true)"
       @generate-card="onGenerateCard"
       @restart-probe="restartProbe"
@@ -115,7 +117,6 @@ const {
   messages,
   agentFeedback,
   infoMessage,
-  agentStatuses,
   probe,
   probeCollected,
   probeTotal,
@@ -154,8 +155,27 @@ function goHome() {
   router.push("/");
 }
 
-function onCourseSelect(courseId) {
-  handleEnrollCourse(courseId);
+async function onCourseSelect(courseId) {
+  if (courseId === activeCourse.value?.course_id) {
+    bootMode.value = "ready";
+    return;
+  }
+
+  const isEnrolled = enrolledCourses.value.some((course) => course.course_id === courseId);
+  if (isEnrolled) {
+    await handleSwitchCourse(courseId);
+    return;
+  }
+
+  await handleEnrollCourse(courseId);
+}
+
+function openCourseSelection() {
+  bootMode.value = "course_selection";
+}
+
+function returnToWorkspace() {
+  bootMode.value = activeCourse.value ? "ready" : "course_selection";
 }
 
 async function onSendTutorMessage(payload) {
@@ -170,10 +190,10 @@ function onSwitchCourse(courseId) {
   handleSwitchCourse(courseId);
 }
 
-async function onGenerateCard({ nodeId, force = false } = {}) {
+async function onGenerateCard({ nodeId, cardType = "", force = false } = {}) {
   const targetNode = nodeId || currentNode.value;
   if (!targetNode) return;
-  await refreshNodeResources(targetNode, force);
+  await refreshNodeResources(targetNode, { force, cardType });
 }
 </script>
 

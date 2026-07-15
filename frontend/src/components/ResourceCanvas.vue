@@ -19,13 +19,6 @@
         <div class="resource-canvas__actions">
           <button
             type="button"
-            class="workspace-shell-btn focus-ring px-3 py-2 text-[11px] font-semibold"
-            @click="isExpanded = !isExpanded"
-          >
-            {{ isExpanded ? "紧凑视图" : "展开矩阵" }}
-          </button>
-          <button
-            type="button"
             class="workspace-shell-btn workspace-shell-btn--secondary focus-ring px-3 py-2 text-[11px] font-semibold"
             @click="focusMode = !focusMode"
           >
@@ -56,7 +49,7 @@
           <strong>{{ masteredCount }}/{{ pathNodes.length }}</strong>
         </div>
         <p class="resource-canvas__guidance">
-          {{ currentNodeMeta ? `先完成 ${activeCardTitle}，再进入诊断。` : "选择课程节点后，资料会在这里自动装配。" }}
+          {{ currentNodeMeta ? resourceGuidance : "选择课程节点后，资料会在这里自动装配。" }}
         </p>
       </div>
 
@@ -75,6 +68,24 @@
         >
           {{ node.title }}
         </button>
+        </div>
+      </div>
+
+      <div class="resource-canvas__filters" aria-label="资源类型">
+        <span class="resource-canvas__filters-label">资源类型</span>
+        <div class="resource-canvas__filter-scroll aurora-scroll" role="group" aria-label="筛选学习资源">
+          <button
+            v-for="item in resourceFilterItems"
+            :key="item.key"
+            type="button"
+            class="resource-canvas__filter focus-ring"
+            :class="{ 'resource-canvas__filter--active': filterType === item.key }"
+            :aria-pressed="String(filterType === item.key)"
+            @click="emit('filter-change', item.key)"
+          >
+            <span>{{ item.label }}</span>
+            <span class="resource-canvas__filter-count" aria-hidden="true">{{ item.count }}</span>
+          </button>
         </div>
       </div>
     </header>
@@ -112,17 +123,17 @@
       </div>
 
       <div
-        class="grid w-full grid-cols-1 gap-5 md:grid-cols-12 auto-rows-[minmax(240px,auto)]"
+        class="resource-canvas__grid"
+        :class="isSingleCardView ? 'resource-canvas__grid--single' : 'resource-canvas__grid--multiple'"
       >
         <template v-for="(slot, index) in cardTypeSlots" :key="slot.type">
 
           <!-- Case 1: card exists and not minimized -->
           <div
             v-if="slot.card && !minimizedIds.includes(slot.card.resource_id)"
-            draggable="true"
-            class="animate-cardIn h-full card-depth transition-all duration-300"
+            :draggable="!isSingleCardView"
+            class="resource-canvas__slot animate-cardIn h-full card-depth transition-all duration-300"
             :style="{ animationDelay: `${index * 55}ms` }"
-            :class="[getGridSpanClass(slot.type), slot.card.resource_id === activeCardId ? 'md:-translate-y-1.5' : '']"
             @dragstart="onDragStart(slot.card.resource_id)"
             @dragover.prevent
             @drop="onDrop(slot.card.resource_id)"
@@ -136,15 +147,15 @@
               :progress="loading ? progressHint(resourceType(card)) : 100"
               :is-ready="!loading"
               :is-active="card.resource_id === activeCardId"
-              :is-expanded="isCardHydrated(card.resource_id)"
+              :is-expanded="isSingleCardView"
               :activatable="!loading"
               :color="cardColor(resourceType(card))"
-              @activate="activateCard(card.resource_id)"
+              @activate="openCard(card)"
               @pin="pinCard(card.resource_id)"
               @minimize="minimizeCard(card.resource_id)"
             >
               <template #content>
-              <div v-if="!isCardHydrated(card.resource_id)" class="space-y-4">
+              <div v-if="!isSingleCardView" class="space-y-4">
                 <div class="workspace-shell-card-soft rounded-[20px] p-4">
                   <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">
                     {{ previewLabel(resourceType(card)) }}
@@ -163,9 +174,9 @@
                 <button
                   type="button"
                     class="workspace-shell-btn workspace-shell-btn--accent focus-ring px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.10em]"
-                    @click.stop="activateCard(card.resource_id)"
+                    @click.stop="openCard(card)"
                   >
-                  {{ card.resource_id === activeCardId ? "展开完整内容" : "设为当前并展开" }}
+                  打开完整内容
                 </button>
               </div>
 
@@ -434,9 +445,8 @@
           <!-- Case 2: empty slot — show placeholder with generate button -->
           <div
             v-else
-            class="animate-cardIn h-full min-h-[240px] transition-all duration-300"
+            class="resource-canvas__slot animate-cardIn h-full transition-all duration-300"
             :style="{ animationDelay: `${index * 40}ms` }"
-            :class="getGridSpanClass(slot.type)"
           >
             <div
               class="slot-empty group h-full rounded-[22px] border border-dashed border-subtle/50 bg-space-elevated/40 flex flex-col items-center justify-center gap-4 p-6"
@@ -503,17 +513,18 @@ const props = defineProps({
   buildQuiz: { type: Function, required: true },
 });
 
-const emit = defineEmits(["submit-quiz", "select-node", "refresh", "generate-card"]);
+const emit = defineEmits(["submit-quiz", "select-node", "refresh", "generate-card", "filter-change"]);
 
 const orderedIds = ref([]);
 const minimizedIds = ref([]);
 const activeCardId = ref("");
 const dragId = ref("");
 const focusMode = ref(false);
-const isExpanded = ref(false);
 const answers = ref({});
-const hydratedCardIds = ref([]);
 const submittedScore = ref(null);
+const quizAttemptNumber = ref(1);
+const quizStartedAt = ref(Date.now());
+const quizEventId = ref("");
 const scrollViewport = ref(null);
 const nodeScroller = ref(null);
 const nodeButtonRefs = new Map();
@@ -538,12 +549,21 @@ watch(
 
 // ── 5-type slot system ─────────────────────────────────────────────────
 const CARD_TYPES = [
-  { type: "concept_map",          label: "概念导图", icon: "🗺", sidebarKey: "concept",  color: "var(--learning-concept)" },
-  { type: "code_snippet",         label: "代码示例", icon: "💻", sidebarKey: "code",     color: "var(--learning-code)" },
-  { type: "interactive_exercise", label: "互动练习", icon: "✏️", sidebarKey: "practice", color: "var(--learning-practice)" },
-  { type: "video_summary",        label: "视频摘要", icon: "🎬", sidebarKey: "video",    color: "var(--learning-video)" },
-  { type: "diagnostic_quiz",      label: "诊断测验", icon: "📋", sidebarKey: "quiz",     color: "var(--learning-quiz)" },
+  { type: "concept_map",          label: "概念导图", filterLabel: "概念", icon: "🗺", sidebarKey: "concept",  color: "var(--learning-concept)" },
+  { type: "code_snippet",         label: "代码示例", filterLabel: "代码", icon: "💻", sidebarKey: "code",     color: "var(--learning-code)" },
+  { type: "interactive_exercise", label: "互动练习", filterLabel: "练习", icon: "✏️", sidebarKey: "practice", color: "var(--learning-practice)" },
+  { type: "video_summary",        label: "视频摘要", filterLabel: "视频", icon: "🎬", sidebarKey: "video",    color: "var(--learning-video)" },
+  { type: "diagnostic_quiz",      label: "诊断测验", filterLabel: "测验", icon: "📋", sidebarKey: "quiz",     color: "var(--learning-quiz)" },
 ];
+
+const resourceFilterItems = computed(() => [
+  { key: "all", label: "全部", count: props.cards.length },
+  ...CARD_TYPES.map((item) => ({
+    key: item.sidebarKey,
+    label: item.filterLabel,
+    count: props.cards.filter((card) => resourceType(card) === item.type).length,
+  })),
+]);
 
 /** Map card_type → latest card */
 const cardsByType = computed(() => {
@@ -560,14 +580,38 @@ const cardsByType = computed(() => {
  * "all" → all 5 types; otherwise only the matching type.
  */
 const cardTypeSlots = computed(() => {
-  const filtered = props.filterType && props.filterType !== "all"
+  let filtered = props.filterType && props.filterType !== "all"
     ? CARD_TYPES.filter((m) => m.sidebarKey === props.filterType)
     : CARD_TYPES;
+
+  if (focusMode.value && activeCardId.value) {
+    const activeType = resourceType(props.cards.find((card) => card.resource_id === activeCardId.value));
+    filtered = filtered.filter((meta) => meta.type === activeType);
+  }
+
   return filtered.map((meta) => ({
     ...meta,
     card: cardsByType.value[meta.type] ?? null,
   }));
 });
+
+const singleCardId = computed(() => {
+  if (cardTypeSlots.value.length !== 1) {
+    return "";
+  }
+
+  const cardId = cardTypeSlots.value[0].card?.resource_id ?? "";
+  return minimizedIds.value.includes(cardId) ? "" : cardId;
+});
+
+const isSingleCardView = computed(() => Boolean(singleCardId.value));
+
+watch(
+  () => props.filterType,
+  () => {
+    focusMode.value = false;
+  },
+);
 
 watch(
   () => props.cards,
@@ -576,10 +620,17 @@ watch(
     orderedIds.value = nextIds;
     minimizedIds.value = [];
     activeCardId.value = nextIds[0] ?? "";
-    hydratedCardIds.value = [];
     focusMode.value = false;
-    answers.value = {};
-    submittedScore.value = null;
+  },
+  { immediate: true },
+);
+
+watch(
+  singleCardId,
+  (cardId) => {
+    if (cardId) {
+      setActiveCard(cardId);
+    }
   },
   { immediate: true },
 );
@@ -626,6 +677,17 @@ const quizCard = computed(() =>
   sortedCards.value.find((card) => resourceType(card) === "diagnostic_quiz"),
 );
 
+watch(
+  [() => props.currentNode, () => quizCard.value?.resource_id ?? quizCard.value?.id ?? ""],
+  () => {
+    answers.value = {};
+    submittedScore.value = null;
+    quizAttemptNumber.value = 1;
+    quizStartedAt.value = Date.now();
+    quizEventId.value = "";
+  },
+);
+
 const quizQuestions = computed(() => {
   const structuredQuestions = structuredPayload(quizCard.value)?.questions;
   if (Array.isArray(structuredQuestions) && structuredQuestions.length) {
@@ -662,10 +724,14 @@ const currentMastery = computed(() =>
   Math.round((currentNodeMeta.value?.mastery ?? 0) * 100),
 );
 
-const activeCardTitle = computed(() => {
-  const activeCard = sortedCards.value.find((card) => card.resource_id === activeCardId.value) ?? sortedCards.value[0];
-  return activeCard ? cardLabel(resourceType(activeCard)) : "当前内容";
-});
+const resourceGuidance = computed(() => ({
+  concept: "概念导图帮助你建立当前知识点的整体结构。",
+  code: "代码示例帮助你理解知识点如何落到实际实现。",
+  practice: "互动练习帮助你通过应用与反思巩固理解。",
+  video: "视频摘要帮助你快速回顾当前知识点的核心内容。",
+  quiz: "诊断测验用于检验掌握程度并发现薄弱环节。",
+  all: "多种学习资源共同支持理解、实践与诊断的完整过程。",
+}[props.filterType] ?? "当前资源帮助你理解并掌握这个知识点。"));
 
 const availableTypes = computed(() => new Set(props.cards.map((card) => resourceType(card))));
 const nextPendingNode = computed(() =>
@@ -896,24 +962,6 @@ function quizAfterGuidance(card) {
   return cardMetadata(card).after_quiz_guidance || "";
 }
 
-watch(
-  () => focusMode.value,
-  (enabled) => {
-    if (enabled && activeCardId.value) {
-      hydrateCard(activeCardId.value);
-    }
-  },
-);
-
-watch(
-  () => activeCardId.value,
-  (cardId) => {
-    if (focusMode.value && cardId) {
-      hydrateCard(cardId);
-    }
-  },
-);
-
 function cardLabel(cardType) {
   return props.getCardLabel(cardType);
 }
@@ -941,20 +989,6 @@ function progressHint(cardType) {
     return 58;
   }
   return 84;
-}
-
-function getGridSpanClass(cardType) {
-  switch (cardType) {
-    case "concept_map":
-    case "video_summary":
-      return "col-span-1 md:col-span-6 xl:col-span-6";
-    case "code_snippet":
-      return "col-span-1 md:col-span-12 xl:col-span-12";
-    case "interactive_exercise":
-    case "diagnostic_quiz":
-    default:
-      return "col-span-1 md:col-span-6";
-  }
 }
 
 function nodeChipClass(node) {
@@ -1007,36 +1041,39 @@ function alignNodeToLeft(nodeId) {
   });
 }
 
-function isCardHydrated(cardId) {
-  return hydratedCardIds.value.includes(cardId);
-}
-
-function hydrateCard(cardId) {
-  if (!cardId || hydratedCardIds.value.includes(cardId)) {
-    return;
-  }
-
-  hydratedCardIds.value = [...hydratedCardIds.value, cardId];
-}
-
 function activateCard(cardId) {
   if (!cardId) {
     return;
   }
 
-  setActiveCard(cardId, true);
+  setActiveCard(cardId);
 }
 
-function setActiveCard(cardId, shouldHydrate = false) {
+function openCard(card) {
+  if (!card?.resource_id) {
+    return;
+  }
+
+  setActiveCard(card.resource_id);
+  if (isSingleCardView.value) {
+    return;
+  }
+
+  const filterKey = CARD_TYPES.find((item) => item.type === resourceType(card))?.sidebarKey;
+  if (filterKey) {
+    emit("filter-change", filterKey);
+    return;
+  }
+
+  activateCard(card.resource_id);
+}
+
+function setActiveCard(cardId) {
   if (!cardId) {
     return;
   }
 
   activeCardId.value = cardId;
-
-  if (shouldHydrate) {
-    hydrateCard(cardId);
-  }
 }
 
 function textPreview(content) {
@@ -1122,8 +1159,30 @@ function submitQuizScore() {
     }
   });
   const score = quizQuestions.value.length ? correct / quizQuestions.value.length : 0;
+  const resourceId = quizCard.value?.resource_id ?? quizCard.value?.id;
+  if (!resourceId) return;
+  if (!quizEventId.value) {
+    quizEventId.value = `diagnostic-${resourceId}-${quizAttemptNumber.value}-${Date.now()}`;
+  }
   submittedScore.value = score;
-  emit("submit-quiz", score);
+  emit("submit-quiz", {
+    eventId: quizEventId.value,
+    resourceId: String(resourceId),
+    durationMs: Math.max(0, Date.now() - quizStartedAt.value),
+    attemptNumber: quizAttemptNumber.value,
+    usedHint: false,
+    answers: quizQuestions.value.map((question) => ({
+      questionId: question.id,
+      selectedOptionIndex: answers.value[question.id],
+    })),
+    onRecorded() {
+      quizAttemptNumber.value += 1;
+      quizEventId.value = "";
+    },
+    onFailure() {
+      submittedScore.value = null;
+    },
+  });
 }
 
 function forwardWheelToContent(event) {
@@ -1153,6 +1212,29 @@ function forwardWheelToContent(event) {
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--space-elevated) 62%, transparent), transparent 22rem);
   overscroll-behavior: contain;
+}
+
+.resource-canvas__grid {
+  display: grid;
+  width: 100%;
+  gap: 1rem;
+}
+
+.resource-canvas__grid--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.resource-canvas__grid--single .resource-canvas__slot {
+  min-height: max(36rem, calc(100dvh - 18rem));
+}
+
+.resource-canvas__grid--multiple {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr));
+  grid-auto-rows: 30rem;
+}
+
+.resource-canvas__slot {
+  min-width: 0;
 }
 
 .resource-canvas__header {
@@ -1253,6 +1335,72 @@ function forwardWheelToContent(event) {
   flex-shrink: 0;
 }
 
+.resource-canvas__filters {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.75rem;
+  padding-top: 0.15rem;
+}
+
+.resource-canvas__filters-label {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.resource-canvas__filter-scroll {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  gap: 0.35rem;
+  overflow-x: auto;
+  padding: 0.15rem;
+}
+
+.resource-canvas__filter {
+  display: inline-flex;
+  min-height: 2.75rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border-radius: var(--radius-sm);
+  padding: 0 0.8rem;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 750;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.resource-canvas__filter:hover {
+  background: var(--space-elevated);
+  color: var(--text-primary);
+}
+
+.resource-canvas__filter--active {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-dark);
+}
+
+.resource-canvas__filter-count {
+  display: inline-flex;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  padding: 0 0.3rem;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  line-height: 1;
+}
+
 @media (max-width: 767px) {
   .resource-canvas__heading-row {
     align-items: flex-start;
@@ -1277,6 +1425,16 @@ function forwardWheelToContent(event) {
     align-items: flex-start;
     flex-direction: column;
     gap: 0.4rem;
+  }
+
+  .resource-canvas__filters {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .resource-canvas__filter-scroll {
+    width: 100%;
   }
 }
 </style>

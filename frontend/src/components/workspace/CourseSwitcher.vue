@@ -11,7 +11,7 @@
       @keydown.down.prevent="openMenu('first')"
       @keydown.up.prevent="openMenu('last')"
     >
-      <span class="course-switcher__icon" aria-hidden="true">{{ activeCourse?.icon || "📌" }}</span>
+      <span class="course-switcher__icon" aria-hidden="true"><IconDoc :size="16" /></span>
       <span class="course-switcher__title">{{ activeCourseTitle }}</span>
       <svg
         width="12"
@@ -55,7 +55,7 @@
           :class="{ 'is-selected': course.course_id === activeCourse?.course_id }"
           @click="selectCourse(course.course_id)"
         >
-          <span class="course-switcher__item-icon" aria-hidden="true">{{ course.icon || "📌" }}</span>
+          <span class="course-switcher__item-icon" aria-hidden="true"><IconDoc :size="16" /></span>
           <span class="course-switcher__item-copy">
             <span class="course-switcher__item-title">{{ course.title_cn || "课程" }}</span>
             <span class="course-switcher__item-meta">{{ formatProgress(course.progress) }}</span>
@@ -78,7 +78,7 @@
           @click="browseCourses"
         >
           <span class="course-switcher__browse-mark" aria-hidden="true">+</span>
-          <span>浏览更多课程</span>
+          <span>选择其他课程</span>
         </button>
       </div>
     </transition>
@@ -95,6 +95,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import IconCheck from "../icons/IconCheck.vue";
+import IconDoc from "../icons/IconDoc.vue";
 
 const props = defineProps({
   activeCourse: { type: Object, default: null },

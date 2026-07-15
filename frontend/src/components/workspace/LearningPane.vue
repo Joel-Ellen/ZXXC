@@ -23,6 +23,7 @@
       @select-node="$emit('select-node', $event)"
       @refresh="$emit('refresh')"
       @generate-card="$emit('generate-card', $event)"
+      @filter-change="$emit('filter-change', $event)"
     />
   </main>
 </template>
@@ -47,7 +48,7 @@ defineProps({
   buildQuiz: { type: Function, required: true },
 });
 
-defineEmits(["submit-quiz", "select-node", "refresh", "generate-card"]);
+defineEmits(["submit-quiz", "select-node", "refresh", "generate-card", "filter-change"]);
 
 const paneRef = ref(null);
 

@@ -18,8 +18,10 @@
         :busy="busy"
         :node-title="currentNodeTitle"
         :suggestions="suggestions"
+        :collapsible="collapsible"
         @send="$emit('send', $event)"
         @submit-probe="$emit('submit-probe', $event)"
+        @collapse="$emit('collapse')"
       />
     </div>
   </aside>
@@ -40,9 +42,10 @@ defineProps({
   isSubmittingProbe: { type: Boolean, default: false },
   busy: { type: Boolean, default: false },
   suggestions: { type: Array, default: () => [] },
+  collapsible: { type: Boolean, default: false },
 });
 
-defineEmits(["send", "submit-probe"]);
+defineEmits(["send", "submit-probe", "collapse"]);
 
 const paneRef = ref(null);
 

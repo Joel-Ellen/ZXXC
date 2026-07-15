@@ -60,7 +60,20 @@
         @select-node="(id) => onSelectNode(id)"
         @refresh="$emit('refresh-resources')"
         @generate-card="(payload) => $emit('generate-card', payload)"
+        @filter-change="onResourceFilterChange"
       />
+
+      <button
+        v-if="isTutorCollapsed"
+        type="button"
+        class="desktop-tutor-toggle focus-ring"
+        aria-controls="workspace-coach-panel"
+        aria-expanded="false"
+        @click="openTutor"
+      >
+        <IconChat :size="17" aria-hidden="true" />
+        <span>展开辅导</span>
+      </button>
 
       <TutorPane
         ref="coachPanelRef"
@@ -77,8 +90,10 @@
         :is-submitting-probe="isSubmittingProbe"
         :busy="isBusy"
         :suggestions="coachPrompts"
+        :collapsible="isDesktopViewport && bootMode !== 'probe'"
         @send="handleCoachSend"
         @submit-probe="(values) => $emit('submit-probe', values)"
+        @collapse="collapseTutor"
       />
 
       <nav class="mobile-dock sticky bottom-0 z-20 border-t border-subtle bg-space-panel/88 px-3 py-2 backdrop-blur-xl" aria-label="工作台切换">
@@ -154,6 +169,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import SidebarDrawer from "./SidebarDrawer.vue";
+import IconChat from "./icons/IconChat.vue";
 import LearningPane from "./workspace/LearningPane.vue";
 import SessionHeader from "./workspace/SessionHeader.vue";
 import TutorPane from "./workspace/TutorPane.vue";
@@ -176,7 +192,6 @@ const props = defineProps({
   capabilityRadar: { type: Array, default: () => [0.5, 0.5, 0.5, 0.5, 0.5] },
   overallProgress: { type: Number, default: 0 },
   masteredCount: { type: Number, default: 0 },
-  statuses: { type: Array, default: () => [] },
   infoMessage: { type: String, default: "" },
   isBusy: { type: Boolean, default: false },
   isLoadingNode: { type: Boolean, default: false },
@@ -203,11 +218,18 @@ const emit = defineEmits([
   "refresh-resources",
   "generate-card",
   "restart-probe",
+  "browse-courses",
 ]);
 
+const WORKSPACE_VIEWS = new Set(["study", "path", "agents", "evidence"]);
+const WORKSPACE_DRAWER_PANELS = {
+  path: "tree",
+  agents: "feedback",
+  evidence: "radar",
+};
 const drawerOpen = ref(false);
-const sidebarPanel = ref("concept");
-const activeResourceCategory = ref("concept"); // which content type is active
+const sidebarPanel = ref("all");
+const activeResourceCategory = ref("all");
 const learnPanelRef = ref(null);
 const coachPanelRef = ref(null);
 
@@ -215,7 +237,7 @@ const highContrast = ref(false);
 const reduceMotion = ref(false);
 const fontSize = ref(16);
 const mobilePane = ref("learn");
-const tutorCollapsed = ref(false);
+const tutorCollapsed = ref(true);
 const isDesktopViewport = ref(false);
 let desktopMediaQuery = null;
 const isWorkspaceBusy = computed(() => props.isBusy || props.isLoadingNode);
@@ -224,35 +246,27 @@ const isTutorCollapsed = computed(() => (
 ));
 
 const workspaceNav = [
-  { key: "learn", label: "学习区" },
-  { key: "coach", label: "辅导区" },
-  { key: "path", label: "路径" },
-  { key: "assessment", label: "诊断" },
-  { key: "feedback", label: "反馈" },
-  { key: "settings", label: "设置" },
-  { key: "probe", label: "测试" },
+  { key: "study", label: "学习工作台" },
+  { key: "path", label: "学习路径" },
+  { key: "agents", label: "智能体协同" },
+  { key: "evidence", label: "学习成果" },
 ];
 
 const dockActions = [
-  { key: "learn", label: "学习" },
+  { key: "study", label: "学习" },
   { key: "coach", label: "辅导" },
   { key: "path", label: "路径" },
-  { key: "assessment", label: "诊断" },
-  { key: "feedback", label: "反馈" },
-  { key: "settings", label: "设置" },
-  { key: "probe", label: "测试" },
+  { key: "agents", label: "协同" },
+  { key: "evidence", label: "成果" },
 ];
 
 const workspaceNavItems = computed(() =>
   workspaceNav.map((item) => ({
     ...item,
-    label: item.key === "coach" && isDesktopViewport.value
-      ? (isTutorCollapsed.value ? "展开辅导" : "收起辅导")
-      : item.label,
-    active: isNavActive(item.key),
-    expanded: navExpandedState(item.key),
-    hasPopup: isDrawerAction(item.key),
-    targetId: navTargetId(item.key),
+    active: isWorkspaceNavActive(item.key),
+    expanded: item.key !== "study" ? String(isWorkspaceNavActive(item.key)) : undefined,
+    hasPopup: item.key !== "study",
+    targetId: item.key === "study" ? LEARN_PANEL_ID : DRAWER_PANEL_ID,
   })),
 );
 
@@ -302,6 +316,8 @@ watch(
       reduceMotion: nextMotion,
       fontSize: nextFont,
       tutorCollapsed: nextTutorCollapsed,
+      tutorPreferenceSet: true,
+      motionPreferenceSet: true,
     }));
   },
 );
@@ -323,14 +339,18 @@ onMounted(() => {
 
     const saved = JSON.parse(raw);
     highContrast.value = Boolean(saved.highContrast);
-    reduceMotion.value = Boolean(saved.reduceMotion);
+    reduceMotion.value = saved.motionPreferenceSet === true
+      ? Boolean(saved.reduceMotion)
+      : false;
     fontSize.value = typeof saved.fontSize === "number" ? saved.fontSize : 16;
-    tutorCollapsed.value = Boolean(saved.tutorCollapsed);
+    tutorCollapsed.value = saved.tutorPreferenceSet === true
+      ? Boolean(saved.tutorCollapsed)
+      : true;
   } catch {
     highContrast.value = false;
     reduceMotion.value = false;
     fontSize.value = 16;
-    tutorCollapsed.value = false;
+    tutorCollapsed.value = true;
   }
 });
 
@@ -340,6 +360,11 @@ onBeforeUnmount(() => {
 
 function updateDesktopViewport(event) {
   isDesktopViewport.value = Boolean(event.matches);
+}
+
+function onResourceFilterChange(filterKey) {
+  activeResourceCategory.value = filterKey;
+  sidebarPanel.value = filterKey;
 }
 
 function onSidebarSelect(panelKey) {
@@ -354,6 +379,10 @@ function onSidebarSelect(panelKey) {
     activeResourceCategory.value = panelKey;
     sidebarPanel.value = panelKey;
     drawerOpen.value = false;
+    return;
+  }
+  if (panelKey === "tree") {
+    openPanel("tree");
     return;
   }
   // Drawer keys (tree, radar, settings)
@@ -385,7 +414,7 @@ function onSwitchCourse(courseId) {
 }
 
 function handleBrowseCourses() {
-  emit("go-home");
+  emit("browse-courses");
 }
 
 function handleCoachSend(message) {
@@ -393,8 +422,34 @@ function handleCoachSend(message) {
   emit("send-tutor", message);
 }
 
+async function openTutor() {
+  tutorCollapsed.value = false;
+  drawerOpen.value = false;
+  await focusWorkspaceRegion("coach");
+}
+
+async function collapseTutor() {
+  if (props.bootMode === "probe") {
+    return;
+  }
+
+  tutorCollapsed.value = true;
+  await focusWorkspaceRegion("learn");
+}
+
 async function handleNav(key) {
-  if (key === "learn") {
+  if (WORKSPACE_VIEWS.has(key)) {
+    if (key !== "study") {
+      const panelKey = WORKSPACE_DRAWER_PANELS[key];
+      if (drawerOpen.value && sidebarPanel.value === panelKey) {
+        drawerOpen.value = false;
+      } else {
+        openPanel(panelKey);
+      }
+      mobilePane.value = "learn";
+      return;
+    }
+
     mobilePane.value = "learn";
     drawerOpen.value = false;
     await focusWorkspaceRegion("learn");
@@ -404,15 +459,14 @@ async function handleNav(key) {
   if (key === "coach") {
     if (isDesktopViewport.value) {
       if (props.bootMode === "probe") {
-        tutorCollapsed.value = false;
-        await focusWorkspaceRegion("coach");
+        await openTutor();
         return;
       }
 
-      tutorCollapsed.value = !tutorCollapsed.value;
-      drawerOpen.value = false;
-      if (!tutorCollapsed.value) {
-        await focusWorkspaceRegion("coach");
+      if (tutorCollapsed.value) {
+        await openTutor();
+      } else {
+        await collapseTutor();
       }
       return;
     }
@@ -420,11 +474,6 @@ async function handleNav(key) {
     mobilePane.value = "coach";
     drawerOpen.value = false;
     await focusWorkspaceRegion("coach");
-    return;
-  }
-
-  if (key === "path") {
-    openPanel("tree");
     return;
   }
 
@@ -449,10 +498,14 @@ async function handleNav(key) {
 }
 
 function isDrawerAction(key) {
-  return key === "path" || key === "assessment" || key === "feedback" || key === "settings";
+  return key === "path" || key === "agents" || key === "evidence" || key === "settings";
 }
 
 function isNavActive(key) {
+  if (WORKSPACE_VIEWS.has(key)) {
+    return isWorkspaceNavActive(key);
+  }
+
   if (isDesktopViewport.value) {
     if (key === "learn") {
       return true;
@@ -486,12 +539,20 @@ function isNavActive(key) {
   return false;
 }
 
+function isWorkspaceNavActive(key) {
+  if (key === "study") {
+    return !drawerOpen.value || !Object.values(WORKSPACE_DRAWER_PANELS).includes(sidebarPanel.value);
+  }
+
+  return drawerOpen.value && sidebarPanel.value === WORKSPACE_DRAWER_PANELS[key];
+}
+
 function navTargetId(key) {
   if (key === "probe") {
     return undefined;
   }
 
-  if (key === "learn") {
+  if (key === "learn" || key === "study") {
     return LEARN_PANEL_ID;
   }
 
@@ -615,8 +676,12 @@ function resolvePaneElement(target) {
 
 .mobile-dock__actions {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0.4rem;
+}
+
+.desktop-tutor-toggle {
+  display: none;
 }
 
 @media (min-width: 1100px) {
@@ -625,6 +690,7 @@ function resolvePaneElement(target) {
     grid-template-columns: minmax(0, 1fr) minmax(19rem, 20.5rem);
     gap: 0.5rem;
     padding: 0 1rem 1rem;
+    transition: grid-template-columns 320ms var(--ease-emphasized);
   }
 
   .workspace-pane-layout__pane,
@@ -635,11 +701,53 @@ function resolvePaneElement(target) {
   }
 
   .workspace-pane-layout.is-tutor-collapsed {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0);
+  }
+
+  .workspace-pane-layout__tutor {
+    transform-origin: right center;
+    transition:
+      opacity 180ms var(--ease-standard),
+      transform 260ms var(--ease-emphasized),
+      visibility 0s linear 0s;
   }
 
   .workspace-pane-layout.is-tutor-collapsed .workspace-pane-layout__tutor {
-    display: none;
+    visibility: hidden;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateX(14px) scale(0.985);
+    transition:
+      opacity 140ms var(--ease-standard),
+      transform 220ms var(--ease-emphasized),
+      visibility 0s linear 220ms;
+  }
+
+  .desktop-tutor-toggle {
+    position: absolute;
+    top: 50%;
+    right: 1rem;
+    z-index: var(--z-sticky);
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    gap: 0.45rem;
+    transform: translateY(-50%);
+    border: 1px solid var(--color-primary);
+    border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+    background: var(--space-panel);
+    padding: 0 0.8rem;
+    color: var(--color-primary-dark);
+    font-size: 0.75rem;
+    font-weight: 750;
+    transition:
+      background-color var(--duration-fast) var(--ease-standard),
+      color var(--duration-fast) var(--ease-standard);
+  }
+
+  .desktop-tutor-toggle:hover {
+    background: var(--color-primary-soft);
+    color: var(--text-primary);
   }
 
   .mobile-dock {

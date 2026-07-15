@@ -32,13 +32,6 @@
         <div class="flex items-center gap-3">
           <button
             type="button"
-            class="focus-ring hidden rounded-full border border-subtle bg-card px-4 py-1.5 text-xs font-semibold text-text-secondary transition-all duration-200 hover:border-primary/30 hover:text-primary hover:bg-card-hover md:inline-flex"
-            @click="enterApp"
-          >
-            登录
-          </button>
-          <button
-            type="button"
             class="focus-ring rounded-full bg-text-primary px-4 py-1.5 text-xs font-semibold text-space-bg transition-transform duration-200 hover:scale-105 active:scale-95"
             @click="enterApp"
           >
@@ -124,12 +117,6 @@
           >
             立即体验
           </button>
-          <a
-            href="#demo"
-            class="focus-ring rounded-full border border-subtle bg-card px-6 py-3 text-sm font-medium text-text-secondary transition-all duration-200 hover:border-primary/30 hover:text-primary hover:bg-card-hover"
-          >
-            观看演示
-          </a>
         </div>
 
         <!-- Hero pills -->
@@ -1069,32 +1056,49 @@
         <div class="space-y-4">
           <div
             v-for="(faq, idx) in faqs"
-            :key="idx"
-            class="reveal rounded-2xl border border-subtle bg-card transition-all duration-300"
-            :class="openFaq === idx ? 'border-primary/20' : 'hover:border-hover'"
+            :key="faq.q"
+            class="reveal"
             :style="{ transitionDelay: `${idx * 80}ms` }"
           >
-            <button
-              type="button"
-              class="flex w-full items-center justify-between px-6 py-5 text-left"
-              @click="toggleFaq(idx)"
+            <div
+              class="rounded-2xl border border-subtle bg-card transition-colors duration-300"
+              :class="openFaq === idx ? 'border-primary/20' : 'hover:border-hover'"
             >
-              <span class="text-base font-semibold">{{ faq.q }}</span>
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                class="text-text-muted transition-transform duration-300"
-                :class="openFaq === idx ? 'rotate-45' : ''"
+              <button
+                :id="`faq-question-${idx}`"
+                type="button"
+                class="focus-ring flex min-h-11 w-full items-center justify-between gap-4 rounded-2xl px-6 py-5 text-left"
+                :aria-expanded="String(openFaq === idx)"
+                :aria-controls="`faq-answer-${idx}`"
+                @click="toggleFaq(idx)"
               >
-                <path d="M12 5v14M5 12h14" />
-              </svg>
-            </button>
-            <div class="faq-answer" :class="{ 'faq-answer--open': openFaq === idx }">
-              <p class="px-6 pb-5 text-sm font-light leading-relaxed text-text-secondary">{{ faq.a }}</p>
+                <span class="text-base font-semibold">{{ faq.q }}</span>
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  class="shrink-0 text-text-muted transition-transform duration-300"
+                  :class="openFaq === idx ? 'rotate-45' : ''"
+                  aria-hidden="true"
+                >
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </button>
+              <div
+                :id="`faq-answer-${idx}`"
+                class="faq-answer"
+                :class="{ 'faq-answer--open': openFaq === idx }"
+                role="region"
+                :aria-labelledby="`faq-question-${idx}`"
+                :aria-hidden="String(openFaq !== idx)"
+              >
+                <div class="faq-answer__inner">
+                  <p class="px-6 pb-5 text-sm font-light leading-relaxed text-text-secondary">{{ faq.a }}</p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1816,17 +1820,22 @@ onBeforeUnmount(() => {
 
 /* ── FAQ accordion answer ── */
 .faq-answer {
-  max-height: 0;
+  display: grid;
+  grid-template-rows: 0fr;
   opacity: 0;
-  overflow: hidden;
-  transition: max-height 0.45s cubic-bezier(0.16, 1, 0.3, 1),
-              opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1),
-              padding 0.35s ease;
+  transition:
+    grid-template-rows 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .faq-answer--open {
-  max-height: 600px;
+  grid-template-rows: 1fr;
   opacity: 1;
+}
+
+.faq-answer__inner {
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* Fade transition for mobile menu */

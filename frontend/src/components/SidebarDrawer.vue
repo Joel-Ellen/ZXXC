@@ -2,18 +2,20 @@
   <transition name="drawer-backdrop">
     <div
       v-if="open"
-      class="fixed inset-0 z-40 lg:z-30"
+      class="sidebar-drawer-layer fixed inset-0"
       @click.self="$emit('close')"
     >
       <div
         class="absolute inset-0 bg-black/42 backdrop-blur-[3px] transition-opacity lg:bg-[color:rgba(8,14,28,0.16)] lg:backdrop-blur-[1px]"
+        aria-hidden="true"
+        @click="$emit('close')"
       />
 
       <transition name="drawer-panel">
         <aside
           ref="drawerPanel"
           :id="panelId"
-          class="drawer-surface absolute bottom-4 left-4 right-4 top-24 z-10 flex overflow-hidden rounded-[24px] border border-[color:rgba(255,255,255,0.55)] shadow-[0_28px_80px_rgba(15,23,42,0.24)] lg:inset-y-4 lg:left-[76px] lg:right-auto lg:top-4 lg:w-[408px] lg:rounded-l-none lg:border-l-0"
+          class="drawer-surface absolute bottom-4 left-4 right-4 top-24 z-10 flex overflow-hidden rounded-[20px] border border-[color:rgba(255,255,255,0.55)] shadow-[0_28px_80px_rgba(15,23,42,0.24)] lg:bottom-4 lg:left-auto lg:right-4 lg:top-4 lg:w-[428px]"
           role="dialog"
           aria-modal="true"
           :aria-label="panelTitle"
@@ -31,7 +33,7 @@
               </div>
 
               <div class="min-w-0 flex-1">
-                <p class="text-[11px] font-black uppercase tracking-[0.14em] text-text-muted">工作台控制台</p>
+                <p class="text-[11px] font-black uppercase tracking-[0.14em] text-text-muted">{{ panelEyebrow }}</p>
                 <h2 class="gradient-text mt-1.5 text-[28px] font-black tracking-tight">{{ panelTitle }}</h2>
                 <p class="mt-2 max-w-[34ch] text-sm font-light leading-7 text-text-muted">
                   {{ panelDescription }}
@@ -39,9 +41,9 @@
               </div>
             </div>
 
-            <div class="px-6 pb-4 pt-4">
+            <div v-if="activePanel !== 'settings'" class="px-6 pb-4 pt-4">
               <nav
-                class="grid grid-cols-4 gap-2 rounded-[20px] border border-subtle bg-card/92 p-1.5 shadow-card"
+                class="grid grid-cols-3 gap-2 rounded-[20px] border border-subtle bg-card/92 p-1.5 shadow-card"
                 aria-label="工作台抽屉视图切换"
                 role="tablist"
               >
@@ -65,6 +67,8 @@
             </div>
 
             <div class="aurora-scroll flex-1 overflow-y-auto px-5 pb-6">
+              <transition name="drawer-content" mode="out-in">
+                <div :key="activePanel">
               <template v-if="activePanel === 'tree'">
                 <section
                   :id="panelRegionId('tree')"
@@ -93,6 +97,24 @@
               </template>
 
               <template v-else-if="activePanel === 'radar'">
+                <section
+                  v-if="lastDiagnostic"
+                  class="mb-5 rounded-[20px] border border-subtle bg-card p-5 shadow-card"
+                >
+                  <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">最近诊断</p>
+                  <div class="mt-3 flex items-end justify-between gap-4">
+                    <div>
+                      <p class="text-sm font-semibold text-text-primary">{{ currentNodeTitle || "当前节点" }}</p>
+                      <p class="mt-1 text-xs leading-5 text-text-muted">
+                        {{ lastDiagnostic.advancedToNextNode ? "已达到推进条件" : "继续积累有效学习证据" }}
+                      </p>
+                    </div>
+                    <strong class="font-mono text-lg text-primary">
+                      {{ Math.round((lastDiagnostic.masteryBefore ?? 0) * 100) }}% → {{ Math.round((lastDiagnostic.masteryAfter ?? 0) * 100) }}%
+                    </strong>
+                  </div>
+                </section>
+
                 <section
                   :id="panelRegionId('radar')"
                   class="mb-5 rounded-[20px] border border-subtle bg-card p-5 shadow-card"
@@ -241,9 +263,9 @@
                 <section class="rounded-[20px] border border-subtle bg-card p-5 shadow-card">
                   <div class="flex items-center justify-between gap-3">
                     <div>
-                      <h3 class="text-sm font-bold tracking-wide text-text-secondary">减少动效</h3>
+                      <h3 class="text-sm font-bold tracking-wide text-text-secondary">界面动效</h3>
                       <p class="mt-2 text-sm font-light leading-7 text-text-muted">
-                        在保留整体氛围的前提下收紧运动反馈，更适合稳定阅读和录屏演示。
+                        默认保留抽屉、卡片和面板切换反馈；需要静态阅读时可临时减少动效。
                       </p>
                     </div>
                     <button
@@ -254,18 +276,20 @@
                         : 'border-subtle bg-card text-text-secondary hover:border-secondary/40 hover:text-secondary hover:bg-card-hover'"
                       @click="$emit('toggle-motion')"
                     >
-                      {{ reduceMotion ? "已启用" : "启用" }}
+                      {{ reduceMotion ? "恢复动效" : "减少动效" }}
                     </button>
                   </div>
                 </section>
               </div>
+                </div>
+              </transition>
             </div>
 
             <button
               ref="closeButton"
               type="button"
               class="focus-ring absolute right-4 top-4 rounded-full border border-subtle/70 bg-card/82 p-2 text-text-muted shadow-sm backdrop-blur-sm transition hover:bg-card-hover hover:text-text-primary"
-              aria-label="关闭侧边栏"
+              :aria-label="activePanel === 'settings' ? '关闭显示设置' : '关闭学习控制台'"
               @click="$emit('close')"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -333,22 +357,21 @@ const panelIcons = {
 
 const panelTabs = [
   { key: "tree", label: "路径" },
-  { key: "radar", label: "诊断" },
-  { key: "feedback", label: "反馈" },
-  { key: "settings", label: "设置" },
+  { key: "feedback", label: "协同" },
+  { key: "radar", label: "成果" },
 ];
 
 const titles = {
   tree: "知识路径",
-  radar: "能力雷达",
-  feedback: "学习反馈",
+  radar: "学习成果",
+  feedback: "智能体协同",
   settings: "工作台设置",
 };
 
 const descriptions = {
   tree: "追踪学习拓扑，查看掌握状态，并直接跳转到下一步更值得投入的节点。",
-  radar: "回看概念理解、代码工程、逻辑推理等核心能力的平衡分布。",
-  feedback: "集中查看当前节点的诊断结论、推进状态和各智能体输出。",
+  radar: "结合最近诊断与能力雷达，快速查看本轮学习产生的有效成果。",
+  feedback: "集中查看画像、规划、生成、校验与评估智能体的协作过程。",
   settings: "围绕当前工作台会话微调主题、对比度、字号和动效节奏。",
 };
 
@@ -406,7 +429,10 @@ const pathStats = computed(() => [
 
 const panelIcon = computed(() => panelIcons[props.activePanel] ?? IconSettings);
 const panelTitle = computed(() => titles[props.activePanel] ?? "工作台");
-const panelDescription = computed(() => descriptions[props.activePanel] ?? "工作台控制台。");
+const panelDescription = computed(() => descriptions[props.activePanel] ?? "学习控制台。");
+const panelEyebrow = computed(() => (
+  props.activePanel === "settings" ? "显示偏好" : "学习控制台"
+));
 const panelSurfaceStyle = computed(() => ({
   backgroundColor: theme.value === "light" ? "#f7f3e8" : "#0b1120",
 }));
@@ -550,6 +576,10 @@ function panelRegionId(panelKey) {
 </script>
 
 <style scoped>
+.sidebar-drawer-layer {
+  z-index: var(--z-modal-backdrop);
+}
+
 @media (max-width: 767px) {
   .drawer-surface {
     top: max(0.75rem, env(safe-area-inset-top, 0px));
@@ -587,8 +617,32 @@ function panelRegionId(panelKey) {
 
 .drawer-panel-enter-from,
 .drawer-panel-leave-to {
-  transform: translateX(-24px) scale(0.98);
+  transform: translateX(24px) scale(0.98);
   opacity: 0;
+}
+
+.drawer-content-enter-active {
+  transition:
+    opacity 220ms var(--ease-standard),
+    transform 260ms var(--ease-emphasized),
+    filter 220ms var(--ease-standard);
+}
+
+.drawer-content-leave-active {
+  transition:
+    opacity 120ms var(--ease-standard),
+    transform 140ms var(--ease-standard);
+}
+
+.drawer-content-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+  filter: blur(2px);
+}
+
+.drawer-content-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 
 input[type="range"]::-webkit-slider-thumb {
