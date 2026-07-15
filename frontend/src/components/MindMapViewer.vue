@@ -58,7 +58,7 @@
  *
  * 使用 @vue-flow/core 渲染为可拖拽、可缩放的节点树。
  */
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { VueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
@@ -73,6 +73,7 @@ const props = defineProps({
 const title = computed(() => props.content?.title || '')
 const topic = computed(() => props.content?.topic || '')
 const mermaidCode = computed(() => props.content?.mermaid_code || '')
+const rootNode = computed(() => props.content?.root || null)
 const tips = computed(() => props.content?.usage_tips || '')
 
 const canvasRef = ref(null)
@@ -99,10 +100,18 @@ const V_SPACING = 60     // Vertical spacing between sibling nodes
  * Walk the recursive MindMapNode tree and compute positions.
  * Returns { nodes, edges } arrays ready for Vue Flow.
  */
-function buildTreeLayout(root, yOffset = { current: 0 }) {
+function buildTreeLayout(root, depth = 0, yOffset = { current: 0 }) {
   const flowNodes = []
   const flowEdges = []
-  function layoutNode(node, d, parentId = null) {
+  const color = DEPTH_COLORS[Math.min(depth, DEPTH_COLORS.length - 1)]
+
+  // Count leaf descendants for spacing calculation
+  function countLeaves(node) {
+    if (!node.children || node.children.length === 0) return 1
+    return node.children.reduce((sum, c) => sum + countLeaves(c), 0)
+  }
+
+  function layoutNode(node, d, parentId = null, parentY = null) {
     const children = node.children || []
     const childrenCount = children.length
 
@@ -116,7 +125,7 @@ function buildTreeLayout(root, yOffset = { current: 0 }) {
       // Layout children first to know their total height
       const childStartY = yOffset.current
       for (const child of children) {
-        layoutNode(child, d + 1, node.id)
+        layoutNode(child, d + 1, node.id, null)
       }
       const childEndY = yOffset.current
       // Center parent between first and last child
@@ -171,7 +180,7 @@ watch(
   () => props.content?.root,
   (newRoot) => {
     if (newRoot && newRoot.label) {
-      const { nodes: n, edges: e } = buildTreeLayout(newRoot, { current: 0 })
+      const { nodes: n, edges: e } = buildTreeLayout(newRoot, 0, { current: 0 })
       nodes.value = n
       edges.value = e
     }

@@ -3,8 +3,6 @@
     <div
       class="rail-shell relative flex h-full w-full flex-col items-center overflow-visible px-2 py-4 transition-all duration-300 rounded-2xl"
     >
-      <div class="rail-shell__aura pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit]" />
-
       <!-- Brand mark -->
       <div class="rail-brand relative z-10 flex h-12 w-12 shrink-0 items-center justify-center rounded-xl mb-1">
         <span class="text-[13px] font-black tracking-[0.10em] text-primary-dark">EA</span>
@@ -26,7 +24,7 @@
           :title="item.label"
           @click="$emit('select', item.key)"
         >
-          <span class="text-[18px] leading-none">{{ item.icon }}</span>
+          <component :is="item.icon" :size="18" />
           <span class="text-[8px] font-bold tracking-[0.08em] uppercase leading-none opacity-70 mt-0.5">
             {{ item.short }}
           </span>
@@ -35,7 +33,7 @@
           <span class="rail-tooltip pointer-events-none absolute left-[calc(100%+12px)] top-1/2 z-50 flex -translate-y-1/2 items-center gap-2.5 whitespace-nowrap rounded-xl px-3 py-2 text-left opacity-0 shadow-[0_12px_32px_rgba(0,107,173,0.12)] transition-all duration-200 group-hover:translate-x-0.5 group-hover:opacity-100">
             <span class="flex h-7 w-7 items-center justify-center rounded-lg text-sm"
                   :style="{ background: item.softColor, color: item.color }">
-              {{ item.icon }}
+              <component :is="item.icon" :size="14" />
             </span>
             <span>
               <span class="block text-[9px] font-black uppercase tracking-[0.14em] text-text-muted">{{ item.short }}</span>
@@ -95,7 +93,7 @@
       <div class="relative z-10 mt-auto flex w-[52px] shrink-0 flex-col items-center rounded-xl border border-subtle bg-space-elevated px-1 py-2.5 text-center">
         <span class="text-[8px] font-black uppercase tracking-[0.14em] text-text-muted">节点</span>
         <span class="mt-1.5 text-[22px] font-black leading-none text-text-primary">{{ pathCount }}</span>
-        <span class="mt-1.5 h-1.5 w-1.5 rounded-full bg-success shadow-[0_0_8px_var(--color-success)]" role="status" aria-label="就绪" />
+        <span class="mt-1.5 h-1.5 w-1.5 rounded-full bg-success shadow-[0_0_8px_var(--color-success)]" aria-label="就绪" />
       </div>
     </div>
   </aside>
@@ -103,10 +101,14 @@
 
 <script setup>
 import { computed } from "vue";
+import IconChat from "./icons/IconChat.vue";
+import IconCheck from "./icons/IconCheck.vue";
+import IconDoc from "./icons/IconDoc.vue";
+import IconExpand from "./icons/IconExpand.vue";
 import IconQuiz from "./icons/IconQuiz.vue";
 import IconTree from "./icons/IconTree.vue";
 
-defineProps({
+const props = defineProps({
   activePanel:  { type: String, default: "concept" },
   drawerOpen:   { type: Boolean, default: false },
   panelId:      { type: String, default: "workspace-sidebar-drawer" },
@@ -120,7 +122,7 @@ const contentItems = computed(() => [
     key: "concept",
     short: "概念",
     label: "概念导图",
-    icon: "🗺",
+    icon: IconDoc,
     color: "var(--learning-concept-dark)",
     softColor: "var(--learning-concept-soft)",
   },
@@ -128,7 +130,7 @@ const contentItems = computed(() => [
     key: "code",
     short: "代码",
     label: "代码示例",
-    icon: "💻",
+    icon: IconExpand,
     color: "var(--learning-code-dark)",
     softColor: "var(--learning-code-soft)",
   },
@@ -136,7 +138,7 @@ const contentItems = computed(() => [
     key: "practice",
     short: "练习",
     label: "互动练习",
-    icon: "✏️",
+    icon: IconCheck,
     color: "var(--learning-practice-dark)",
     softColor: "var(--learning-practice-soft)",
   },
@@ -144,7 +146,7 @@ const contentItems = computed(() => [
     key: "video",
     short: "视频",
     label: "视频摘要",
-    icon: "🎬",
+    icon: IconChat,
     color: "var(--learning-video-dark)",
     softColor: "var(--learning-video-soft)",
   },
@@ -152,7 +154,7 @@ const contentItems = computed(() => [
     key: "quiz",
     short: "测验",
     label: "诊断测验",
-    icon: "📋",
+    icon: IconQuiz,
     color: "var(--learning-quiz-dark)",
     softColor: "var(--learning-quiz-soft)",
   },
@@ -161,19 +163,14 @@ const contentItems = computed(() => [
 
 <style scoped>
 .rail-shell {
+  border-radius: var(--radius-sm) !important;
   border: 1px solid var(--border-subtle);
   background: var(--space-panel);
   box-shadow: var(--workspace-shadow-soft);
 }
 
-.rail-shell__aura {
-  background: linear-gradient(180deg,
-    color-mix(in srgb, var(--color-primary-soft) 70%, transparent) 0%,
-    transparent 40%
-  );
-}
-
 .rail-brand {
+  border-radius: var(--radius-sm) !important;
   border: 1px solid color-mix(in srgb, var(--color-primary) 22%, var(--border-subtle));
   background: color-mix(in srgb, var(--color-primary-soft) 80%, white);
   color: var(--color-primary-dark);
@@ -185,6 +182,7 @@ const contentItems = computed(() => [
 
 /* nav buttons */
 .rail-nav-btn {
+  border-radius: var(--radius-sm) !important;
   border: 1px solid transparent;
   color: var(--text-muted);
 }
@@ -204,9 +202,7 @@ const contentItems = computed(() => [
   border-color: color-mix(in srgb, var(--rail-accent, var(--color-primary)) 28%, var(--border-subtle));
   background: color-mix(in srgb, var(--rail-accent, var(--color-primary)) 12%, var(--card-bg));
   color: var(--rail-accent, var(--color-primary));
-  box-shadow:
-    0 4px 14px color-mix(in srgb, var(--rail-accent, var(--color-primary)) 18%, transparent),
-    inset 0 1px 0 rgba(255,255,255,0.60);
+  box-shadow: inset 3px 0 0 var(--rail-accent, var(--color-primary));
 }
 
 .rail-nav-btn__badge {
@@ -217,6 +213,7 @@ const contentItems = computed(() => [
 }
 
 .rail-tooltip {
+  border-radius: var(--radius-sm) !important;
   border: 1px solid var(--border-subtle);
   background: var(--space-panel);
   min-width: 7rem;

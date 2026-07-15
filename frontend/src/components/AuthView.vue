@@ -17,16 +17,14 @@
         <!-- 标签切换 -->
         <div class="flex mb-7 p-1 rounded-xl bg-card border border-subtle">
           <button
-            type="button"
             :class="mode === 'login' ? 'bg-card-hover text-text-primary shadow-lg shadow-black/20' : 'text-text-muted hover:text-text-secondary'"
-            class="min-h-11 flex-1 py-2.5 text-sm font-medium rounded-lg transition-all duration-200"
-            @click="selectMode('login')"
+            class="flex-1 py-2.5 text-sm font-medium rounded-lg transition-all duration-200"
+            @click="mode = 'login'"
           >登录</button>
           <button
-            type="button"
             :class="mode === 'register' ? 'bg-card-hover text-text-primary shadow-lg shadow-black/20' : 'text-text-muted hover:text-text-secondary'"
-            class="min-h-11 flex-1 py-2.5 text-sm font-medium rounded-lg transition-all duration-200"
-            @click="selectMode('register')"
+            class="flex-1 py-2.5 text-sm font-medium rounded-lg transition-all duration-200"
+            @click="mode = 'register'"
           >注册</button>
         </div>
 
@@ -34,9 +32,8 @@
         <form @submit.prevent="onSubmit" class="space-y-5">
           <!-- 用户名 -->
           <div>
-            <label for="auth-user-id" class="block text-xs font-semibold text-text-secondary mb-1.5">用户名</label>
+            <label class="block text-xs font-semibold text-text-secondary mb-1.5">用户名</label>
             <input
-              id="auth-user-id"
               v-model="form.userId"
               type="text"
               required
@@ -48,9 +45,8 @@
 
           <!-- 邮箱 (仅注册) -->
           <div v-if="mode === 'register'">
-            <label for="auth-email" class="block text-xs font-semibold text-text-secondary mb-1.5">邮箱</label>
+            <label class="block text-xs font-semibold text-text-secondary mb-1.5">邮箱</label>
             <input
-              id="auth-email"
               v-model="form.email"
               type="email"
               required
@@ -61,9 +57,8 @@
 
           <!-- 密码 -->
           <div>
-            <label for="auth-password" class="block text-xs font-semibold text-text-secondary mb-1.5">密码</label>
+            <label class="block text-xs font-semibold text-text-secondary mb-1.5">密码</label>
             <input
-              id="auth-password"
               v-model="form.password"
               type="password"
               required
@@ -75,10 +70,9 @@
 
           <!-- 验证码 -->
           <div>
-            <label for="auth-captcha" class="block text-xs font-semibold text-text-secondary mb-1.5">验证码</label>
+            <label class="block text-xs font-semibold text-text-secondary mb-1.5">验证码</label>
             <div class="captcha-row">
               <input
-                id="auth-captcha"
                 v-model="form.captchaAnswer"
                 type="text"
                 required
@@ -95,19 +89,7 @@
           </div>
 
           <!-- 错误提示 -->
-          <div
-            v-if="errorMsg"
-            class="flex items-center justify-between gap-3 rounded-xl border border-error/20 bg-error-soft px-3 py-2.5 text-xs text-error"
-            role="alert"
-          >
-            <span>{{ errorMsg }}</span>
-            <button
-              type="button"
-              class="focus-ring shrink-0 rounded-lg px-2 py-1 font-semibold"
-              :disabled="loading"
-              @click="onSubmit"
-            >重试</button>
-          </div>
+          <div v-if="errorMsg" class="rounded-xl border border-error/20 bg-error-soft px-3 py-2.5 text-xs text-error">{{ errorMsg }}</div>
 
           <!-- 提交按钮 -->
           <button
@@ -135,7 +117,7 @@
       <div class="mt-8 text-center">
         <button
           type="button"
-          class="min-h-11 px-3 text-xs text-text-muted hover:text-primary transition-colors duration-200 underline underline-offset-4"
+          class="text-xs text-text-muted hover:text-primary transition-colors duration-200 underline underline-offset-4"
           @click="$emit('go-home')"
         >
           返回首页
@@ -154,22 +136,9 @@
 import { ref, reactive, onMounted } from "vue";
 import { getCaptcha, login, register } from "../services/eduAgentApi";
 
-const props = defineProps({
-  screen: { type: String, default: "login" },
-  initialAuthMode: { type: String, default: "login" },
-  initialNotice: { type: String, default: "" },
-  resetToken: { type: String, default: "" },
-  verificationToken: { type: String, default: "" },
-  submitLogin: { type: Function, default: null },
-  submitRegister: { type: Function, default: null },
-  submitForgot: { type: Function, default: null },
-  submitReset: { type: Function, default: null },
-  submitVerification: { type: Function, default: null },
-});
+const emit = defineEmits(["login-success", "go-home"]);
 
-const emit = defineEmits(["login-success", "go-home", "auth-mode-change"]);
-
-const mode = ref(props.initialAuthMode === "register" ? "register" : "login");
+const mode = ref("login");
 const loading = ref(false);
 const errorMsg = ref("");
 const captchaSvg = ref("");
@@ -181,12 +150,6 @@ const form = reactive({
   password: "",
   captchaAnswer: "",
 });
-
-function selectMode(nextMode) {
-  mode.value = nextMode;
-  errorMsg.value = "";
-  emit("auth-mode-change", nextMode);
-}
 
 async function fetchCaptcha() {
   try {
@@ -209,31 +172,25 @@ async function onSubmit() {
   try {
     let result;
     if (mode.value === "login") {
-      result = typeof props.submitLogin === "function"
-        ? await props.submitLogin(form.userId, form.password, captchaToken.value, form.captchaAnswer)
-        : await login({
-          user_id: form.userId,
-          password: form.password,
-          captcha_token: captchaToken.value,
-          captcha_answer: form.captchaAnswer,
-        });
+      result = await login({
+        user_id: form.userId,
+        password: form.password,
+        captcha_token: captchaToken.value,
+        captcha_answer: form.captchaAnswer,
+      });
     } else {
       if (!form.email.includes("@")) { errorMsg.value = "请输入有效的邮箱地址"; return; }
-      result = typeof props.submitRegister === "function"
-        ? await props.submitRegister(form.userId, form.email, form.password, captchaToken.value, form.captchaAnswer)
-        : await register({
-          user_id: form.userId,
-          email: form.email,
-          password: form.password,
-          captcha_token: captchaToken.value,
-          captcha_answer: form.captchaAnswer,
-        });
+      result = await register({
+        user_id: form.userId,
+        email: form.email,
+        password: form.password,
+        captcha_token: captchaToken.value,
+        captcha_answer: form.captchaAnswer,
+      });
     }
     emit("login-success", result);
   } catch (e) {
-    const message = e?.response?.data?.detail || e?.message || "操作失败，请重试";
-    await fetchCaptcha();
-    errorMsg.value = message;
+    errorMsg.value = e?.response?.data?.detail || e?.message || "操作失败，请重试";
   } finally {
     loading.value = false;
   }
