@@ -716,14 +716,14 @@ def build_resource_context(
                 "id": f"course:{course_id}:{node_id}",
                 "type": "course_graph",
                 "title": title,
-                "excerpt": f"Course node {title}; target capability: {_text(getattr(current, 'category', ''), 'concept')}.",
+                "excerpt": f"课程节点：{title}；能力目标：{_text(getattr(current, 'category', ''), 'concept')}。",
             },
             *[
                 {
                     "id": f"course:{course_id}:{record['node_id']}",
                     "type": "course_graph",
                     "title": record["title"],
-                    "excerpt": f"Prerequisite for {title}: {record['title']}.",
+                    "excerpt": f"{title} 的前置知识：{record['title']}。",
                 }
                 for record in prerequisites[:2]
             ],
@@ -732,7 +732,7 @@ def build_resource_context(
                     "id": f"course:{course_id}:{record['node_id']}",
                     "type": "course_graph",
                     "title": record["title"],
-                    "excerpt": f"Follow-on node after {title}: {record['title']}.",
+                    "excerpt": f"{title} 的后继节点：{record['title']}。",
                 }
                 for record in successors[:2]
             ],

@@ -35,6 +35,7 @@ from src.orchestration_runtime import get_runtime
 from src.resource_events import notifier as resource_event_notifier
 from src.resource_generation import (
     CARD_TYPES,
+    TEMPLATE_NOTICE,
     GeneratedResourcePayload,
     ResourceContext,
     ResourceGenerator,
@@ -70,10 +71,8 @@ from ._common import (
 )
 
 
-_TEMPLATE_FALLBACK_NOTICE = (
-    "> Generation status: local fallback template. "
-    "This card was not produced by a model response.\n\n"
-)
+# 与生成器共用同一段模板回退提示，保证 startswith 前缀判断不会漂移。
+_TEMPLATE_FALLBACK_NOTICE = TEMPLATE_NOTICE
 _COURSE_BASE_CACHE_POLICY = "generic-context-v1"
 
 _KNOWN_SEMANTIC_KEYWORDS: Dict[tuple[str, str], tuple[str, ...]] = {
@@ -159,25 +158,25 @@ def _bound_template_content(binding: Dict[str, Any], card_type: str) -> str:
     templates = {
         "concept_map": (
             f"## {title}\n\n"
-            f"### Learning focus\n- Define the core idea of {title}.\n"
-            f"- Identify its assumptions, constraints, and boundary cases.\n"
-            f"- Apply the idea in one small example for node {node_id}."
+            f"### 学习重点\n- 给出{title}的核心定义。\n"
+            f"- 找出它的前提、约束和边界情况。\n"
+            f"- 在节点 {node_id} 中用一个小例子应用该概念。"
         ),
         "code_snippet": (
             f"## {title}\n\n"
-            f"```python\n# Practice scaffold for {title} ({node_id})\npass\n```"
+            f"```python\n# {title}（{node_id}）的练习脚手架\npass\n```"
         ),
         "interactive_exercise": (
             f"## {title}\n\n"
-            f"Explain one defining property of {title}, then apply it to a small example."
+            f"先解释{title}的一条定义性质，再把它应用到一个小例子上。"
         ),
         "video_summary": (
             f"## {title}\n\n"
-            f"Review the definition, one representative example, and the main boundary of {title}."
+            f"依次复习{title}的定义、一个代表性示例和主要边界。"
         ),
         "diagnostic_quiz": (
             f"## {title}\n\n"
-            f"1. Which statement best captures the defining constraint of {title}?"
+            f"1. 哪种说法最能概括{title}的定义性约束？"
         ),
     }
     return _TEMPLATE_FALLBACK_NOTICE + templates.get(card_type, templates["concept_map"])
@@ -289,7 +288,7 @@ def _diagnostic_quiz_metadata(
         )
     return {
         "render_type": "diagnostic_quiz",
-        "title": f"{title} diagnostic quiz",
+        "title": f"{title} 诊断测验",
         "questions": questions,
         "pass_threshold": 0.65,
         "after_quiz_guidance": "再次作答前，请回看概念讲解和练习中的条件、例子与边界。",
@@ -2149,8 +2148,9 @@ def _generate_phase(
             }
     llm = runtime.get_llm() if callable(getattr(runtime, "get_llm", None)) else None
     if card_types == ["concept_map"]:
-        return {"concept_map": generator.generate(llm, context, "concept_map", max_tokens=1600, timeout_sec=18.0)}
-    return generator.generate_bundle(llm, context, card_types, max_tokens=2800, timeout_sec=20.0)
+        # max_tokens 统一由 prompts.TOKEN_BUDGETS 决定，避免在调用点复制常量。
+        return {"concept_map": generator.generate(llm, context, "concept_map", timeout_sec=18.0)}
+    return generator.generate_bundle(llm, context, card_types, timeout_sec=20.0)
 
 
 def _quiz_payload_with_stable_answers(payload: Dict[str, Any], node_id: str, revision: int) -> Dict[str, Any]:

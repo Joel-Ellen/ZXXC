@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from src.adapters.state_to_domain import resource_contract_from_card
-from src.resource_generation import CARD_TYPES, ResourceContext, ResourceGenerator, payload_model_for, validate_resource_payload
+from src.resource_generation import CARD_TYPES, ResourceContext, ResourceGenerator, TEMPLATE_NOTICE, payload_model_for, validate_resource_payload
 from src.state.agent_state import ResourceCard
 
 
@@ -40,7 +40,7 @@ def test_local_templates_validate_against_all_shared_card_schemas(
     assert parsed.render_type == card_type
     assert validation.valid, validation.issues
     assert generated.source == "template"
-    assert generated.body_markdown.startswith("> Generation status: local fallback template.")
+    assert generated.body_markdown.startswith(TEMPLATE_NOTICE)
 
 
 def test_resource_contract_redacts_server_owned_answer_indexes(monkeypatch: pytest.MonkeyPatch) -> None:

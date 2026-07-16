@@ -15,7 +15,9 @@ from .prompts import TOKEN_BUDGETS, build_card_messages, build_supporting_bundle
 from .validator import ResourcePayloadValidation, validate_resource_payload
 
 
-_TEMPLATE_NOTICE = "> Generation status: local fallback template. This card was not produced by a model response.\n\n"
+# 模板回退卡片的可见标识。resource_service 与 orchestration_runtime 复用同一
+# 常量做前缀判断，不要在别处重新定义这段文本。
+TEMPLATE_NOTICE = "> 生成状态：本地回退模板。此卡片并非由模型生成。\n\n"
 
 
 @dataclass(frozen=True)
@@ -180,9 +182,10 @@ def _template_common(
     context: ResourceContext,
     *,
     evidence_fields: list[str],
+    blueprint: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     refs = _source_ref_ids(context)
-    blueprint = _template_blueprint(context)
+    blueprint = blueprint if blueprint is not None else _template_blueprint(context)
     objective_ids = [
         str(value.get("id") or "")
         for value in blueprint.get("objectives", [])
@@ -209,9 +212,11 @@ def _template_common(
 def _template_payload(context: ResourceContext, card_type: str) -> dict[str, Any]:
     title = context.node_title
     if card_type == "concept_map":
+        blueprint = _template_blueprint(context)
         common = _template_common(
             context,
             evidence_fields=["summary", "definition", "constraints", "mechanism"],
+            blueprint=blueprint,
         )
         return {
             **common,
@@ -228,8 +233,8 @@ def _template_payload(context: ResourceContext, card_type: str) -> dict[str, Any
             "counterexamples": ["违反必要前提的输入不能直接套用同一种方法。"],
             "transfer_questions": [f"哪个新问题与{title}共享相同的核心约束？"],
             "review_prompts": ["说出核心不变量，并验证一个边界输入。"],
-            "mermaid_source": "graph TD\nA[Prerequisites] --> B[Definition]\nB --> C[Constraint]\nC --> D[Mechanism]\nD --> E[Application]",
-            "learning_blueprint": _template_blueprint(context),
+            "mermaid_source": "graph TD\nA[前置知识] --> B[定义]\nB --> C[约束]\nC --> D[机制]\nD --> E[应用]",
+            "learning_blueprint": blueprint,
         }
     if card_type == "code_snippet":
         common = _template_common(
@@ -245,7 +250,7 @@ def _template_payload(context: ResourceContext, card_type: str) -> dict[str, Any
             "prerequisites": ["运行前先阅读输入契约并确认边界。"],
             "code": "def apply_concept(items):\n    if items is None:\n        return []\n    return list(items)",
             "boundary_tests": [
-                {"name": "empty input", "input": "[]", "expected": "[]"},
+                {"name": "空输入", "input": "[]", "expected": "[]"},
             ],
             "walkthrough_steps": ["先检查输入边界，再执行数据转换。"],
             "explanation": "该预验证示例显式保留输入契约，并产生确定性输出。",
@@ -394,7 +399,7 @@ def _template_payload(context: ResourceContext, card_type: str) -> dict[str, Any
             for level, label, prompt, correct in question_specs
         ],
         "pass_threshold": 0.65,
-        "after_quiz_guidance": "Review the concept map and trace one boundary case before retrying.",
+        "after_quiz_guidance": "重新作答前，先复习概念图，并完整跟踪一个边界用例。",
     }
 
 
@@ -457,7 +462,7 @@ class ResourceGenerator:
         if validation.valid and validation.payload is not None:
             markdown = render_markdown(card_type, validation.payload)
             if source == "template":
-                markdown = _TEMPLATE_NOTICE + markdown
+                markdown = TEMPLATE_NOTICE + markdown
             return GeneratedResourcePayload(
                 card_type=card_type,
                 structured_payload=validation.payload,
@@ -480,7 +485,7 @@ class ResourceGenerator:
         return GeneratedResourcePayload(
             card_type=card_type,
             structured_payload=fallback_validation.payload,
-            body_markdown=_TEMPLATE_NOTICE + render_markdown(card_type, fallback_validation.payload),
+            body_markdown=TEMPLATE_NOTICE + render_markdown(card_type, fallback_validation.payload),
             source="template",
             provider=provider,
             model=model,

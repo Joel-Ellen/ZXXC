@@ -20,6 +20,7 @@ from src.agents.validator_node import ValidatorNode
 from src.graph import get_kg_manager
 from src.infrastructure.cold_start import ColdStartEngine, ColdStartState
 from src.observability import incr_metric, log_event
+from src.resource_generation import TEMPLATE_NOTICE
 from src.resource_generation.services import CircuitBreaker
 from src.orchestration_core import EduAgentGraph
 from src.state.agent_state import AgentState
@@ -750,18 +751,14 @@ class OrchestrationRuntime:
                 except Exception:
                     title = ""
         title = title or self.kg.get_node_title(node_id) or node_id
-        notice = (
-            "> Generation status: local fallback template. "
-            "This card was not produced by a model response.\n\n"
-        )
         templates = {
-            "concept_map": f"## {title}\n\nCore concept map placeholder for {node_id}.",
-            "code_snippet": f"## {title}\n\n```python\n# Practice scaffold for {node_id}\npass\n```",
-            "interactive_exercise": f"## {title}\n\nTry one small exercise that applies this concept.",
-            "video_summary": f"## {title}\n\nShort explanation script for reviewing the idea.",
-            "diagnostic_quiz": f"## {title}\n\n1. What is the key invariant of this concept?",
+            "concept_map": f"## {title}\n\n{node_id} 的核心概念图占位内容。",
+            "code_snippet": f"## {title}\n\n```python\n# {node_id} 的练习脚手架\npass\n```",
+            "interactive_exercise": f"## {title}\n\n尝试一个应用该概念的小练习。",
+            "video_summary": f"## {title}\n\n用于复习该概念的简短讲解提纲。",
+            "diagnostic_quiz": f"## {title}\n\n1. 这个概念的关键不变量是什么？",
         }
-        return notice + templates.get(card_type, templates["concept_map"])
+        return TEMPLATE_NOTICE + templates.get(card_type, templates["concept_map"])
 
 
 _runtime: Optional[OrchestrationRuntime] = None

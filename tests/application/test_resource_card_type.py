@@ -9,6 +9,7 @@ from starlette.requests import Request
 
 from src.application import resource_service
 from src.orchestration_core import run_official_learning_step
+from src.resource_generation import TEMPLATE_NOTICE
 from tests.helpers import FakeValidationPipeline, disable_persistence, install_fake_runtime
 
 
@@ -120,9 +121,7 @@ def test_template_only_resource_response_is_explicitly_labelled(monkeypatch) -> 
     assert result["generation"]["template_fallback_count"] == 1
     resource = result["resources"][0]
     assert resource["generation"]["source"] == "template"
-    assert resource["body_markdown"].startswith(
-        "> Generation status: local fallback template."
-    )
+    assert resource["body_markdown"].startswith(TEMPLATE_NOTICE)
 
 
 def test_force_refresh_preserves_an_active_review_retest_quiz(monkeypatch) -> None:
