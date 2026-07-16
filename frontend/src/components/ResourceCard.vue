@@ -16,8 +16,8 @@
     :role="activatable ? 'button' : undefined"
     :tabindex="activatable ? 0 : undefined"
     @click="handleActivate"
-    @keydown.enter.prevent="handleActivate"
-    @keydown.space.prevent="handleActivate"
+    @keydown.enter.self.prevent="handleActivate"
+    @keydown.space.self.prevent="handleActivate"
   >
     <div class="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/12 to-transparent" />
     <div
@@ -48,12 +48,17 @@
           <div class="font-mono text-[10px] uppercase tracking-[0.14em] text-text-muted">
             {{ isReady ? "已就绪" : progressText }}
           </div>
-          <div class="mt-1 text-[11px] font-semibold text-text-secondary">
-            {{ isReady ? "100%" : `${progress}%` }}
+          <div v-if="!isReady && hasProgress" class="mt-1 text-[11px] font-semibold text-text-secondary">
+            {{ progress }}%
+          </div>
+          <div v-else-if="!isReady" class="mt-1 flex items-center justify-end gap-1.5 text-[11px] font-semibold text-text-secondary" aria-live="polite">
+            <span class="h-1.5 w-1.5 rounded-full bg-tertiary animate-pulse" aria-hidden="true" />
+            <span>处理中</span>
           </div>
         </div>
 
         <button
+          v-if="showPin"
           type="button"
           class="focus-ring rounded-full border border-subtle p-2 text-text-muted transition-all duration-200 hover:border-primary/30 hover:bg-card-hover hover:text-primary active:scale-95"
           aria-label="置顶卡片"
@@ -62,6 +67,18 @@
           <IconPin />
         </button>
         <button
+          type="button"
+          class="focus-ring inline-flex h-11 min-h-11 w-11 min-w-11 shrink-0 items-center justify-center rounded-full border border-subtle p-0 transition-all duration-200 hover:border-warning/30 hover:bg-card-hover hover:text-warning active:scale-95"
+          :class="isBookmarked ? 'border-warning/35 bg-warning-soft text-warning' : 'text-text-muted'"
+          :aria-label="isBookmarked ? '取消收藏资源' : '收藏资源'"
+          :aria-pressed="String(isBookmarked)"
+          :title="isBookmarked ? '取消收藏资源' : '收藏资源'"
+          @click.stop="$emit('bookmark')"
+        >
+          <IconBookmark :filled="isBookmarked" />
+        </button>
+        <button
+          v-if="showMinimize"
           type="button"
           class="focus-ring rounded-full border border-subtle p-2 text-text-muted transition-all duration-200 hover:border-secondary/30 hover:bg-card-hover hover:text-secondary active:scale-95"
           aria-label="最小化卡片"
@@ -84,7 +101,7 @@
         >
           <div class="h-full w-1/2 animate-shimmer bg-gradient-to-r from-transparent via-[var(--text-muted)]/10 to-transparent" />
         </div>
-        <div class="mt-4 rounded-full bg-[var(--border-strong)]/80 p-[1px]">
+        <div v-if="hasProgress" class="mt-4 rounded-full bg-[var(--border-strong)]/80 p-[1px]">
           <div
             class="h-1.5 rounded-full bg-gradient-to-r from-primary to-secondary transition-all duration-500"
             :style="{ width: `${progress}%` }"
@@ -116,6 +133,7 @@
 
 <script setup>
 import { computed } from "vue";
+import IconBookmark from "./icons/IconBookmark.vue";
 import IconMinimize from "./icons/IconMinimize.vue";
 import IconPin from "./icons/IconPin.vue";
 
@@ -124,11 +142,14 @@ const props = defineProps({
   title: { type: String, default: "" },
   resource: { type: Object, default: null },
   progressText: { type: String, default: "栅格同步" },
-  progress: { type: Number, default: 0 },
+  progress: { type: Number, default: null },
   isReady: { type: Boolean, default: false },
   isActive: { type: Boolean, default: false },
   isExpanded: { type: Boolean, default: false },
+  isBookmarked: { type: Boolean, default: false },
   activatable: { type: Boolean, default: false },
+  showPin: { type: Boolean, default: true },
+  showMinimize: { type: Boolean, default: true },
   color: { type: String, default: "primary" },
 });
 
@@ -138,7 +159,8 @@ const displayTitle = computed(() => (
   || props.resource?.metadata?.title
   || props.title
 ));
-const emit = defineEmits(["activate", "pin", "minimize"]);
+const hasProgress = computed(() => Number.isFinite(props.progress));
+const emit = defineEmits(["activate", "pin", "bookmark", "minimize"]);
 
 const COLOR_MAP = {
   primary: {

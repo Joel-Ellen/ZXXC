@@ -1,7 +1,11 @@
 import apiClient, { createRequestId, tokenStore } from "./apiClient";
+import { normalizeLearningEvent } from "../contracts/learning";
+import { normalizeTutorRequest } from "../contracts/tutor";
+import { createRefreshRecoveryReporter } from "./clientTelemetry";
 
 const RESOURCE_READ_TIMEOUT_MS = 15_000;
 const RESOURCE_GENERATION_REQUEST_TIMEOUT_MS = 15_000;
+const refreshRecoveryReporter = createRefreshRecoveryReporter();
 
 // ── 认证 ──
 export async function getCaptcha() {
@@ -38,7 +42,11 @@ export async function fetchMyProfile() {
 
 // Session-style API (new stable boundary)
 export function buildSessionId(userId, courseId = "data_structures") {
-  return `${userId || "demo_user"}:${courseId || "data_structures"}`;
+  const normalizedUserId = String(userId || "").trim();
+  const normalizedCourseId = String(courseId || "data_structures").trim();
+  return normalizedUserId && normalizedUserId !== "demo_user" && normalizedCourseId
+    ? `${normalizedUserId}:${normalizedCourseId}`
+    : "";
 }
 
 function sessionPath(sessionId) {
@@ -54,8 +62,14 @@ export async function createSession({ course_id = "data_structures" } = {}) {
 }
 
 export async function getSession(sessionId) {
-  const { data } = await apiClient.get(`/sessions/${sessionPath(sessionId)}`);
-  return data;
+  try {
+    const { data } = await apiClient.get(`/sessions/${sessionPath(sessionId)}`);
+    refreshRecoveryReporter.success();
+    return data;
+  } catch (error) {
+    refreshRecoveryReporter.failure();
+    throw error;
+  }
 }
 
 export async function submitSessionProfileInput(sessionId, answer) {
@@ -84,19 +98,67 @@ export async function submitSessionBehavior(sessionId, payload = {}) {
 }
 
 export async function submitSessionLearningEvent(sessionId, payload = {}) {
-  const { data } = await apiClient.post(`/sessions/${sessionPath(sessionId)}/events`, payload);
+  const { data } = await apiClient.post(
+    `/sessions/${sessionPath(sessionId)}/events`,
+    normalizeLearningEvent(payload),
+  );
+  return data;
+}
+
+export async function fetchSessionLearningEventHistory(
+  sessionId,
+  { nodeId = "", eventId = "", limit = 100 } = {},
+) {
+  const params = { limit };
+  if (nodeId) params.node_id = nodeId;
+  if (eventId) params.event_id = eventId;
+  const { data } = await apiClient.get(`/sessions/${sessionPath(sessionId)}/events`, { params });
+  return data;
+}
+
+export async function fetchSessionLearningAssets(sessionId) {
+  const { data } = await apiClient.get(`/sessions/${sessionPath(sessionId)}/assets`);
+  return data;
+}
+
+export async function patchSessionLearningAssets(sessionId, payload = {}) {
+  const { data } = await apiClient.patch(`/sessions/${sessionPath(sessionId)}/assets`, payload);
+  return data;
+}
+
+export async function fetchSessionReviewDashboard(sessionId) {
+  const { data } = await apiClient.get(`/sessions/${sessionPath(sessionId)}/review`);
+  return data;
+}
+
+export async function startSessionReviewItem(sessionId, reviewItemId) {
+  const { data } = await apiClient.post(
+    `/sessions/${sessionPath(sessionId)}/review/items/${encodeURIComponent(reviewItemId)}/start`,
+    {},
+  );
+  return data;
+}
+
+export async function prepareSessionReviewRetest(sessionId, reviewItemId, practiceEventId) {
+  const { data } = await apiClient.post(
+    `/sessions/${sessionPath(sessionId)}/review/items/${encodeURIComponent(reviewItemId)}/prepare-retest`,
+    { practice_event_id: String(practiceEventId || "") },
+  );
   return data;
 }
 
 export async function askSessionTutor(sessionId, payload = {}) {
-  const { data } = await apiClient.post(`/sessions/${sessionPath(sessionId)}/tutor`, payload);
+  const { data } = await apiClient.post(
+    `/sessions/${sessionPath(sessionId)}/tutor`,
+    normalizeTutorRequest(payload),
+  );
   return data;
 }
 
 export async function streamSessionTutor(sessionId, payload, handlers = {}) {
   return streamSsePost(
     `/api/sessions/${sessionPath(sessionId)}/tutor`,
-    { ...payload, stream: true },
+    normalizeTutorRequest({ ...payload, stream: true }),
     handlers,
   );
 }
@@ -143,6 +205,29 @@ export async function streamResourceGeneration(jobId, handlers = {}) {
     handlers,
   );
 }
+
+export async function fetchSessionPracticeProblem(sessionId, problemOrResourceId) {
+  const { data } = await apiClient.get(
+    `/sessions/${sessionPath(sessionId)}/practice/problems/${encodeURIComponent(problemOrResourceId)}`,
+  );
+  return data;
+}
+
+export async function runSessionPractice(sessionId, payload = {}) {
+  const { data } = await apiClient.post(
+    `/sessions/${sessionPath(sessionId)}/practice/run`,
+    payload,
+  );
+  return data;
+}
+
+export async function submitSessionPractice(sessionId, payload = {}) {
+  const { data } = await apiClient.post(
+    `/sessions/${sessionPath(sessionId)}/practice/submit`,
+    payload,
+  );
+  return data;
+}
 export async function resetSession(userId, courseId = "data_structures") {
   const { data } = await apiClient.post("/reset", { user_id: userId, course_id: courseId });
   return data;
@@ -160,7 +245,7 @@ export async function resetSession(userId, courseId = "data_structures") {
  * @returns {Promise<void>}
  */
 // Shared transport for session tutor streaming.
-async function streamSsePost(url, payload, { onToken, onDone, onError, signal } = {}) {
+async function streamSsePost(url, payload, { onToken, onDone, onReset, onError, signal } = {}) {
   const token = tokenStore.getAccessToken();
   let response;
   try {
@@ -189,6 +274,7 @@ async function streamSsePost(url, payload, { onToken, onDone, onError, signal } 
   const reader = response.body.getReader();
   const decoder = new TextDecoder("utf-8");
   let buffer = "";
+  let receivedTerminalEvent = false;
 
   const dispatch = (rawEvent) => {
     // 单个 SSE 事件块可能包含多行 event:/data:
@@ -211,9 +297,13 @@ async function streamSsePost(url, payload, { onToken, onDone, onError, signal } 
     }
     if (eventName === "token") {
       if (parsed.token) onToken?.(parsed.token);
+    } else if (eventName === "reset") {
+      onReset?.(parsed);
     } else if (eventName === "done") {
+      receivedTerminalEvent = true;
       onDone?.(parsed);
     } else if (eventName === "error") {
+      receivedTerminalEvent = true;
       onError?.(new Error(parsed.error || "流式辅导出错"));
     }
   };
@@ -223,6 +313,7 @@ async function streamSsePost(url, payload, { onToken, onDone, onError, signal } 
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
+      buffer = buffer.replace(/\r\n/g, "\n");
       // SSE 事件以空行（\n\n）分隔
       let sepIndex;
       while ((sepIndex = buffer.indexOf("\n\n")) !== -1) {
@@ -233,6 +324,9 @@ async function streamSsePost(url, payload, { onToken, onDone, onError, signal } 
     }
     // 冲刷残余
     if (buffer.trim()) dispatch(buffer);
+    if (!receivedTerminalEvent) {
+      onError?.(new Error("辅导连接意外结束，输入已保留，请重试。"));
+    }
   } catch (err) {
     if (err?.name !== "AbortError") onError?.(err);
   }
@@ -283,9 +377,13 @@ async function streamSseGet(url, {
     let eventId = "";
     const dataLines = [];
     for (const line of rawEvent.split("\n")) {
-      if (line.startsWith("event:")) eventName = line.slice(6).trim();
-      else if (line.startsWith("id:")) eventId = line.slice(3).trim();
-      else if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+      if (line.startsWith("event:")) {
+        eventName = line.slice(6).trim();
+      } else if (line.startsWith("id:")) {
+        eventId = line.slice(3).trim();
+      } else if (line.startsWith("data:")) {
+        dataLines.push(line.slice(5).trimStart());
+      }
     }
     if (!dataLines.length) return;
 
