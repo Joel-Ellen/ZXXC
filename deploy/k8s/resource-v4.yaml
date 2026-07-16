@@ -1,0 +1,552 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: eduagent-resource-v4
+data:
+  APP_ENV: production
+  EDUAGENT_RESOURCE_IN_PROCESS_WORKERS: "false"
+  EDUAGENT_RESOURCE_WORKER_STAGE_SLOTS: "8"
+  EDUAGENT_RESOURCE_WORKER_HEARTBEAT_SECONDS: "15"
+  EDUAGENT_RESOURCE_WORKER_LEASE_SECONDS: "60"
+  EDUAGENT_RESOURCE_WORKER_SHUTDOWN_GRACE_SECONDS: "90"
+  EDUAGENT_RESOURCE_WORKER_METRICS_SECONDS: "5"
+  EDUAGENT_RESOURCE_WORKER_RECOVERY_SECONDS: "15"
+  EDUAGENT_RESOURCE_EVENT_WAKE_WAIT_SECONDS: "0.2"
+  EDUAGENT_RESOURCE_KB_INDEX: resource-kb-v4-read
+  EDUAGENT_PROMETHEUS_PORT: "9108"
+  EDUAGENT_PROMETHEUS_ADDRESS: 0.0.0.0
+  ES_VERIFY_CERTS: "true"
+  NLI_SERVICE_URL: http://nli-service:8080
+  EMBEDDING_SERVICE_URL: http://embedding-service:8080
+  SANDBOX_RUNNER_URL: http://sandbox-runner:8080
+  RESOURCE_QUALITY_V4_ROLLOUT_PERCENT: "0"
+  RESOURCE_V4_NLI_CALIBRATED: "false"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eduagent-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: eduagent-api
+  template:
+    metadata:
+      labels:
+        app: eduagent-api
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 45
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: registry.example/eduagent@sha256:replace-me
+          command: ["python", "frontend/server.py"]
+          ports:
+            - name: http
+              containerPort: 8800
+            - name: metrics
+              containerPort: 9108
+          envFrom:
+            - configMapRef:
+                name: eduagent-resource-v4
+            - secretRef:
+                name: eduagent-runtime-secrets
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet:
+              path: /api/ready
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 15
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: eduagent-api
+  labels:
+    app: eduagent-api
+spec:
+  selector:
+    app: eduagent-api
+  ports:
+    - name: http
+      port: 8800
+      targetPort: http
+    - name: metrics
+      port: 9108
+      targetPort: metrics
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: resource-worker
+spec:
+  replicas: 8
+  selector:
+    matchLabels:
+      app: resource-worker
+  template:
+    metadata:
+      labels:
+        app: resource-worker
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 100
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: registry.example/eduagent@sha256:replace-me
+          command: ["python", "-m", "src.resource_worker"]
+          ports:
+            - name: metrics
+              containerPort: 9108
+          envFrom:
+            - configMapRef:
+                name: eduagent-resource-v4
+            - secretRef:
+                name: eduagent-runtime-secrets
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: "1"
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: resource-worker
+  labels:
+    app: resource-worker
+spec:
+  selector:
+    app: resource-worker
+  ports:
+    - name: metrics
+      port: 9108
+      targetPort: metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: resource-v4
+spec:
+  selector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - eduagent-api
+          - resource-worker
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 5s
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: resource-worker
+spec:
+  minReplicas: 8
+  maxReplicas: 20
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: resource-worker
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 30
+    scaleDown:
+      stabilizationWindowSeconds: 300
+  metrics:
+    - type: External
+      external:
+        metric:
+          name: resource_queue_oldest_age_seconds
+        target:
+          type: AverageValue
+          averageValue: "5"
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: eduagent-api
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: eduagent-api
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: resource-worker
+spec:
+  minAvailable: 6
+  selector:
+    matchLabels:
+      app: resource-worker
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: nli-service
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: nli-service
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: embedding-service
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: embedding-service
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sandbox-runner
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: sandbox-runner
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nli-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nli-service
+  template:
+    metadata:
+      labels:
+        app: nli-service
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: nli
+          image: registry.example/resource-nli@sha256:replace-calibrated-digest
+          env:
+            - name: SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: resource-nli-secrets
+                  key: service-token
+            - name: NLI_MODEL_ARTIFACT_DIGEST
+              valueFrom:
+                secretKeyRef:
+                  name: resource-nli-secrets
+                  key: artifact-digest
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nli-service
+spec:
+  selector:
+    app: nli-service
+  ports:
+    - port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: embedding-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: embedding-service
+  template:
+    metadata:
+      labels:
+        app: embedding-service
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: embedding
+          image: registry.example/resource-embedding@sha256:replace-me
+          env:
+            - name: SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: resource-embedding-secrets
+                  key: service-token
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: embedding-service
+spec:
+  selector:
+    app: embedding-service
+  ports:
+    - port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sandbox-runner
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: sandbox-runner
+  template:
+    metadata:
+      labels:
+        app: sandbox-runner
+    spec:
+      automountServiceAccountToken: false
+      runtimeClassName: gvisor
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: runner
+          image: registry.example/sandbox-runner@sha256:replace-me
+          env:
+            - name: SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: sandbox-runner-secrets
+                  key: service-token
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
+          volumeMounts:
+            - name: work
+              mountPath: /work
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 500m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: work
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sandbox-runner
+spec:
+  selector:
+    app: sandbox-runner
+  ports:
+    - port: 8080
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandbox-runner-deny-egress
+spec:
+  podSelector:
+    matchLabels:
+      app: sandbox-runner
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: resource-worker
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: resource-model-services-deny-egress
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - nli-service
+          - embedding-service
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: resource-worker
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress: []

@@ -248,3 +248,46 @@ def test_stale_recovery_commits_transition_before_emitting_event(monkeypatch) ->
 
     assert [job["job_id"] for job in recovered] == ["expired-job"]
     assert order == ["commit", "event"]
+
+
+def test_v4_job_insert_keeps_columns_and_parameters_aligned(monkeypatch) -> None:
+    class Database:
+        def commit(self) -> None:
+            pass
+
+        def rollback(self) -> None:
+            pass
+
+    repo = ResourceGenerationRepo(database=Database(), allow_memory_fallback=False)
+    monkeypatch.setattr(repo, "ensure_tables", lambda: True)
+    calls: list[tuple[str, tuple[object, ...]]] = []
+
+    def fetchone(sql, params):
+        calls.append((sql, params))
+        if "SELECT * FROM resource_generation_jobs" in sql:
+            return None
+        if "INSERT INTO resource_generation_jobs" in sql:
+            assert sql.count("%s") == len(params)
+            return repo._job_record(  # noqa: SLF001
+                "learner",
+                "course-a",
+                "N01",
+                "request",
+                pipeline_version="resource-v4",
+            )
+        raise AssertionError(sql)
+
+    monkeypatch.setattr(repo, "_fetchone", fetchone)
+    monkeypatch.setattr(repo, "append_event", lambda *_args, **_kwargs: {})
+
+    job, created = repo.create_or_get_active_job(
+        "learner",
+        "course-a",
+        "N01",
+        "request",
+        pipeline_version="resource-v4",
+    )
+
+    assert created is True
+    assert job["pipeline_version"] == "resource-v4"
+    assert any("INSERT INTO resource_generation_jobs" in sql for sql, _ in calls)

@@ -73,7 +73,8 @@ class ElasticsearchKnowledgeBaseConfig(BaseModel):
     rrf_rank_constant: int = Field(default=60, ge=1, le=500)
     rrf_rank_window_size: int = Field(default=50, ge=5, le=500)
     request_timeout: int = Field(default=30, ge=1, le=300)
-    verify_certs: bool = Field(default=False)
+    verify_certs: bool = Field(default=True)
+    ca_certs: Optional[str] = Field(default=None)
     basic_auth_user: Optional[str] = Field(default=None)
     basic_auth_password: Optional[str] = Field(default=None)
 
@@ -90,6 +91,11 @@ class KnowledgeBaseChunk(BaseModel):
 
     chunk_id: str = Field(..., min_length=1)
     document_id: str = Field(..., min_length=1)
+    course_id: str = Field(default="")
+    node_ids: List[str] = Field(default_factory=list)
+    content_kind: str = Field(default="explanation")
+    locale: str = Field(default="zh-CN")
+    content_version: str = Field(default="1")
     source_path: str = Field(..., min_length=1)
     chunk_index: int = Field(default=0, ge=0)
     content: str = Field(..., min_length=1)
@@ -264,6 +270,19 @@ class MarkdownKnowledgeBaseChunker:
                     KnowledgeBaseChunk(
                         chunk_id=chunk_id,
                         document_id=document_id,
+                        course_id=str(extra_metadata.get("course_id") or ""),
+                        node_ids=[
+                            str(value)
+                            for value in extra_metadata.get("node_ids", [])
+                            if str(value).strip()
+                        ],
+                        content_kind=str(
+                            extra_metadata.get("content_kind") or "explanation"
+                        ),
+                        locale=str(extra_metadata.get("locale") or "zh-CN"),
+                        content_version=str(
+                            extra_metadata.get("content_version") or "1"
+                        ),
                         source_path=source_path,
                         chunk_index=chunk_index,
                         content=normalized,
@@ -530,6 +549,8 @@ class ElasticsearchKnowledgeBaseClient:
                 self._config.basic_auth_user,
                 self._config.basic_auth_password,
             )
+        if self._config.ca_certs:
+            kwargs["ca_certs"] = self._config.ca_certs
         self._client = Elasticsearch(**kwargs)
 
     def is_connected(self) -> bool:
@@ -563,6 +584,59 @@ class ElasticsearchKnowledgeBaseClient:
             mappings=self._build_index_mappings(),
             settings=self._build_index_settings(),
         )
+
+    def switch_aliases(
+        self,
+        physical_index: str,
+        *,
+        read_alias: str = "resource-kb-v4-read",
+        write_alias: str = "resource-kb-v4-write",
+    ) -> None:
+        """Atomically move the v4 read/write aliases to a validated index."""
+        client = self._ensure_client()
+        actions: List[Dict[str, Any]] = []
+        for alias in (read_alias, write_alias):
+            try:
+                current = client.indices.get_alias(name=alias)
+            except Exception:
+                current = {}
+            for index_name in current:
+                actions.append(
+                    {"remove": {"index": index_name, "alias": alias}}
+                )
+        actions.extend([
+            {"add": {"index": physical_index, "alias": read_alias}},
+            {
+                "add": {
+                    "index": physical_index,
+                    "alias": write_alias,
+                    "is_write_index": True,
+                }
+            },
+        ])
+        client.indices.update_aliases(actions=actions)
+
+    def rollback_read_alias(
+        self,
+        previous_index: str,
+        *,
+        read_alias: str = "resource-kb-v4-read",
+    ) -> None:
+        """Roll back readers without changing the active ingestion target."""
+        client = self._ensure_client()
+        actions: List[Dict[str, Any]] = []
+        try:
+            current = client.indices.get_alias(name=read_alias)
+        except Exception:
+            current = {}
+        for index_name in current:
+            actions.append(
+                {"remove": {"index": index_name, "alias": read_alias}}
+            )
+        actions.append(
+            {"add": {"index": previous_index, "alias": read_alias}}
+        )
+        client.indices.update_aliases(actions=actions)
 
     def bulk_index_chunks(self, chunks: Sequence[KnowledgeBaseChunk]) -> int:
         if not chunks:
@@ -800,6 +874,11 @@ class ElasticsearchKnowledgeBaseClient:
             "properties": {
                 "chunk_id": {"type": "keyword"},
                 "document_id": {"type": "keyword"},
+                "course_id": {"type": "keyword"},
+                "node_ids": {"type": "keyword"},
+                "content_kind": {"type": "keyword"},
+                "locale": {"type": "keyword"},
+                "content_version": {"type": "keyword"},
                 "source_path": {"type": "keyword"},
                 "chunk_index": {"type": "integer"},
                 "content": {"type": "text", "analyzer": "eduagent_default"},

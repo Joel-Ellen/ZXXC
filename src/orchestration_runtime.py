@@ -20,6 +20,7 @@ from src.agents.validator_node import ValidatorNode
 from src.graph import get_kg_manager
 from src.infrastructure.cold_start import ColdStartEngine, ColdStartState
 from src.observability import incr_metric, log_event
+from src.resource_generation.services import CircuitBreaker
 from src.orchestration_core import EduAgentGraph
 from src.state.agent_state import AgentState
 
@@ -45,6 +46,8 @@ class ResourceGenerationResult:
     fallback_reason: Optional[str] = None
     elapsed_ms: float = 0.0
     structured_payload: Optional[Dict[str, Any]] = None
+    input_tokens: int = 0
+    output_tokens: int = 0
 
     def to_metadata(self) -> Dict[str, Any]:
         """Return learner-safe provenance suitable for the resource contract."""
@@ -79,7 +82,15 @@ class OrchestrationRuntime:
         )
         # One bounded attempt is the default.  Deployments with a reliable
         # secondary provider may explicitly opt into another attempt.
-        self._resource_llm_retries = self._read_int_env("EDUAGENT_RESOURCE_LLM_RETRIES", 1)
+        configured_retries = self._read_int_env("EDUAGENT_RESOURCE_LLM_RETRIES", 1)
+        environment = str(
+            os.environ.get("APP_ENV")
+            or os.environ.get("ENVIRONMENT")
+            or ""
+        ).strip().lower()
+        self._resource_llm_retries = (
+            1 if environment in {"prod", "production"} else configured_retries
+        )
         self._resource_llm_retry_backoff_sec = self._read_float_env(
             "EDUAGENT_RESOURCE_LLM_RETRY_BACKOFF_SEC",
             0.25,
@@ -96,6 +107,10 @@ class OrchestrationRuntime:
             thread_name_prefix="eduagent-resource-llm",
         )
         self._llm_provider_order = self._build_provider_order()
+        self._provider_breakers = {
+            provider: CircuitBreaker(failure_threshold=3, open_seconds=30.0)
+            for provider in self._llm_provider_order
+        }
         self.kg = get_kg_manager()
 
         llm = self.get_llm()
@@ -125,6 +140,22 @@ class OrchestrationRuntime:
         ]
         ordered: List[str] = []
         for provider in [primary, *fallbacks]:
+            environment = str(
+                os.environ.get("APP_ENV")
+                or os.environ.get("ENVIRONMENT")
+                or ""
+            ).strip().lower()
+            if environment in {"prod", "production"}:
+                allowed = {
+                    self._canonical_provider(value)
+                    for value in os.environ.get(
+                        "EDUAGENT_RESOURCE_DOMESTIC_PROVIDERS",
+                        "dashscope,deepseek,spark",
+                    ).split(",")
+                    if value.strip()
+                }
+                if provider not in allowed:
+                    continue
             if provider not in ordered:
                 ordered.append(provider)
         return ordered
@@ -279,6 +310,9 @@ class OrchestrationRuntime:
             candidates.append((self._canonical_provider(getattr(current, "provider", "primary")), current))
         for provider in self._llm_provider_order:
             provider = self._canonical_provider(provider)
+            breaker = self._provider_breakers.get(provider)
+            if breaker is not None and not breaker.allow():
+                continue
             client = self._get_or_create_llm_for_provider(provider)
             if client is None:
                 continue
@@ -286,6 +320,16 @@ class OrchestrationRuntime:
                 continue
             candidates.append((provider, client))
         return candidates
+
+    def _provider_success(self, provider: str) -> None:
+        breaker = self._provider_breakers.get(self._canonical_provider(provider))
+        if breaker is not None:
+            breaker.success()
+
+    def _provider_failure(self, provider: str) -> None:
+        breaker = self._provider_breakers.get(self._canonical_provider(provider))
+        if breaker is not None:
+            breaker.failure()
 
     @staticmethod
     def _llm_model_name(llm: Any) -> Optional[str]:
@@ -377,6 +421,7 @@ class OrchestrationRuntime:
                 try:
                     content = future.result(timeout=attempt_timeout_sec)
                     if str(content or "").strip():
+                        self._provider_success(provider_name)
                         if provider_name != candidates[0][0]:
                             incr_metric(
                                 "llm.fallback_total",
@@ -394,6 +439,7 @@ class OrchestrationRuntime:
                     last_failure = "empty_response"
                     raise RuntimeError(last_failure)
                 except concurrent.futures.TimeoutError:
+                    self._provider_failure(provider_name)
                     future.cancel()
                     last_failure = "timeout"
                     incr_metric("llm.timeout_total", operation="resource_generation", provider=provider_name)
@@ -406,6 +452,7 @@ class OrchestrationRuntime:
                         timeout_sec=round(attempt_timeout_sec, 3),
                     )
                 except Exception as exc:
+                    self._provider_failure(provider_name)
                     last_failure = "provider_error" if last_failure != "empty_response" else last_failure
                     incr_metric("llm.error_total", operation="resource_generation", provider=provider_name)
                     log_event(
@@ -530,6 +577,8 @@ class OrchestrationRuntime:
             fallback_reason=metadata.get("fallback_reason"),
             elapsed_ms=float(metadata.get("elapsed_ms") or 0.0),
             structured_payload=dict(generated.structured_payload),
+            input_tokens=max(0, int(getattr(generated, "input_tokens", 0) or 0)),
+            output_tokens=max(0, int(getattr(generated, "output_tokens", 0) or 0)),
         )
 
     def _structured_single_attempt(
@@ -580,15 +629,18 @@ class OrchestrationRuntime:
             try:
                 result = future.result(timeout=timeout_sec)
             except concurrent.futures.TimeoutError:
+                self._provider_failure(provider_name)
                 future.cancel()
                 last_failure = "timeout"
                 incr_metric("llm.timeout_total", operation="resource_generation", provider=provider_name)
                 continue
             except Exception as exc:
+                self._provider_failure(provider_name)
                 last_failure = f"provider_error:{type(exc).__name__}"
                 incr_metric("llm.error_total", operation="resource_generation", provider=provider_name)
                 continue
             if result.source == "llm":
+                self._provider_success(provider_name)
                 return result
             last_failure = result.fallback_reason or "invalid_output"
         from src.resource_generation.generator import ResourceGenerator
@@ -633,11 +685,13 @@ class OrchestrationRuntime:
             try:
                 generated = future.result(timeout=timeout_sec)
             except concurrent.futures.TimeoutError:
+                self._provider_failure(provider_name)
                 future.cancel()
                 last_failure = "timeout"
                 incr_metric("llm.timeout_total", operation="resource_supporting_bundle", provider=provider_name)
                 continue
             except Exception as exc:
+                self._provider_failure(provider_name)
                 last_failure = f"provider_error:{type(exc).__name__}"
                 incr_metric("llm.error_total", operation="resource_supporting_bundle", provider=provider_name)
                 continue
@@ -646,6 +700,7 @@ class OrchestrationRuntime:
                 for card_type, value in generated.items()
             }
             if any(result.source == "llm" for result in results.values()):
+                self._provider_success(provider_name)
                 return results
             last_failure = next(
                 (result.fallback_reason for result in results.values() if result.fallback_reason),

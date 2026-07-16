@@ -23,6 +23,36 @@ CARD_TYPES = (
 CONTENT_VERSION = "resource-v3"
 
 
+class LearningObjective(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    id: str = Field(min_length=1, max_length=80)
+    text: str = Field(min_length=1, max_length=500)
+
+
+class AtomicClaim(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    id: str = Field(min_length=1, max_length=80)
+    text: str = Field(min_length=1, max_length=700)
+    critical: bool = True
+    evidence_ids: list[str] = Field(default_factory=list, min_length=1, max_length=5)
+
+
+class LearningBlueprint(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    version: str = "resource-blueprint-v1"
+    objectives: list[LearningObjective] = Field(min_length=1, max_length=8)
+    claims: list[AtomicClaim] = Field(min_length=1, max_length=16)
+    terms: list[str] = Field(default_factory=list, max_length=16)
+    misconceptions: list[str] = Field(default_factory=list, max_length=10)
+    examples: list[str] = Field(default_factory=list, max_length=8)
+    boundaries: list[str] = Field(default_factory=list, max_length=8)
+    difficulty_strategy: str = Field(min_length=1, max_length=800)
+    card_roles: dict[str, str] = Field(default_factory=dict)
+
+
 class ResourcePayload(BaseModel):
     """Fields shared by every generated card."""
 
@@ -31,6 +61,11 @@ class ResourcePayload(BaseModel):
     render_type: str
     title: str = Field(min_length=1, max_length=160)
     source_ref_ids: list[str] = Field(default_factory=list, max_length=5)
+    objective_ids: list[str] = Field(default_factory=list, max_length=8)
+    evidence_map: dict[str, list[str]] = Field(default_factory=dict)
+    language: str = Field(default="zh-CN", min_length=2, max_length=32)
+    content_language: str = Field(default="zh-CN", min_length=2, max_length=32)
+    quality_profile: dict[str, Any] = Field(default_factory=dict)
 
 
 class ConceptSection(BaseModel):
@@ -55,6 +90,7 @@ class ConceptMapPayload(ResourcePayload):
     transfer_questions: list[str] = Field(default_factory=list, min_length=1, max_length=6)
     review_prompts: list[str] = Field(default_factory=list, min_length=1, max_length=6)
     mermaid_source: str = Field(min_length=1, max_length=6000)
+    learning_blueprint: LearningBlueprint | None = None
 
 
 class BoundaryTest(BaseModel):
@@ -79,6 +115,25 @@ class CodeSnippetPayload(ResourcePayload):
     complexity_notes: list[str] = Field(default_factory=list, min_length=1, max_length=8)
     pitfalls: list[str] = Field(default_factory=list, min_length=1, max_length=8)
     experiments: list[str] = Field(default_factory=list, min_length=1, max_length=8)
+    example_binding: str = Field(default="", max_length=160)
+    practice_id: str = Field(default="", max_length=160)
+    verification: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExerciseRubricItem(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    criterion: str = Field(min_length=1, max_length=300)
+    points: int = Field(ge=1, le=100)
+    evidence: str = Field(min_length=1, max_length=500)
+
+
+class ExerciseCheckpoint(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    id: str = Field(min_length=1, max_length=80)
+    prompt: str = Field(min_length=1, max_length=500)
+    expected_signal: str = Field(min_length=1, max_length=500)
 
 
 class InteractiveExercisePayload(ResourcePayload):
@@ -91,6 +146,9 @@ class InteractiveExercisePayload(ResourcePayload):
     hints: list[str] = Field(default_factory=list, min_length=1, max_length=6)
     solution_outline: str = Field(min_length=1, max_length=1600)
     expected_outcome: str = Field(min_length=1, max_length=900)
+    rubric: list[ExerciseRubricItem] = Field(default_factory=list, max_length=8)
+    structured_checkpoints: list[ExerciseCheckpoint] = Field(default_factory=list, max_length=8)
+    hint_levels: dict[str, str] = Field(default_factory=dict)
 
 
 class VideoTimelineItem(BaseModel):
@@ -104,25 +162,28 @@ class VideoSummaryPayload(ResourcePayload):
     render_type: Literal["video_summary"] = "video_summary"
     summary: str = Field(min_length=1, max_length=1300)
     key_points: list[str] = Field(default_factory=list, min_length=1, max_length=8)
-    timeline: list[VideoTimelineItem] = Field(default_factory=list, min_length=1, max_length=8)
+    timeline: list[VideoTimelineItem] = Field(default_factory=list, max_length=8)
     watch_focus: list[str] = Field(default_factory=list, min_length=1, max_length=6)
     review_questions: list[str] = Field(default_factory=list, min_length=1, max_length=6)
     duration_minutes: int = Field(default=0, ge=0, le=240)
     video_url: str | None = None
     video_source_id: str | None = None
+    media_status: Literal["trusted_video", "no_trusted_video"] = "no_trusted_video"
+    reading_sequence: list[str] = Field(default_factory=list, max_length=8)
 
 
 class DiagnosticQuestion(BaseModel):
     model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
 
     id: str = Field(min_length=1, max_length=120)
-    level: Literal["concept", "understanding", "application"]
+    level: Literal["concept", "understanding", "application", "boundary", "transfer"]
     prompt: str = Field(min_length=1, max_length=1200)
     options: list[str] = Field(min_length=4, max_length=4)
     answer_index: int = Field(ge=0, le=3)
     explanation: str = Field(min_length=1, max_length=1300)
     skill_tag: str = Field(min_length=1, max_length=160)
     error_tags: list[str] = Field(default_factory=list, max_length=5)
+    distractor_error_tags: dict[str, str] = Field(default_factory=dict)
     difficulty: Literal["easy", "medium", "hard"] = "medium"
 
     @field_validator("options")

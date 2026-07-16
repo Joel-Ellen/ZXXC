@@ -109,19 +109,21 @@ def resource_contract_from_card(card: ResourceCard) -> ResourceContract:
     personalization_basis = {"cognitive_style": card.cognitive_style}
     if isinstance(metadata.get("personalization_basis"), dict):
         personalization_basis.update(metadata["personalization_basis"])
+    content_version = str(
+        metadata.get("content_version")
+        or generation_payload.get("content_version")
+        or "legacy-v1"
+    )
     # GET resource reads must remain non-mutating, including for cards saved
     # before provenance/version fields existed. Normalize those fields only in
     # the response so every visible card retains an auditable contract.
-    if not source_refs:
+    if not source_refs and not content_version.startswith("resource-v4"):
         source_refs = [{
             "id": f"legacy-course-node:{card.node_id}",
             "type": "course_node",
             "node_id": card.node_id,
             "title": str(title),
         }]
-    content_version = str(
-        metadata.get("content_version") or generation_payload.get("content_version") or "legacy-v1"
-    )
     if not generation_payload.get("source"):
         generation_payload = {**generation_payload, "source": "legacy"}
     if content_version and "content_version" not in generation_payload:

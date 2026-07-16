@@ -14,6 +14,7 @@ their event history must be durable for reconnecting SSE clients.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import threading
 import uuid
@@ -31,11 +32,50 @@ except ImportError:  # Keep the repository importable for memory fallback tests.
     psycopg2 = _PsycopgUnavailable()  # type: ignore[assignment]
 
 from .connection import db, is_production_environment
+from src.resource_events import notifier as resource_event_notifier
 
 
 DEFAULT_LOCALE = "zh-CN"
-ACTIVE_JOB_STATUSES = frozenset({"queued", "running", "retrying"})
-TERMINAL_JOB_STATUSES = frozenset({"completed", "failed", "cancelled"})
+ACTIVE_JOB_STATUSES = frozenset({
+    "queued",
+    "running",
+    "retrying",
+    "retrieving",
+    "blueprint",
+    "concept",
+    "supporting",
+    "validating",
+    "repairing",
+})
+TERMINAL_JOB_STATUSES = frozenset({"completed", "partial", "failed", "cancelled"})
+PIPELINE_STATES = (
+    "queued",
+    "retrieving",
+    "blueprint",
+    "concept",
+    "supporting",
+    "validating",
+    "repairing",
+    "completed",
+    "partial",
+    "failed",
+    "cancelled",
+)
+PRIORITY_VALUES = {
+    "concept_map": 100,
+    "concept": 100,
+    "repair": 80,
+    "supporting_bundle": 50,
+    "supporting": 50,
+    "shadow": 10,
+    "normal": 50,
+    "interactive": 50,
+    "legacy_sync": 50,
+}
+DEFAULT_LEASE_SECONDS = 60
+MAX_ACTIVE_JOBS_PER_USER = 2
+QUEUE_SOFT_LIMIT = 4_000
+QUEUE_HARD_LIMIT = 5_000
 
 # PostgreSQL advisory locks are scoped to a database session and automatically
 # disappear if a worker process loses its connection.  Keeping the namespace
@@ -43,6 +83,40 @@ TERMINAL_JOB_STATUSES = frozenset({"completed", "failed", "cancelled"})
 # collisions with unrelated advisory-lock users in the same database.
 _RESOURCE_GENERATION_ADVISORY_NAMESPACE = 1_177_184_338
 _MAX_GENERATION_CONCURRENCY_SLOTS = 256
+
+
+class ResourceAdmissionError(RuntimeError):
+    """A durable queue admission decision safe to map to an HTTP response."""
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        status_code: int,
+        retry_after: int,
+        queue_depth: Optional[int] = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.status_code = int(status_code)
+        self.retry_after = max(1, int(retry_after))
+        self.queue_depth = (
+            max(0, int(queue_depth))
+            if queue_depth is not None
+            else None
+        )
+
+    def response_payload(self) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "error": str(self),
+            "error_code": self.code,
+            "status_code": self.status_code,
+            "retry_after": self.retry_after,
+        }
+        if self.queue_depth is not None:
+            payload["queue_depth"] = self.queue_depth
+        return payload
 
 
 @dataclass(frozen=True)
@@ -71,6 +145,16 @@ def _slot_candidates(max_concurrency: int, *, concept_priority: bool) -> Tuple[i
     return tuple(range(safe_max)) if concept_priority else tuple(range(1, safe_max))
 
 
+def _admission_lock_key(value: str) -> int:
+    """Return a stable signed int32 key for PostgreSQL two-key advisory locks."""
+    raw = int.from_bytes(
+        hashlib.sha256(str(value).encode("utf-8")).digest()[:4],
+        "big",
+        signed=False,
+    )
+    return raw if raw < 2**31 else raw - 2**32
+
+
 RESOURCE_GENERATION_TABLES_SQL = """
 CREATE TABLE IF NOT EXISTS resource_generation_jobs (
     job_id                  VARCHAR(64) PRIMARY KEY,
@@ -97,13 +181,38 @@ CREATE TABLE IF NOT EXISTS resource_generation_jobs (
     failed_at               VARCHAR(64)
 );
 
+ALTER TABLE resource_generation_jobs ADD COLUMN IF NOT EXISTS pipeline_version VARCHAR(64) NOT NULL DEFAULT 'resource-v3';
+ALTER TABLE resource_generation_jobs ADD COLUMN IF NOT EXISTS prompt_version VARCHAR(64) NOT NULL DEFAULT 'resource-v3';
+ALTER TABLE resource_generation_jobs ADD COLUMN IF NOT EXISTS blueprint_version VARCHAR(64) NOT NULL DEFAULT 'resource-v3';
+ALTER TABLE resource_generation_jobs ADD COLUMN IF NOT EXISTS quality_version VARCHAR(64) NOT NULL DEFAULT 'resource-v3';
+ALTER TABLE resource_generation_jobs ADD COLUMN IF NOT EXISTS priority_value INTEGER NOT NULL DEFAULT 50;
+ALTER TABLE resource_generation_jobs ADD COLUMN IF NOT EXISTS pipeline_state VARCHAR(32) NOT NULL DEFAULT 'queued';
+ALTER TABLE resource_generation_jobs ADD COLUMN IF NOT EXISTS deadline_at VARCHAR(64);
+ALTER TABLE resource_generation_jobs ADD COLUMN IF NOT EXISTS lease_owner VARCHAR(128);
+ALTER TABLE resource_generation_jobs ADD COLUMN IF NOT EXISTS lease_expires_at VARCHAR(64);
+ALTER TABLE resource_generation_jobs ADD COLUMN IF NOT EXISTS heartbeat_at VARCHAR(64);
+ALTER TABLE resource_generation_jobs ADD COLUMN IF NOT EXISTS token_budget_input INTEGER NOT NULL DEFAULT 45000;
+ALTER TABLE resource_generation_jobs ADD COLUMN IF NOT EXISTS token_budget_output INTEGER NOT NULL DEFAULT 12000;
+ALTER TABLE resource_generation_jobs ADD COLUMN IF NOT EXISTS cost_budget_microunits BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE resource_generation_jobs ADD COLUMN IF NOT EXISTS generation_call_budget INTEGER NOT NULL DEFAULT 8;
+ALTER TABLE resource_generation_jobs ADD COLUMN IF NOT EXISTS exposure_mode VARCHAR(32) NOT NULL DEFAULT 'normal';
+ALTER TABLE resource_generation_jobs ADD COLUMN IF NOT EXISTS trace_id VARCHAR(64) NOT NULL DEFAULT '';
+ALTER TABLE resource_generation_jobs ADD COLUMN IF NOT EXISTS release_version VARCHAR(128) NOT NULL DEFAULT '';
+ALTER TABLE resource_generation_jobs ADD COLUMN IF NOT EXISTS cohort VARCHAR(64) NOT NULL DEFAULT '';
+
 CREATE INDEX IF NOT EXISTS idx_resource_generation_jobs_user_node
     ON resource_generation_jobs (user_id, course_id, node_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_resource_generation_jobs_status
     ON resource_generation_jobs (status, updated_at);
+CREATE INDEX IF NOT EXISTS idx_resource_generation_jobs_queue
+    ON resource_generation_jobs (priority_value DESC, created_at ASC)
+    WHERE status IN ('queued', 'retrying');
+CREATE INDEX IF NOT EXISTS idx_resource_generation_jobs_lease
+    ON resource_generation_jobs (lease_expires_at)
+    WHERE status NOT IN ('completed', 'partial', 'failed', 'cancelled');
 CREATE UNIQUE INDEX IF NOT EXISTS uq_resource_generation_jobs_active_request
     ON resource_generation_jobs (user_id, course_id, node_id, idempotency_key)
-    WHERE status IN ('queued', 'running', 'retrying');
+    WHERE status NOT IN ('completed', 'partial', 'failed', 'cancelled');
 
 CREATE TABLE IF NOT EXISTS resource_generation_job_events (
     event_id    BIGSERIAL PRIMARY KEY,
@@ -115,6 +224,63 @@ CREATE TABLE IF NOT EXISTS resource_generation_job_events (
 
 CREATE INDEX IF NOT EXISTS idx_resource_generation_job_events_job_event
     ON resource_generation_job_events (job_id, event_id);
+
+CREATE TABLE IF NOT EXISTS resource_generation_cards (
+    card_id             BIGSERIAL PRIMARY KEY,
+    job_id              VARCHAR(64) NOT NULL REFERENCES resource_generation_jobs(job_id) ON DELETE CASCADE,
+    card_type           VARCHAR(64) NOT NULL,
+    status              VARCHAR(32) NOT NULL DEFAULT 'queued',
+    state_version       INTEGER NOT NULL DEFAULT 1,
+    payload             JSONB,
+    quality_result      JSONB NOT NULL DEFAULT '{}'::jsonb,
+    blueprint_snapshot  JSONB NOT NULL DEFAULT '{}'::jsonb,
+    publication_version VARCHAR(128) NOT NULL DEFAULT '',
+    content_hash        VARCHAR(64) NOT NULL DEFAULT '',
+    degraded_reason     VARCHAR(128),
+    created_at          VARCHAR(64) NOT NULL,
+    updated_at          VARCHAR(64) NOT NULL,
+    published_at        VARCHAR(64),
+    UNIQUE (job_id, card_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_resource_generation_cards_job_status
+    ON resource_generation_cards (job_id, status);
+
+CREATE TABLE IF NOT EXISTS resource_generation_attempts (
+    attempt_id       BIGSERIAL PRIMARY KEY,
+    job_id           VARCHAR(64) NOT NULL REFERENCES resource_generation_jobs(job_id) ON DELETE CASCADE,
+    card_type        VARCHAR(64) NOT NULL,
+    operation        VARCHAR(64) NOT NULL,
+    provider         VARCHAR(64) NOT NULL DEFAULT '',
+    model            VARCHAR(128) NOT NULL DEFAULT '',
+    input_tokens     INTEGER NOT NULL DEFAULT 0,
+    output_tokens    INTEGER NOT NULL DEFAULT 0,
+    elapsed_ms       DOUBLE PRECISION NOT NULL DEFAULT 0,
+    issue_code       VARCHAR(128) NOT NULL DEFAULT '',
+    artifact_version VARCHAR(128) NOT NULL DEFAULT '',
+    content_hash     VARCHAR(64) NOT NULL DEFAULT '',
+    created_at       VARCHAR(64) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_resource_generation_attempts_job
+    ON resource_generation_attempts (job_id, created_at);
+
+CREATE TABLE IF NOT EXISTS resource_quality_evaluations (
+    evaluation_id   BIGSERIAL PRIMARY KEY,
+    job_id          VARCHAR(64) NOT NULL REFERENCES resource_generation_jobs(job_id) ON DELETE CASCADE,
+    card_type       VARCHAR(64) NOT NULL,
+    quality_version VARCHAR(64) NOT NULL,
+    gate_status     VARCHAR(32) NOT NULL,
+    score           DOUBLE PRECISION NOT NULL DEFAULT 0,
+    dimensions      JSONB NOT NULL DEFAULT '{}'::jsonb,
+    issue_codes     JSONB NOT NULL DEFAULT '[]'::jsonb,
+    artifact_digest VARCHAR(128) NOT NULL DEFAULT '',
+    content_hash    VARCHAR(64) NOT NULL DEFAULT '',
+    created_at      VARCHAR(64) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_resource_quality_evaluations_job
+    ON resource_quality_evaluations (job_id, card_type, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS resource_base_cache (
     course_id               VARCHAR(128) NOT NULL,
@@ -212,6 +378,8 @@ def _normalise_job(row: Optional[Mapping[str, Any]]) -> Optional[Dict[str, Any]]
     result["progress"] = _json_value(result.get("progress"), {})
     result["request_params"] = _json_value(result.get("request_params"), {})
     result["error"] = _json_value(result.pop("error_json", result.get("error")), None)
+    result.setdefault("pipeline_state", result.get("status", "queued"))
+    result.setdefault("priority_value", PRIORITY_VALUES.get(str(result.get("priority") or "normal"), 50))
     return result
 
 
@@ -240,6 +408,9 @@ class _MemoryGenerationStore:
         self.lock = threading.RLock()
         self.jobs: Dict[str, Dict[str, Any]] = {}
         self.events: Dict[str, List[Dict[str, Any]]] = {}
+        self.cards: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        self.attempts: List[Dict[str, Any]] = []
+        self.quality_evaluations: List[Dict[str, Any]] = []
         self.base_cache: Dict[Tuple[str, str, str, str, str, str], Dict[str, Any]] = {}
         self.personal_cache: Dict[Tuple[str, str, str, str, str, str, str, str, str, str], Dict[str, Any]] = {}
         self.generation_slots: Dict[int, str] = {}
@@ -285,7 +456,13 @@ class _MemoryGenerationStore:
             and job.get("status") in ACTIVE_JOB_STATUSES
         )
 
-    def create_or_get_active_job(self, record: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
+    def create_or_get_active_job(
+        self,
+        record: Dict[str, Any],
+        *,
+        enforce_admission: bool = False,
+        concept_lane: bool = False,
+    ) -> Tuple[Dict[str, Any], bool]:
         with self.lock:
             for existing in self.jobs.values():
                 if self._active_match(
@@ -296,6 +473,46 @@ class _MemoryGenerationStore:
                     record["idempotency_key"],
                 ):
                     return copy.deepcopy(existing), False
+            if enforce_admission:
+                queued = [
+                    job
+                    for job in self.jobs.values()
+                    if job.get("status") in {"queued", "retrying"}
+                ]
+                queue_depth = len(queued)
+                low_priority = (
+                    record.get("exposure_mode") == "shadow"
+                    or record.get("priority")
+                    in {"shadow", "supporting", "supporting_bundle"}
+                )
+                if queue_depth >= QUEUE_HARD_LIMIT and not concept_lane:
+                    raise ResourceAdmissionError(
+                        "resource_queue_full",
+                        "Resource generation queue is temporarily full.",
+                        status_code=503,
+                        retry_after=30,
+                        queue_depth=queue_depth,
+                    )
+                if queue_depth >= QUEUE_SOFT_LIMIT and low_priority:
+                    raise ResourceAdmissionError(
+                        "resource_low_priority_paused",
+                        "Low-priority resource generation is temporarily paused.",
+                        status_code=503,
+                        retry_after=15,
+                        queue_depth=queue_depth,
+                    )
+                active_for_user = sum(
+                    job.get("user_id") == record["user_id"]
+                    and job.get("status") not in TERMINAL_JOB_STATUSES
+                    for job in self.jobs.values()
+                )
+                if active_for_user >= MAX_ACTIVE_JOBS_PER_USER:
+                    raise ResourceAdmissionError(
+                        "resource_user_active_limit",
+                        "At most two resource generation jobs may be active per learner.",
+                        status_code=429,
+                        retry_after=5,
+                    )
             self.jobs[record["job_id"]] = copy.deepcopy(record)
             self.events.setdefault(record["job_id"], [])
             self._append_event_locked(
@@ -340,20 +557,32 @@ class _MemoryGenerationStore:
         retry_count: Optional[int] = None,
         max_retries: Optional[int] = None,
         merge_progress: bool = True,
+        owner_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         with self.lock:
             record = self.jobs.get(job_id)
-            if record is None:
+            if (
+                record is None
+                or (
+                    owner_id
+                    and str(record.get("lease_owner") or "") != owner_id
+                )
+            ):
                 return None
             now = _now()
             if status is not None:
                 record["status"] = str(status)
+                if status in PIPELINE_STATES:
+                    record["pipeline_state"] = status
                 if status == "running" and not record.get("started_at"):
                     record["started_at"] = now
-                elif status == "completed":
+                elif status in {"completed", "partial", "cancelled"}:
                     record["completed_at"] = now
                 elif status == "failed":
                     record["failed_at"] = now
+                if status in TERMINAL_JOB_STATUSES:
+                    record["lease_owner"] = None
+                    record["lease_expires_at"] = None
             if progress is not None:
                 if merge_progress:
                     merged = dict(record.get("progress") or {})
@@ -377,10 +606,68 @@ class _MemoryGenerationStore:
                 return None
             now = _now()
             record["status"] = "running"
+            record["pipeline_state"] = "retrieving"
             record["started_at"] = record.get("started_at") or now
             record["updated_at"] = now
             self._append_event_locked(job_id, "running", {"status": "running"})
             return copy.deepcopy(record)
+
+    def claim_next_job(
+        self,
+        owner_id: str,
+        *,
+        lease_seconds: int,
+        include_shadow: bool,
+    ) -> Optional[Dict[str, Any]]:
+        now = datetime.now(timezone.utc)
+        with self.lock:
+            candidates = [
+                record
+                for record in self.jobs.values()
+                if record.get("status") in {"queued", "retrying"}
+                and (include_shadow or record.get("exposure_mode") != "shadow")
+            ]
+            candidates.sort(
+                key=lambda item: (
+                    -int(item.get("priority_value") or 0),
+                    str(item.get("created_at") or ""),
+                    str(item.get("job_id") or ""),
+                )
+            )
+            if not candidates:
+                return None
+            record = candidates[0]
+            now_text = now.isoformat()
+            record.update({
+                "status": "running",
+                "pipeline_state": "retrieving",
+                "lease_owner": owner_id,
+                "lease_expires_at": (now + timedelta(seconds=lease_seconds)).isoformat(),
+                "heartbeat_at": now_text,
+                "started_at": record.get("started_at") or now_text,
+                "updated_at": now_text,
+            })
+            self._append_event_locked(
+                str(record["job_id"]),
+                "running",
+                {"status": "running", "pipeline_state": "retrieving", "lease_owner": owner_id},
+            )
+            return copy.deepcopy(record)
+
+    def heartbeat_job(self, job_id: str, owner_id: str, *, lease_seconds: int) -> bool:
+        now = datetime.now(timezone.utc)
+        with self.lock:
+            record = self.jobs.get(job_id)
+            if (
+                record is None
+                or record.get("status") in TERMINAL_JOB_STATUSES
+                or str(record.get("lease_owner") or "") != owner_id
+            ):
+                return False
+            record["heartbeat_at"] = now.isoformat()
+            record["lease_expires_at"] = (now + timedelta(seconds=lease_seconds)).isoformat()
+            record["updated_at"] = now.isoformat()
+            return True
 
     def _append_event_locked(self, job_id: str, event_type: str, payload: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
         event = {
@@ -434,6 +721,20 @@ class _ResourceGenerationRepositoryMixin:
         locale: str = DEFAULT_LOCALE,
         max_retries: int = 0,
         job_id: Optional[str] = None,
+        pipeline_version: str = "resource-v3",
+        prompt_version: str = "resource-v3",
+        blueprint_version: str = "resource-v3",
+        quality_version: str = "resource-v3",
+        priority_value: Optional[int] = None,
+        deadline_at: Optional[str] = None,
+        token_budget_input: int = 45_000,
+        token_budget_output: int = 12_000,
+        generation_call_budget: int = 8,
+        cost_budget_microunits: int = 0,
+        exposure_mode: str = "normal",
+        trace_id: Optional[str] = None,
+        release_version: str = "",
+        cohort: str = "",
     ) -> Dict[str, Any]:
         now = _now()
         normalized_types = _card_types(card_types)
@@ -446,7 +747,13 @@ class _ResourceGenerationRepositoryMixin:
             "card_types": normalized_types,
             "force": bool(force),
             "priority": str(priority or "normal"),
+            "priority_value": int(
+                priority_value
+                if priority_value is not None
+                else PRIORITY_VALUES.get(str(priority or "normal").strip().lower(), 50)
+            ),
             "status": "queued",
+            "pipeline_state": "queued",
             "progress": {
                 "total_cards": len(normalized_types),
                 "completed_card_types": [],
@@ -459,6 +766,22 @@ class _ResourceGenerationRepositoryMixin:
             "content_version": str(content_version or "1"),
             "knowledge_index_version": str(knowledge_index_version or ""),
             "locale": str(locale or DEFAULT_LOCALE),
+            "pipeline_version": str(pipeline_version or "resource-v3"),
+            "prompt_version": str(prompt_version or "resource-v3"),
+            "blueprint_version": str(blueprint_version or "resource-v3"),
+            "quality_version": str(quality_version or "resource-v3"),
+            "deadline_at": deadline_at,
+            "lease_owner": None,
+            "lease_expires_at": None,
+            "heartbeat_at": None,
+            "token_budget_input": max(0, int(token_budget_input)),
+            "token_budget_output": max(0, int(token_budget_output)),
+            "generation_call_budget": max(0, int(generation_call_budget)),
+            "cost_budget_microunits": max(0, int(cost_budget_microunits)),
+            "exposure_mode": str(exposure_mode or "normal"),
+            "trace_id": str(trace_id or uuid.uuid4().hex),
+            "release_version": str(release_version or ""),
+            "cohort": str(cohort or ""),
             "created_at": now,
             "updated_at": now,
             "started_at": None,
@@ -492,6 +815,32 @@ class _ResourceGenerationRepositoryMixin:
             self.append_event(job_id, "running", {"status": "running"})
         return updated
 
+    def claim_next_job(
+        self,
+        owner_id: str,
+        *,
+        lease_seconds: int = DEFAULT_LEASE_SECONDS,
+        include_shadow: bool = True,
+    ) -> Optional[Dict[str, Any]]:
+        return self._store.claim_next_job(
+            owner_id,
+            lease_seconds=max(1, int(lease_seconds)),
+            include_shadow=include_shadow,
+        )
+
+    def heartbeat_job(
+        self,
+        job_id: str,
+        owner_id: str,
+        *,
+        lease_seconds: int = DEFAULT_LEASE_SECONDS,
+    ) -> bool:
+        return self._store.heartbeat_job(
+            job_id,
+            owner_id,
+            lease_seconds=max(1, int(lease_seconds)),
+        )
+
     def transition_job(
         self,
         job_id: str,
@@ -500,8 +849,15 @@ class _ResourceGenerationRepositoryMixin:
         progress: Optional[Mapping[str, Any]] = None,
         error: Any = _UNSET,
         event_payload: Optional[Mapping[str, Any]] = None,
+        owner_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        job = self.update_job(job_id, status=status, progress=progress, error=error)
+        job = self.update_job(
+            job_id,
+            status=status,
+            progress=progress,
+            error=error,
+            owner_id=owner_id,
+        )
         if job is not None:
             payload = {"status": status}
             if event_payload:
@@ -516,9 +872,17 @@ class _ResourceGenerationRepositoryMixin:
         card: Mapping[str, Any],
         *,
         progress: Optional[Mapping[str, Any]] = None,
+        owner_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         job = self.get_job(job_id)
-        if job is None:
+        if (
+            job is None
+            or job.get("status") in TERMINAL_JOB_STATUSES
+            or (
+                owner_id
+                and str(job.get("lease_owner") or "") != owner_id
+            )
+        ):
             return None
         current = dict(job.get("progress") or {})
         completed = list(current.get("completed_card_types") or [])
@@ -528,7 +892,12 @@ class _ResourceGenerationRepositoryMixin:
         current["completed_cards"] = len(completed)
         if progress:
             current.update(dict(progress))
-        updated = self.update_job(job_id, progress=current, merge_progress=False)
+        updated = self.update_job(
+            job_id,
+            progress=current,
+            merge_progress=False,
+            owner_id=owner_id,
+        )
         if updated is not None:
             self.append_event(
                 job_id,
@@ -544,6 +913,7 @@ class _ResourceGenerationRepositoryMixin:
         error: Any,
         *,
         progress: Optional[Mapping[str, Any]] = None,
+        owner_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         job = self.get_job(job_id)
         if job is None:
@@ -556,7 +926,12 @@ class _ResourceGenerationRepositoryMixin:
         current["failed_cards"] = len(failed)
         if progress:
             current.update(dict(progress))
-        updated = self.update_job(job_id, progress=current, merge_progress=False)
+        updated = self.update_job(
+            job_id,
+            progress=current,
+            merge_progress=False,
+            owner_id=owner_id,
+        )
         if updated is not None:
             self.append_event(
                 job_id,
@@ -571,23 +946,81 @@ class _ResourceGenerationRepositoryMixin:
         *,
         progress: Optional[Mapping[str, Any]] = None,
         event_payload: Optional[Mapping[str, Any]] = None,
+        owner_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         return self.transition_job(
             job_id,
             "completed",
             progress=progress,
             event_payload=event_payload,
+            owner_id=owner_id,
         )
 
-    def mark_failed(self, job_id: str, error: Any, *, progress: Optional[Mapping[str, Any]] = None) -> Optional[Dict[str, Any]]:
-        return self.transition_job(job_id, "failed", progress=progress, error=error, event_payload={"error": copy.deepcopy(error)})
+    def mark_partial(
+        self,
+        job_id: str,
+        *,
+        progress: Optional[Mapping[str, Any]] = None,
+        event_payload: Optional[Mapping[str, Any]] = None,
+        owner_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        job = self.transition_job(
+            job_id,
+            "partial",
+            progress=progress,
+            event_payload=event_payload,
+            owner_id=owner_id,
+        )
+        if job is not None:
+            # Existing SSE clients terminate only on completed/failed. Keep
+            # the durable state truthful while emitting an explicit terminal
+            # compatibility envelope whose payload remains status=partial.
+            self.append_event(
+                job_id,
+                "completed",
+                {
+                    "status": "partial",
+                    "partial": True,
+                    "compatibility_terminal": True,
+                },
+            )
+        return job
 
-    def retry_job(self, job_id: str, *, error: Any = _UNSET) -> Optional[Dict[str, Any]]:
+    def mark_failed(
+        self,
+        job_id: str,
+        error: Any,
+        *,
+        progress: Optional[Mapping[str, Any]] = None,
+        owner_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        return self.transition_job(
+            job_id,
+            "failed",
+            progress=progress,
+            error=error,
+            event_payload={"error": copy.deepcopy(error)},
+            owner_id=owner_id,
+        )
+
+    def retry_job(
+        self,
+        job_id: str,
+        *,
+        error: Any = _UNSET,
+        owner_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
         job = self.get_job(job_id)
         if job is None:
             return None
         retry_count = int(job.get("retry_count") or 0) + 1
-        updated = self.update_job(job_id, status="queued", error=error, retry_count=retry_count)
+        updated = self.update_job(
+            job_id,
+            status="queued",
+            error=error,
+            retry_count=retry_count,
+            owner_id=owner_id,
+        )
         if updated is not None:
             self.append_event(job_id, "queued", {"status": "queued", "retry_count": retry_count})
         return updated
@@ -637,13 +1070,28 @@ class ResourceGenerationRepo(_ResourceGenerationRepositoryMixin):
         return True
 
     def ensure_tables(self) -> bool:
-        """Create coordination tables lazily, matching the sync repo pattern."""
+        """Validate migrated production schema or create local development tables."""
         if self._using_memory:
             return False
         if self._tables_ready:
             return True
         try:
-            self._db.execute(RESOURCE_GENERATION_TABLES_SQL)
+            if is_production_environment():
+                # Production schema ownership belongs to Alembic. Application
+                # replicas only validate the expand migration and fail closed
+                # if rollout ordering is incorrect.
+                for sql in (
+                    """SELECT job_id, pipeline_version, lease_owner
+                       FROM resource_generation_jobs LIMIT 0""",
+                    """SELECT job_id, card_type, state_version
+                       FROM resource_generation_cards LIMIT 0""",
+                ):
+                    cursor = self._db.execute(sql)
+                    fetchall = getattr(cursor, "fetchall", None)
+                    if callable(fetchall):
+                        fetchall()
+            else:
+                self._db.execute(RESOURCE_GENERATION_TABLES_SQL)
             self._db.commit()
             self._tables_ready = True
             return True
@@ -876,6 +1324,22 @@ class ResourceGenerationRepo(_ResourceGenerationRepositoryMixin):
         locale: str = DEFAULT_LOCALE,
         max_retries: int = 0,
         job_id: Optional[str] = None,
+        pipeline_version: str = "resource-v3",
+        prompt_version: str = "resource-v3",
+        blueprint_version: str = "resource-v3",
+        quality_version: str = "resource-v3",
+        priority_value: Optional[int] = None,
+        deadline_at: Optional[str] = None,
+        token_budget_input: int = 45_000,
+        token_budget_output: int = 12_000,
+        generation_call_budget: int = 8,
+        cost_budget_microunits: int = 0,
+        exposure_mode: str = "normal",
+        trace_id: Optional[str] = None,
+        release_version: str = "",
+        cohort: str = "",
+        enforce_admission: bool = False,
+        concept_lane: bool = False,
     ) -> Tuple[Dict[str, Any], bool]:
         record = self._job_record(
             user_id,
@@ -891,9 +1355,221 @@ class ResourceGenerationRepo(_ResourceGenerationRepositoryMixin):
             locale=locale,
             max_retries=max_retries,
             job_id=job_id,
+            pipeline_version=pipeline_version,
+            prompt_version=prompt_version,
+            blueprint_version=blueprint_version,
+            quality_version=quality_version,
+            priority_value=priority_value,
+            deadline_at=deadline_at,
+            token_budget_input=token_budget_input,
+            token_budget_output=token_budget_output,
+            generation_call_budget=generation_call_budget,
+            cost_budget_microunits=cost_budget_microunits,
+            exposure_mode=exposure_mode,
+            trace_id=trace_id,
+            release_version=release_version,
+            cohort=cohort,
         )
+
         if not self.ensure_tables():
-            return self._store.create_or_get_active_job(record)
+            return self._store.create_or_get_active_job(
+                record,
+                enforce_admission=enforce_admission,
+                concept_lane=concept_lane,
+            )
+
+        try:
+            connection = getattr(self._db, "conn", None)
+        except Exception:
+            connection = None
+        if connection is not None:
+            cursor_factory = getattr(
+                getattr(psycopg2, "extras", None),
+                "RealDictCursor",
+                None,
+            )
+            cursor = (
+                connection.cursor(cursor_factory=cursor_factory)
+                if cursor_factory is not None
+                else connection.cursor()
+            )
+
+            def row_dict(row: Any) -> Optional[Dict[str, Any]]:
+                if row is None:
+                    return None
+                if isinstance(row, Mapping):
+                    return dict(row)
+                columns = [
+                    column[0]
+                    for column in (cursor.description or [])
+                ]
+                return dict(zip(columns, row))
+
+            try:
+                if enforce_admission:
+                    # Serialize the short admission transaction so queue caps
+                    # cannot be exceeded by concurrent API replicas. The
+                    # per-user key documents and preserves the learner-level
+                    # fencing boundary if the global policy is later sharded.
+                    cursor.execute(
+                        "SELECT pg_advisory_xact_lock(%s, %s)",
+                        (_RESOURCE_GENERATION_ADVISORY_NAMESPACE, 0),
+                    )
+                    cursor.execute(
+                        "SELECT pg_advisory_xact_lock(%s, %s)",
+                        (
+                            _RESOURCE_GENERATION_ADVISORY_NAMESPACE,
+                            _admission_lock_key(record["user_id"]),
+                        ),
+                    )
+                cursor.execute(
+                    """SELECT * FROM resource_generation_jobs
+                       WHERE user_id = %s AND course_id = %s AND node_id = %s
+                         AND idempotency_key = %s
+                         AND status NOT IN ('completed', 'partial', 'failed', 'cancelled')
+                       ORDER BY created_at DESC LIMIT 1""",
+                    (user_id, course_id, node_id, idempotency_key),
+                )
+                existing = _normalise_job(row_dict(cursor.fetchone()))
+                if existing is not None:
+                    connection.commit()
+                    return existing, False
+
+                if enforce_admission:
+                    cursor.execute(
+                        """SELECT COUNT(*)::integer AS depth
+                           FROM resource_generation_jobs
+                           WHERE status IN ('queued', 'retrying')""",
+                    )
+                    queue_row = row_dict(cursor.fetchone()) or {}
+                    queue_depth = int(queue_row.get("depth") or 0)
+                    low_priority = (
+                        record["exposure_mode"] == "shadow"
+                        or record["priority"]
+                        in {"shadow", "supporting", "supporting_bundle"}
+                    )
+                    if queue_depth >= QUEUE_HARD_LIMIT and not concept_lane:
+                        raise ResourceAdmissionError(
+                            "resource_queue_full",
+                            "Resource generation queue is temporarily full.",
+                            status_code=503,
+                            retry_after=30,
+                            queue_depth=queue_depth,
+                        )
+                    if queue_depth >= QUEUE_SOFT_LIMIT and low_priority:
+                        raise ResourceAdmissionError(
+                            "resource_low_priority_paused",
+                            "Low-priority resource generation is temporarily paused.",
+                            status_code=503,
+                            retry_after=15,
+                            queue_depth=queue_depth,
+                        )
+                    cursor.execute(
+                        """SELECT COUNT(*)::integer AS count
+                           FROM resource_generation_jobs
+                           WHERE user_id = %s
+                             AND status NOT IN (
+                                 'completed', 'partial', 'failed', 'cancelled'
+                             )""",
+                        (record["user_id"],),
+                    )
+                    active_row = row_dict(cursor.fetchone()) or {}
+                    if int(active_row.get("count") or 0) >= MAX_ACTIVE_JOBS_PER_USER:
+                        raise ResourceAdmissionError(
+                            "resource_user_active_limit",
+                            "At most two resource generation jobs may be active per learner.",
+                            status_code=429,
+                            retry_after=5,
+                        )
+
+                cursor.execute(
+                    """INSERT INTO resource_generation_jobs (
+                           job_id, user_id, course_id, node_id, idempotency_key,
+                           card_types, force, priority, status, progress, error_json,
+                           request_params, retry_count, max_retries, content_version,
+                           knowledge_index_version, locale, created_at, updated_at,
+                           pipeline_version, prompt_version, blueprint_version, quality_version,
+                           priority_value, pipeline_state, deadline_at, token_budget_input,
+                           token_budget_output, cost_budget_microunits, generation_call_budget,
+                           exposure_mode, trace_id, release_version, cohort
+                       ) VALUES (
+                           %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s::jsonb, %s::jsonb,
+                           %s::jsonb, %s, %s, %s, %s, %s, %s, %s,
+                           %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                       ) RETURNING *""",
+                    (
+                        record["job_id"], record["user_id"], record["course_id"],
+                        record["node_id"], record["idempotency_key"],
+                        _json_dump(record["card_types"]), record["force"],
+                        record["priority"], record["status"],
+                        _json_dump(record["progress"]), _json_dump(record["error"]),
+                        _json_dump(record["request_params"]), record["retry_count"],
+                        record["max_retries"], record["content_version"],
+                        record["knowledge_index_version"], record["locale"],
+                        record["created_at"], record["updated_at"],
+                        record["pipeline_version"], record["prompt_version"],
+                        record["blueprint_version"], record["quality_version"],
+                        record["priority_value"], record["pipeline_state"],
+                        record["deadline_at"], record["token_budget_input"],
+                        record["token_budget_output"],
+                        record["cost_budget_microunits"],
+                        record["generation_call_budget"], record["exposure_mode"],
+                        record["trace_id"], record["release_version"],
+                        record["cohort"],
+                    ),
+                )
+                inserted = _normalise_job(row_dict(cursor.fetchone()))
+                if inserted is None:
+                    raise RuntimeError(
+                        "resource generation job insert returned no row"
+                    )
+                cursor.execute(
+                    """INSERT INTO resource_generation_job_events
+                       (job_id, event_type, payload, created_at)
+                       VALUES (%s, 'queued', %s::jsonb, %s)
+                       RETURNING event_id""",
+                    (
+                        inserted["job_id"],
+                        _json_dump({
+                            "status": "queued",
+                            "requested_card_types": list(inserted["card_types"]),
+                        }),
+                        record["created_at"],
+                    ),
+                )
+                event_row = row_dict(cursor.fetchone()) or {}
+                event_id = int(event_row.get("event_id") or 0)
+                connection.commit()
+                if event_id:
+                    resource_event_notifier.publish(
+                        str(inserted["job_id"]),
+                        event_id,
+                    )
+                return inserted, True
+            except ResourceAdmissionError:
+                connection.rollback()
+                raise
+            except psycopg2.IntegrityError:
+                connection.rollback()
+                existing = self._active_job_db(
+                    user_id,
+                    course_id,
+                    node_id,
+                    idempotency_key,
+                )
+                if existing is not None:
+                    return existing, False
+                raise
+            except Exception as exc:
+                connection.rollback()
+                self._failover(exc)
+                return self._store.create_or_get_active_job(
+                    record,
+                    enforce_admission=enforce_admission,
+                    concept_lane=concept_lane,
+                )
+            finally:
+                cursor.close()
 
         try:
             existing = self._active_job_db(user_id, course_id, node_id, idempotency_key)
@@ -904,10 +1580,15 @@ class ResourceGenerationRepo(_ResourceGenerationRepositoryMixin):
                        job_id, user_id, course_id, node_id, idempotency_key,
                        card_types, force, priority, status, progress, error_json,
                        request_params, retry_count, max_retries, content_version,
-                       knowledge_index_version, locale, created_at, updated_at
+                       knowledge_index_version, locale, created_at, updated_at,
+                       pipeline_version, prompt_version, blueprint_version, quality_version,
+                       priority_value, pipeline_state, deadline_at, token_budget_input,
+                       token_budget_output, cost_budget_microunits, generation_call_budget,
+                       exposure_mode, trace_id, release_version, cohort
                    ) VALUES (
                        %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s::jsonb, %s::jsonb,
                        %s::jsonb, %s, %s, %s, %s, %s, %s, %s
+                       , %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                    ) RETURNING *""",
                 (
                     record["job_id"], record["user_id"], record["course_id"], record["node_id"],
@@ -917,6 +1598,13 @@ class ResourceGenerationRepo(_ResourceGenerationRepositoryMixin):
                     record["retry_count"], record["max_retries"], record["content_version"],
                     record["knowledge_index_version"], record["locale"], record["created_at"],
                     record["updated_at"],
+                    record["pipeline_version"], record["prompt_version"],
+                    record["blueprint_version"], record["quality_version"],
+                    record["priority_value"], record["pipeline_state"], record["deadline_at"],
+                    record["token_budget_input"], record["token_budget_output"],
+                    record["cost_budget_microunits"], record["generation_call_budget"],
+                    record["exposure_mode"], record["trace_id"], record["release_version"],
+                    record["cohort"],
                 ),
             )
             result = _normalise_job(inserted)
@@ -936,7 +1624,11 @@ class ResourceGenerationRepo(_ResourceGenerationRepositoryMixin):
             raise
         except Exception as exc:
             self._failover(exc)
-            return self._store.create_or_get_active_job(record)
+            return self._store.create_or_get_active_job(
+                record,
+                enforce_admission=enforce_admission,
+                concept_lane=concept_lane,
+            )
 
     def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:
         return self._database_or_memory(
@@ -1033,8 +1725,9 @@ class ResourceGenerationRepo(_ResourceGenerationRepositoryMixin):
                 """WITH stale_jobs AS (
                        SELECT job_id
                        FROM resource_generation_jobs
-                       WHERE status = 'running' AND updated_at < %s
-                       ORDER BY updated_at ASC
+                       WHERE status = 'running'
+                         AND COALESCE(lease_expires_at, updated_at) < %s
+                       ORDER BY COALESCE(lease_expires_at, updated_at) ASC
                        LIMIT %s
                        FOR UPDATE SKIP LOCKED
                    )
@@ -1043,6 +1736,10 @@ class ResourceGenerationRepo(_ResourceGenerationRepositoryMixin):
                                     WHEN job.retry_count < job.max_retries THEN 'queued'
                                     ELSE 'failed'
                                 END,
+                       pipeline_state = CASE
+                                            WHEN job.retry_count < job.max_retries THEN 'queued'
+                                            ELSE 'failed'
+                                        END,
                        retry_count = CASE
                                          WHEN job.retry_count < job.max_retries THEN job.retry_count + 1
                                          ELSE job.retry_count
@@ -1055,7 +1752,10 @@ class ResourceGenerationRepo(_ResourceGenerationRepositoryMixin):
                        failed_at = CASE
                                        WHEN job.retry_count < job.max_retries THEN job.failed_at
                                        ELSE %s
-                                   END
+                                   END,
+                       lease_owner = NULL,
+                       lease_expires_at = NULL,
+                       heartbeat_at = NULL
                    FROM stale_jobs
                    WHERE job.job_id = stale_jobs.job_id
                    RETURNING job.*""",
@@ -1083,7 +1783,11 @@ class ResourceGenerationRepo(_ResourceGenerationRepositoryMixin):
                         record
                         for record in self._store.jobs.values()
                         if record.get("status") == "running"
-                        and (_as_utc_timestamp(record.get("updated_at")) or recovered_at) < cutoff
+                        and (
+                            _as_utc_timestamp(record.get("lease_expires_at"))
+                            or _as_utc_timestamp(record.get("updated_at"))
+                            or recovered_at
+                        ) < cutoff
                     ),
                     key=lambda record: str(record.get("updated_at") or ""),
                 )[:safe_limit]
@@ -1092,12 +1796,18 @@ class ResourceGenerationRepo(_ResourceGenerationRepositoryMixin):
                     max_retries = int(record.get("max_retries") or 0)
                     can_retry = retry_count < max_retries
                     record["status"] = "queued" if can_retry else "failed"
+                    record["pipeline_state"] = (
+                        "queued" if can_retry else "failed"
+                    )
                     if can_retry:
                         record["retry_count"] = retry_count + 1
                         record["error"] = None
                     else:
                         record["error"] = copy.deepcopy(recovery_error)
                         record["failed_at"] = updated_at
+                    record["lease_owner"] = None
+                    record["lease_expires_at"] = None
+                    record["heartbeat_at"] = None
                     record["updated_at"] = updated_at
                     self._store._append_event_locked(
                         str(record["job_id"]),
@@ -1109,12 +1819,106 @@ class ResourceGenerationRepo(_ResourceGenerationRepositoryMixin):
 
         return self._database_or_memory(recover_database, recover_memory)
 
+    def expire_deadline_jobs(self, *, limit: int = 100) -> List[Dict[str, Any]]:
+        """Fail queued work whose end-to-end deadline elapsed before claim."""
+        safe_limit = max(1, min(int(limit), 500))
+        now = _now()
+        error = {
+            "code": "deadline_exceeded",
+            "message": "The resource generation deadline elapsed in queue.",
+        }
+
+        def expire_database() -> List[Dict[str, Any]]:
+            rows = self._fetchall(
+                """WITH expired_jobs AS (
+                       SELECT job_id
+                       FROM resource_generation_jobs
+                       WHERE status IN ('queued', 'retrying')
+                         AND deadline_at IS NOT NULL
+                         AND deadline_at <= %s
+                       ORDER BY deadline_at ASC
+                       LIMIT %s
+                       FOR UPDATE SKIP LOCKED
+                   )
+                   UPDATE resource_generation_jobs AS job
+                   SET status = 'failed',
+                       pipeline_state = 'failed',
+                       error_json = %s::jsonb,
+                       updated_at = %s,
+                       failed_at = %s,
+                       lease_owner = NULL,
+                       lease_expires_at = NULL,
+                       heartbeat_at = NULL
+                   FROM expired_jobs
+                   WHERE job.job_id = expired_jobs.job_id
+                   RETURNING job.*""",
+                (now, safe_limit, _json_dump(error), now, now),
+            )
+            expired = [
+                normalized
+                for row in rows
+                if (normalized := _normalise_job(row)) is not None
+            ]
+            for job in expired:
+                self.append_event(
+                    str(job["job_id"]),
+                    "failed",
+                    {
+                        "status": "failed",
+                        "reason": "deadline_exceeded",
+                        "error": error,
+                    },
+                )
+            return expired
+
+        def expire_memory() -> List[Dict[str, Any]]:
+            deadline = datetime.now(timezone.utc)
+            expired: List[Dict[str, Any]] = []
+            with self._store.lock:
+                candidates = sorted(
+                    (
+                        record
+                        for record in self._store.jobs.values()
+                        if record.get("status") in {"queued", "retrying"}
+                        and (
+                            _as_utc_timestamp(record.get("deadline_at"))
+                            or datetime.max.replace(tzinfo=timezone.utc)
+                        ) <= deadline
+                    ),
+                    key=lambda record: str(record.get("deadline_at") or ""),
+                )[:safe_limit]
+                for record in candidates:
+                    record.update({
+                        "status": "failed",
+                        "pipeline_state": "failed",
+                        "error": copy.deepcopy(error),
+                        "updated_at": now,
+                        "failed_at": now,
+                        "lease_owner": None,
+                        "lease_expires_at": None,
+                        "heartbeat_at": None,
+                    })
+                    self._store._append_event_locked(
+                        str(record["job_id"]),
+                        "failed",
+                        {
+                            "status": "failed",
+                            "reason": "deadline_exceeded",
+                            "error": error,
+                        },
+                    )
+                    expired.append(copy.deepcopy(record))
+            return expired
+
+        return self._database_or_memory(expire_database, expire_memory)
+
     def claim_job(self, job_id: str) -> Optional[Dict[str, Any]]:
         def claim_database() -> Optional[Dict[str, Any]]:
             now = _now()
             row = self._fetchone(
                 """UPDATE resource_generation_jobs
                    SET status = 'running',
+                       pipeline_state = 'retrieving',
                        started_at = COALESCE(started_at, %s),
                        updated_at = %s
                    WHERE job_id = %s AND status IN ('queued', 'retrying')
@@ -1128,6 +1932,661 @@ class ResourceGenerationRepo(_ResourceGenerationRepositoryMixin):
 
         return self._database_or_memory(claim_database, lambda: self._store.claim_job(job_id))
 
+    def claim_next_job(
+        self,
+        owner_id: str,
+        *,
+        lease_seconds: int = DEFAULT_LEASE_SECONDS,
+        include_shadow: bool = True,
+    ) -> Optional[Dict[str, Any]]:
+        safe_lease = max(1, int(lease_seconds))
+
+        def claim_database() -> Optional[Dict[str, Any]]:
+            now = datetime.now(timezone.utc)
+            now_text = now.isoformat()
+            expires_at = (now + timedelta(seconds=safe_lease)).isoformat()
+            shadow_clause = "" if include_shadow else "AND exposure_mode <> 'shadow'"
+            row = self._fetchone(
+                f"""WITH candidate AS (
+                        SELECT job_id
+                        FROM resource_generation_jobs
+                        WHERE status IN ('queued', 'retrying')
+                          {shadow_clause}
+                          AND (deadline_at IS NULL OR deadline_at > %s)
+                        ORDER BY priority_value DESC, created_at ASC
+                        LIMIT 1
+                        FOR UPDATE SKIP LOCKED
+                    )
+                    UPDATE resource_generation_jobs AS job
+                    SET status = 'running',
+                        pipeline_state = 'retrieving',
+                        lease_owner = %s,
+                        lease_expires_at = %s,
+                        heartbeat_at = %s,
+                        started_at = COALESCE(started_at, %s),
+                        updated_at = %s
+                    FROM candidate
+                    WHERE job.job_id = candidate.job_id
+                    RETURNING job.*""",
+                (now_text, owner_id, expires_at, now_text, now_text, now_text),
+            )
+            result = _normalise_job(row)
+            if result is not None:
+                self.append_event(
+                    str(result["job_id"]),
+                    "running",
+                    {
+                        "status": "running",
+                        "pipeline_state": "retrieving",
+                        "lease_owner": owner_id,
+                    },
+                )
+            return result
+
+        return self._database_or_memory(
+            claim_database,
+            lambda: self._store.claim_next_job(
+                owner_id,
+                lease_seconds=safe_lease,
+                include_shadow=include_shadow,
+            ),
+        )
+
+    def heartbeat_job(
+        self,
+        job_id: str,
+        owner_id: str,
+        *,
+        lease_seconds: int = DEFAULT_LEASE_SECONDS,
+    ) -> bool:
+        safe_lease = max(1, int(lease_seconds))
+
+        def heartbeat_database() -> bool:
+            now = datetime.now(timezone.utc)
+            row = self._fetchone(
+                """UPDATE resource_generation_jobs
+                   SET heartbeat_at = %s,
+                       lease_expires_at = %s,
+                       updated_at = %s
+                   WHERE job_id = %s
+                     AND lease_owner = %s
+                     AND status NOT IN ('completed', 'partial', 'failed', 'cancelled')
+                   RETURNING job_id""",
+                (
+                    now.isoformat(),
+                    (now + timedelta(seconds=safe_lease)).isoformat(),
+                    now.isoformat(),
+                    job_id,
+                    owner_id,
+                ),
+            )
+            self._commit()
+            return row is not None
+
+        return self._database_or_memory(
+            heartbeat_database,
+            lambda: self._store.heartbeat_job(
+                job_id,
+                owner_id,
+                lease_seconds=safe_lease,
+            ),
+        )
+
+    def transition_pipeline_state(
+        self,
+        job_id: str,
+        pipeline_state: str,
+        *,
+        owner_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        if pipeline_state not in PIPELINE_STATES:
+            raise ValueError(f"Unsupported resource pipeline state: {pipeline_state}")
+
+        def transition_database() -> Optional[Dict[str, Any]]:
+            params: List[Any] = [pipeline_state, _now(), job_id]
+            owner_clause = ""
+            if owner_id:
+                owner_clause = " AND lease_owner = %s"
+                params.append(owner_id)
+            row = self._fetchone(
+                f"""UPDATE resource_generation_jobs
+                    SET pipeline_state = %s, updated_at = %s
+                    WHERE job_id = %s{owner_clause}
+                    RETURNING *""",
+                tuple(params),
+            )
+            result = _normalise_job(row)
+            if result is not None:
+                self.append_event(
+                    job_id,
+                    "phase_changed",
+                    {"pipeline_state": pipeline_state},
+                )
+            return result
+
+        def transition_memory() -> Optional[Dict[str, Any]]:
+            with self._store.lock:
+                record = self._store.jobs.get(job_id)
+                if (
+                    record is None
+                    or record.get("status") in TERMINAL_JOB_STATUSES
+                    or (owner_id and record.get("lease_owner") != owner_id)
+                ):
+                    return None
+                record["pipeline_state"] = pipeline_state
+                record["updated_at"] = _now()
+                self._store._append_event_locked(
+                    job_id,
+                    "phase_changed",
+                    {"pipeline_state": pipeline_state},
+                )
+                return copy.deepcopy(record)
+
+        return self._database_or_memory(transition_database, transition_memory)
+
+    def queue_snapshot(self) -> Dict[str, Any]:
+        now = datetime.now(timezone.utc)
+
+        def snapshot_database() -> Dict[str, Any]:
+            row = self._fetchone(
+                """SELECT COUNT(*)::integer AS depth,
+                          MIN(created_at) AS oldest_created_at,
+                          COUNT(*) FILTER (WHERE exposure_mode = 'shadow')::integer AS shadow_depth
+                   FROM resource_generation_jobs
+                   WHERE status IN ('queued', 'retrying')""",
+                (),
+            ) or {}
+            oldest = _as_utc_timestamp(row.get("oldest_created_at"))
+            return {
+                "depth": int(row.get("depth") or 0),
+                "shadow_depth": int(row.get("shadow_depth") or 0),
+                "oldest_age_seconds": max(0.0, (now - oldest).total_seconds()) if oldest else 0.0,
+            }
+
+        def snapshot_memory() -> Dict[str, Any]:
+            with self._store.lock:
+                pending = [
+                    record
+                    for record in self._store.jobs.values()
+                    if record.get("status") in {"queued", "retrying"}
+                ]
+            oldest = min(
+                (_as_utc_timestamp(record.get("created_at")) for record in pending),
+                default=None,
+                key=lambda value: value or now,
+            )
+            return {
+                "depth": len(pending),
+                "shadow_depth": sum(record.get("exposure_mode") == "shadow" for record in pending),
+                "oldest_age_seconds": max(0.0, (now - oldest).total_seconds()) if oldest else 0.0,
+            }
+
+        return self._database_or_memory(snapshot_database, snapshot_memory)
+
+    def active_job_count_for_user(self, user_id: str) -> int:
+        return int(self._database_or_memory(
+            lambda: (
+                self._fetchone(
+                    """SELECT COUNT(*)::integer AS count
+                       FROM resource_generation_jobs
+                       WHERE user_id = %s
+                         AND status NOT IN ('completed', 'partial', 'failed', 'cancelled')""",
+                    (user_id,),
+                ) or {}
+            ).get("count", 0),
+            lambda: sum(
+                1
+                for record in self._store.jobs.values()
+                if record.get("user_id") == user_id
+                and record.get("status") not in TERMINAL_JOB_STATUSES
+            ),
+        ))
+
+    def get_card_record(self, job_id: str, card_type: str) -> Optional[Dict[str, Any]]:
+        def get_database() -> Optional[Dict[str, Any]]:
+            row = self._fetchone(
+                """SELECT * FROM resource_generation_cards
+                   WHERE job_id = %s AND card_type = %s""",
+                (job_id, card_type),
+            )
+            if row is None:
+                return None
+            result = dict(row)
+            result["payload"] = _json_value(result.get("payload"), None)
+            result["quality_result"] = _json_value(result.get("quality_result"), {})
+            result["blueprint_snapshot"] = _json_value(result.get("blueprint_snapshot"), {})
+            return result
+
+        return self._database_or_memory(
+            get_database,
+            lambda: copy.deepcopy(self._store.cards.get((job_id, card_type))),
+        )
+
+    def mark_card_ready(
+        self,
+        job_id: str,
+        card_type: str,
+        card: Mapping[str, Any],
+        *,
+        progress: Optional[Mapping[str, Any]] = None,
+        quality_result: Optional[Mapping[str, Any]] = None,
+        blueprint_snapshot: Optional[Mapping[str, Any]] = None,
+        publication_version: str = "",
+        degraded_reason: Optional[str] = None,
+        owner_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        payload = copy.deepcopy(dict(card))
+        payload_hash = hashlib.sha256(
+            _json_dump(payload).encode("utf-8")
+        ).hexdigest()
+        now = _now()
+
+        def publish_memory() -> Optional[Dict[str, Any]]:
+            with self._store.lock:
+                job = self._store.jobs.get(job_id)
+                if (
+                    job is None
+                    or job.get("status") in TERMINAL_JOB_STATUSES
+                    or (
+                        owner_id
+                        and str(job.get("lease_owner") or "") != owner_id
+                    )
+                ):
+                    return None
+                key = (job_id, card_type)
+                existing = self._store.cards.get(key)
+                if (
+                    existing is not None
+                    and existing.get("status") == "published"
+                ):
+                    return copy.deepcopy(job)
+                version = int((existing or {}).get("state_version") or 0) + 1
+                self._store.cards[key] = {
+                    "job_id": job_id,
+                    "card_type": card_type,
+                    "status": "published",
+                    "state_version": version,
+                    "payload": payload,
+                    "quality_result": copy.deepcopy(dict(quality_result or {})),
+                    "blueprint_snapshot": copy.deepcopy(dict(blueprint_snapshot or {})),
+                    "publication_version": publication_version,
+                    "content_hash": payload_hash,
+                    "degraded_reason": degraded_reason,
+                    "created_at": (existing or {}).get("created_at") or now,
+                    "updated_at": now,
+                    "published_at": now,
+                }
+                current = dict(job.get("progress") or {})
+                completed = list(current.get("completed_card_types") or [])
+                if card_type not in completed:
+                    completed.append(card_type)
+                current.update(dict(progress or {}))
+                current.update({
+                    "completed_card_types": completed,
+                    "completed_cards": len(completed),
+                })
+                job["progress"] = current
+                job["updated_at"] = now
+                self._store._append_event_locked(
+                    job_id,
+                    "card_ready",
+                    {"card_type": card_type, "card": payload, "progress": current},
+                )
+                return copy.deepcopy(job)
+
+        def publish_database() -> Optional[Dict[str, Any]]:
+            connection = getattr(self._db, "conn", None)
+            if connection is None:
+                return super(ResourceGenerationRepo, self).mark_card_ready(
+                    job_id,
+                    card_type,
+                    payload,
+                    progress=progress,
+                    owner_id=owner_id,
+                )
+            cursor_factory = getattr(getattr(psycopg2, "extras", None), "RealDictCursor", None)
+            cursor = (
+                connection.cursor(cursor_factory=cursor_factory)
+                if cursor_factory is not None
+                else connection.cursor()
+            )
+            try:
+                cursor.execute(
+                    """SELECT progress, lease_owner, status
+                       FROM resource_generation_jobs
+                       WHERE job_id = %s FOR UPDATE""",
+                    (job_id,),
+                )
+                job_row = cursor.fetchone()
+                if job_row is None:
+                    connection.rollback()
+                    return None
+                if isinstance(job_row, Mapping):
+                    current_owner = str(job_row.get("lease_owner") or "")
+                    current_status = str(job_row.get("status") or "")
+                    progress_value = job_row.get("progress")
+                else:
+                    progress_value = job_row[0]
+                    current_owner = str(job_row[1] or "")
+                    current_status = str(job_row[2] or "")
+                if (
+                    current_status in TERMINAL_JOB_STATUSES
+                    or (owner_id and current_owner != owner_id)
+                ):
+                    connection.rollback()
+                    return None
+                current = _json_value(
+                    progress_value,
+                    {},
+                )
+                completed = list(current.get("completed_card_types") or [])
+                if card_type not in completed:
+                    completed.append(card_type)
+                current.update(dict(progress or {}))
+                current.update({
+                    "completed_card_types": completed,
+                    "completed_cards": len(completed),
+                })
+                cursor.execute(
+                    """INSERT INTO resource_generation_cards (
+                           job_id, card_type, status, state_version, payload,
+                           quality_result, blueprint_snapshot, publication_version,
+                           content_hash, degraded_reason, created_at, updated_at, published_at
+                       ) VALUES (
+                           %s, %s, 'published', 1, %s::jsonb, %s::jsonb, %s::jsonb,
+                           %s, %s, %s, %s, %s, %s
+                       )
+                       ON CONFLICT (job_id, card_type) DO UPDATE
+                       SET status = 'published',
+                           state_version = resource_generation_cards.state_version + 1,
+                           payload = EXCLUDED.payload,
+                           quality_result = EXCLUDED.quality_result,
+                           blueprint_snapshot = EXCLUDED.blueprint_snapshot,
+                           publication_version = EXCLUDED.publication_version,
+                           content_hash = EXCLUDED.content_hash,
+                           degraded_reason = EXCLUDED.degraded_reason,
+                           updated_at = EXCLUDED.updated_at,
+                           published_at = EXCLUDED.published_at
+                       WHERE resource_generation_cards.status <> 'published'
+                       RETURNING state_version""",
+                    (
+                        job_id,
+                        card_type,
+                        _json_dump(payload),
+                        _json_dump(dict(quality_result or {})),
+                        _json_dump(dict(blueprint_snapshot or {})),
+                        publication_version,
+                        payload_hash,
+                        degraded_reason,
+                        now,
+                        now,
+                        now,
+                    ),
+                )
+                changed = cursor.fetchone() is not None
+                update_params: List[Any] = [
+                    _json_dump(current),
+                    now,
+                    job_id,
+                ]
+                owner_clause = ""
+                if owner_id:
+                    owner_clause = " AND lease_owner = %s"
+                    update_params.append(owner_id)
+                cursor.execute(
+                    f"""UPDATE resource_generation_jobs
+                       SET progress = %s::jsonb, updated_at = %s
+                       WHERE job_id = %s{owner_clause}
+                         AND status NOT IN ('completed', 'partial', 'failed', 'cancelled')
+                       RETURNING *""",
+                    tuple(update_params),
+                )
+                updated_row = cursor.fetchone()
+                if updated_row is None:
+                    connection.rollback()
+                    return None
+                event_id: Optional[int] = None
+                if changed:
+                    cursor.execute(
+                        """INSERT INTO resource_generation_job_events
+                           (job_id, event_type, payload, created_at)
+                           VALUES (%s, 'card_ready', %s::jsonb, %s)
+                           RETURNING event_id""",
+                        (
+                            job_id,
+                            _json_dump({
+                                "card_type": card_type,
+                                "card": payload,
+                                "progress": current,
+                            }),
+                            now,
+                        ),
+                    )
+                    event_row = cursor.fetchone()
+                    if isinstance(event_row, Mapping):
+                        event_id = int(event_row.get("event_id") or 0) or None
+                    elif event_row:
+                        event_id = int(event_row[0])
+                connection.commit()
+                if event_id is not None:
+                    resource_event_notifier.publish(job_id, event_id)
+                return _normalise_job(updated_row)
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                cursor.close()
+
+        return self._database_or_memory(publish_database, publish_memory)
+
+    def record_attempt(
+        self,
+        job_id: str,
+        card_type: str,
+        operation: str,
+        *,
+        provider: str = "",
+        model: str = "",
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        elapsed_ms: float = 0.0,
+        issue_code: str = "",
+        artifact_version: str = "",
+        content_hash: str = "",
+    ) -> Dict[str, Any]:
+        record = {
+            "job_id": job_id,
+            "card_type": card_type,
+            "operation": operation,
+            "provider": provider,
+            "model": model,
+            "input_tokens": max(0, int(input_tokens)),
+            "output_tokens": max(0, int(output_tokens)),
+            "elapsed_ms": max(0.0, float(elapsed_ms)),
+            "issue_code": issue_code,
+            "artifact_version": artifact_version,
+            "content_hash": content_hash,
+            "created_at": _now(),
+        }
+
+        def insert_database() -> Dict[str, Any]:
+            row = self._fetchone(
+                """INSERT INTO resource_generation_attempts (
+                       job_id, card_type, operation, provider, model, input_tokens,
+                       output_tokens, elapsed_ms, issue_code, artifact_version,
+                       content_hash, created_at
+                   ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                   RETURNING *""",
+                tuple(record.values()),
+            )
+            self._commit()
+            return dict(row or record)
+
+        def insert_memory() -> Dict[str, Any]:
+            with self._store.lock:
+                stored = {**record, "attempt_id": len(self._store.attempts) + 1}
+                self._store.attempts.append(stored)
+                return copy.deepcopy(stored)
+
+        return self._database_or_memory(insert_database, insert_memory)
+
+    def record_quality_evaluation(
+        self,
+        job_id: str,
+        card_type: str,
+        *,
+        quality_version: str,
+        gate_status: str,
+        score: float,
+        dimensions: Mapping[str, Any],
+        issue_codes: Iterable[str] = (),
+        artifact_digest: str = "",
+        content_hash: str = "",
+    ) -> Dict[str, Any]:
+        record = {
+            "job_id": job_id,
+            "card_type": card_type,
+            "quality_version": quality_version,
+            "gate_status": gate_status,
+            "score": float(score),
+            "dimensions": dict(dimensions),
+            "issue_codes": list(issue_codes),
+            "artifact_digest": artifact_digest,
+            "content_hash": content_hash,
+            "created_at": _now(),
+        }
+
+        def insert_database() -> Dict[str, Any]:
+            row = self._fetchone(
+                """INSERT INTO resource_quality_evaluations (
+                       job_id, card_type, quality_version, gate_status, score,
+                       dimensions, issue_codes, artifact_digest, content_hash, created_at
+                   ) VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s)
+                   RETURNING *""",
+                (
+                    job_id,
+                    card_type,
+                    quality_version,
+                    gate_status,
+                    float(score),
+                    _json_dump(dict(dimensions)),
+                    _json_dump(list(issue_codes)),
+                    artifact_digest,
+                    content_hash,
+                    record["created_at"],
+                ),
+            )
+            self._commit()
+            return dict(row or record)
+
+        def insert_memory() -> Dict[str, Any]:
+            with self._store.lock:
+                stored = {
+                    **record,
+                    "evaluation_id": len(self._store.quality_evaluations) + 1,
+                }
+                self._store.quality_evaluations.append(stored)
+                return copy.deepcopy(stored)
+
+        return self._database_or_memory(insert_database, insert_memory)
+
+    def purge_expired_metadata(
+        self,
+        *,
+        evidence_days: int = 30,
+        attempt_days: int = 90,
+        quality_days: int = 180,
+    ) -> Dict[str, int]:
+        now = datetime.now(timezone.utc)
+        evidence_cutoff = (
+            now - timedelta(days=max(1, int(evidence_days)))
+        ).isoformat()
+        attempt_cutoff = (
+            now - timedelta(days=max(1, int(attempt_days)))
+        ).isoformat()
+        quality_cutoff = (
+            now - timedelta(days=max(1, int(quality_days)))
+        ).isoformat()
+
+        def purge_database() -> Dict[str, int]:
+            attempts = len(self._fetchall(
+                """DELETE FROM resource_generation_attempts
+                   WHERE created_at < %s RETURNING attempt_id""",
+                (attempt_cutoff,),
+            ))
+            evaluations = len(self._fetchall(
+                """DELETE FROM resource_quality_evaluations
+                   WHERE created_at < %s RETURNING evaluation_id""",
+                (quality_cutoff,),
+            ))
+            cards = len(self._fetchall(
+                """UPDATE resource_generation_cards
+                   SET payload = payload - 'source_refs',
+                       updated_at = %s
+                   WHERE created_at < %s
+                     AND payload ? 'source_refs'
+                   RETURNING card_id""",
+                (now.isoformat(), evidence_cutoff),
+            ))
+            events = len(self._fetchall(
+                """UPDATE resource_generation_job_events
+                   SET payload = payload #- '{card,source_refs}'
+                   WHERE created_at < %s
+                     AND event_type = 'card_ready'
+                     AND payload #> '{card,source_refs}' IS NOT NULL
+                   RETURNING event_id""",
+                (evidence_cutoff,),
+            ))
+            self._commit()
+            return {
+                "attempts": attempts,
+                "quality_evaluations": evaluations,
+                "card_evidence": cards,
+                "event_evidence": events,
+            }
+
+        def purge_memory() -> Dict[str, int]:
+            with self._store.lock:
+                original_attempts = len(self._store.attempts)
+                self._store.attempts = [
+                    value
+                    for value in self._store.attempts
+                    if str(value.get("created_at") or "") >= attempt_cutoff
+                ]
+                original_quality = len(self._store.quality_evaluations)
+                self._store.quality_evaluations = [
+                    value
+                    for value in self._store.quality_evaluations
+                    if str(value.get("created_at") or "") >= quality_cutoff
+                ]
+                card_evidence = 0
+                for value in self._store.cards.values():
+                    if str(value.get("created_at") or "") >= evidence_cutoff:
+                        continue
+                    payload = value.get("payload")
+                    if isinstance(payload, dict) and "source_refs" in payload:
+                        payload.pop("source_refs", None)
+                        card_evidence += 1
+                event_evidence = 0
+                for events in self._store.events.values():
+                    for event in events:
+                        if str(event.get("created_at") or "") >= evidence_cutoff:
+                            continue
+                        card = event.get("payload", {}).get("card")
+                        if isinstance(card, dict) and "source_refs" in card:
+                            card.pop("source_refs", None)
+                            event_evidence += 1
+                return {
+                    "attempts": original_attempts - len(self._store.attempts),
+                    "quality_evaluations": (
+                        original_quality - len(self._store.quality_evaluations)
+                    ),
+                    "card_evidence": card_evidence,
+                    "event_evidence": event_evidence,
+                }
+
+        return self._database_or_memory(purge_database, purge_memory)
+
     def update_job(
         self,
         job_id: str,
@@ -1138,6 +2597,7 @@ class ResourceGenerationRepo(_ResourceGenerationRepositoryMixin):
         retry_count: Optional[int] = None,
         max_retries: Optional[int] = None,
         merge_progress: bool = True,
+        owner_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         def update_database() -> Optional[Dict[str, Any]]:
             assignments: List[str] = ["updated_at = %s"]
@@ -1145,15 +2605,23 @@ class ResourceGenerationRepo(_ResourceGenerationRepositoryMixin):
             if status is not None:
                 assignments.append("status = %s")
                 params.append(str(status))
+                if status in PIPELINE_STATES:
+                    assignments.append("pipeline_state = %s")
+                    params.append(str(status))
                 if status == "running":
                     assignments.append("started_at = COALESCE(started_at, %s)")
                     params.append(params[0])
-                elif status == "completed":
+                elif status in {"completed", "partial", "cancelled"}:
                     assignments.append("completed_at = %s")
                     params.append(params[0])
                 elif status == "failed":
                     assignments.append("failed_at = %s")
                     params.append(params[0])
+                if status in TERMINAL_JOB_STATUSES:
+                    assignments.extend([
+                        "lease_owner = NULL",
+                        "lease_expires_at = NULL",
+                    ])
             if progress is not None:
                 if merge_progress:
                     assignments.append("progress = COALESCE(progress, '{}'::jsonb) || %s::jsonb")
@@ -1170,8 +2638,15 @@ class ResourceGenerationRepo(_ResourceGenerationRepositoryMixin):
                 assignments.append("max_retries = %s")
                 params.append(int(max_retries))
             params.append(job_id)
+            owner_clause = ""
+            if owner_id:
+                owner_clause = " AND lease_owner = %s"
+                params.append(owner_id)
             row = self._fetchone(
-                f"UPDATE resource_generation_jobs SET {', '.join(assignments)} WHERE job_id = %s RETURNING *",
+                f"""UPDATE resource_generation_jobs
+                    SET {', '.join(assignments)}
+                    WHERE job_id = %s{owner_clause}
+                    RETURNING *""",
                 tuple(params),
             )
             self._commit()
@@ -1187,6 +2662,7 @@ class ResourceGenerationRepo(_ResourceGenerationRepositoryMixin):
                 retry_count=retry_count,
                 max_retries=max_retries,
                 merge_progress=merge_progress,
+                owner_id=owner_id,
             ),
         )
 
@@ -1203,6 +2679,11 @@ class ResourceGenerationRepo(_ResourceGenerationRepositoryMixin):
                 (job_id, str(event_type), _json_dump(dict(payload or {})), _now()),
             ) or {})
             self._commit()
+            if event.get("event_id"):
+                resource_event_notifier.publish(
+                    job_id,
+                    int(event["event_id"]),
+                )
             return event
 
         return self._database_or_memory(
@@ -1737,6 +3218,7 @@ __all__ = [
     "DEFAULT_LOCALE",
     "MemoryResourceGenerationRepo",
     "RESOURCE_GENERATION_TABLES_SQL",
+    "ResourceAdmissionError",
     "ResourceGenerationSlotLease",
     "ResourceGenerationRepo",
     "TERMINAL_JOB_STATUSES",

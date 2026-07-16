@@ -11,6 +11,7 @@ import os
 import re
 import threading
 import time
+import uuid
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -18,9 +19,20 @@ from typing import Any, Dict, Iterable, Iterator, Optional
 
 from src.adapters.domain_to_response import resource_response
 from src.adapters.state_to_domain import resource_contract_from_card
-from src.database.resource_generation_repo import ResourceGenerationRepo
-from src.observability import bind_context, incr_metric, log_event, observe_metric
+from src.database.resource_generation_repo import (
+    ResourceAdmissionError,
+    ResourceGenerationRepo,
+)
+from src.observability import (
+    bind_context,
+    get_request_id,
+    incr_metric,
+    log_event,
+    observe_metric,
+    set_metric,
+)
 from src.orchestration_runtime import get_runtime
+from src.resource_events import notifier as resource_event_notifier
 from src.resource_generation import (
     CARD_TYPES,
     GeneratedResourcePayload,
@@ -30,6 +42,20 @@ from src.resource_generation import (
     validate_resource_payload,
 )
 from src.resource_generation.prompts import render_markdown
+from src.resource_generation.policy import (
+    BLUEPRINT_VERSION,
+    BUNDLE_DEADLINE_SECONDS,
+    CONCEPT_DEADLINE_SECONDS,
+    MAX_GENERATION_CALLS,
+    MAX_INPUT_TOKENS,
+    MAX_OUTPUT_TOKENS,
+    PIPELINE_VERSION,
+    PROMPT_VERSION,
+    QUALITY_VERSION,
+    resource_v4_rollout,
+)
+from src.resource_generation.quality import evaluate_resource_quality
+from src.resource_generation.services import content_hash
 from src.state.agent_state import ResourceCard
 from src.validation.pipeline import get_validation_pipeline
 
@@ -457,7 +483,15 @@ def _generation_metadata(result: Any) -> tuple[str, Dict[str, Any]]:
     metadata = {
         "source": str(getattr(result, "source", "unknown") or "unknown"),
     }
-    for field_name in ("provider", "model", "attempt_count", "fallback_reason", "elapsed_ms"):
+    for field_name in (
+        "provider",
+        "model",
+        "attempt_count",
+        "fallback_reason",
+        "elapsed_ms",
+        "input_tokens",
+        "output_tokens",
+    ):
         value = getattr(result, field_name, None)
         if value not in (None, ""):
             metadata[field_name] = value
@@ -942,6 +976,51 @@ def _resource_job_recovery_stale_seconds() -> float:
     return max(1.0, min(3600.0, configured))
 
 
+def _resource_cost_setting(name: str) -> int:
+    try:
+        configured = int(os.environ.get(name, "0"))
+    except (TypeError, ValueError):
+        configured = 0
+    return max(0, configured)
+
+
+def _resource_cost_microunits(
+    input_tokens: int,
+    output_tokens: int,
+) -> int:
+    input_rate = _resource_cost_setting(
+        "EDUAGENT_RESOURCE_COST_PER_1K_INPUT_MICROUNITS"
+    )
+    output_rate = _resource_cost_setting(
+        "EDUAGENT_RESOURCE_COST_PER_1K_OUTPUT_MICROUNITS"
+    )
+    return (
+        max(0, int(input_tokens)) * input_rate
+        + max(0, int(output_tokens)) * output_rate
+        + 999
+    ) // 1000
+
+
+def _in_process_resource_workers_enabled() -> bool:
+    """Keep API processes enqueue-only in production.
+
+    The compatibility executor remains available for local development,
+    staging smoke tests and the synchronous legacy bridge. Production workers
+    run through ``python -m src.resource_worker`` and claim PostgreSQL leases.
+    """
+    explicit = str(
+        os.environ.get("EDUAGENT_RESOURCE_IN_PROCESS_WORKERS", "")
+    ).strip().lower()
+    if explicit:
+        return explicit in {"1", "true", "yes", "on"}
+    environment = str(
+        os.environ.get("APP_ENV")
+        or os.environ.get("ENVIRONMENT")
+        or ""
+    ).strip().lower()
+    return environment not in {"prod", "production"}
+
+
 _RESOURCE_JOB_WORKER_COUNT = _resource_job_worker_count()
 
 # Keep one worker reserved for the first visible learning surface. The normal
@@ -1344,12 +1423,44 @@ def list_generation_events(
     limit: int = 100,
     user_id: Optional[str] = None,
     repo: Optional[ResourceGenerationRepo] = None,
+    wake_wait_seconds: Optional[float] = None,
 ) -> list[Dict[str, Any]]:
     """Read reconnectable generation events without changing job state."""
     repository = repo or get_resource_generation_repo()
     if get_generation_job(job_id, user_id=user_id, repo=repository) is None:
         return []
-    return repository.list_events(str(job_id), after_event_id=after_event_id, limit=limit)
+    events = repository.list_events(
+        str(job_id),
+        after_event_id=after_event_id,
+        limit=limit,
+    )
+    if events:
+        return events
+    if wake_wait_seconds is None:
+        try:
+            wake_wait_seconds = float(
+                os.environ.get(
+                    "EDUAGENT_RESOURCE_EVENT_WAKE_WAIT_SECONDS",
+                    "0",
+                )
+            )
+        except (TypeError, ValueError):
+            wake_wait_seconds = 0.0
+    wait_seconds = max(0.0, min(1.0, float(wake_wait_seconds)))
+    if wait_seconds <= 0:
+        return []
+    resource_event_notifier.wait(
+        str(job_id),
+        after_event_id=max(0, int(after_event_id)),
+        timeout_seconds=wait_seconds,
+    )
+    # Redis is only a hint. Always replay the authoritative PostgreSQL ledger,
+    # including after timeout or notifier failure.
+    return repository.list_events(
+        str(job_id),
+        after_event_id=after_event_id,
+        limit=limit,
+    )
 
 
 def _generation_context(
@@ -1360,6 +1471,7 @@ def _generation_context(
     locale: str,
     *,
     allow_remote_retrieval: bool = True,
+    content_version: str = "",
 ) -> tuple[Dict[str, Any], Any]:
     binding = _canonical_node_binding(runtime, course_id, node_id)
     context = build_resource_context(
@@ -1370,6 +1482,7 @@ def _generation_context(
         node_title=str(binding["title"]),
         locale=locale,
         allow_remote_retrieval=allow_remote_retrieval,
+        content_version=content_version,
     )
     return binding, context
 
@@ -1634,26 +1747,99 @@ def request_generation(
         priority=normalized_priority,
         context=context,
     )
-    job, created = repository.create_or_get_active_job(
+    existing_active = repository.get_active_job(
         user_id,
         course_id,
         target_node,
         key,
-        card_types=types_to_generate,
-        force=force,
-        priority=normalized_priority,
-        request_params={
-            "requested_card_types": requested_types,
-            "locale": context.locale,
-            "use_cache": bool(use_cache),
-            "auto_supporting_card_types": auto_supporting_card_types,
-        },
-        content_version=context.content_version,
-        knowledge_index_version=context.knowledge_index_version,
-        locale=context.locale,
-        max_retries=1,
     )
-    if submit and (created or str(job.get("status") or "") in {"queued", "retrying"}):
+    queue = repository.queue_snapshot()
+    concept_lane = (
+        normalized_priority in {"concept_map", "concept"}
+        and types_to_generate == ["concept_map"]
+    )
+    if existing_active is None:
+        if int(queue.get("depth") or 0) >= 5_000 and not concept_lane:
+            return {
+                "error": "Resource generation queue is temporarily full.",
+                "status_code": 503,
+                "retry_after": 30,
+                "queue_depth": int(queue.get("depth") or 0),
+            }
+        if (
+            int(queue.get("depth") or 0) >= 4_000
+            and normalized_priority in {"shadow", "supporting", "supporting_bundle"}
+        ):
+            return {
+                "error": "Low-priority resource generation is temporarily paused.",
+                "status_code": 503,
+                "retry_after": 15,
+                "queue_depth": int(queue.get("depth") or 0),
+            }
+        if repository.active_job_count_for_user(user_id) >= 2:
+            return {
+                "error": "At most two resource generation jobs may be active per learner.",
+                "status_code": 429,
+                "retry_after": 5,
+            }
+
+    rollout = resource_v4_rollout(
+        user_id,
+        course_id,
+        target_node,
+        requested_shadow=normalized_priority == "shadow",
+    )
+    deadline_seconds = (
+        CONCEPT_DEADLINE_SECONDS if concept_lane else BUNDLE_DEADLINE_SECONDS
+    )
+    deadline_iso = datetime.fromtimestamp(
+        datetime.now(timezone.utc).timestamp() + deadline_seconds,
+        tz=timezone.utc,
+    ).isoformat()
+    try:
+        job, created = repository.create_or_get_active_job(
+            user_id,
+            course_id,
+            target_node,
+            key,
+            card_types=types_to_generate,
+            force=force,
+            priority=normalized_priority,
+            request_params={
+                "requested_card_types": requested_types,
+                "locale": context.locale,
+                "use_cache": bool(use_cache),
+                "auto_supporting_card_types": auto_supporting_card_types,
+            },
+            content_version=context.content_version,
+            knowledge_index_version=context.knowledge_index_version,
+            locale=context.locale,
+            max_retries=1,
+            pipeline_version=PIPELINE_VERSION if rollout.enabled else context.content_version,
+            prompt_version=PROMPT_VERSION if rollout.enabled else context.content_version,
+            blueprint_version=BLUEPRINT_VERSION if rollout.enabled else context.content_version,
+            quality_version=QUALITY_VERSION if rollout.enabled else context.content_version,
+            deadline_at=deadline_iso,
+            token_budget_input=MAX_INPUT_TOKENS,
+            token_budget_output=MAX_OUTPUT_TOKENS,
+            generation_call_budget=MAX_GENERATION_CALLS,
+            cost_budget_microunits=_resource_cost_setting(
+                "EDUAGENT_RESOURCE_COST_BUDGET_MICROUNITS"
+            ),
+            exposure_mode=rollout.exposure_mode,
+            trace_id=get_request_id() or uuid.uuid4().hex,
+            release_version=str(os.environ.get("RELEASE_VERSION") or ""),
+            cohort=rollout.cohort,
+            enforce_admission=True,
+            concept_lane=concept_lane,
+        )
+    except ResourceAdmissionError as exc:
+        return exc.response_payload()
+    if (
+        submit
+        and _in_process_resource_workers_enabled()
+        and (created or str(job.get("status") or "") in {"queued", "retrying"})
+    ):
         _submit_generation_job(str(job["job_id"]), repo=repository)
     result = {
         "job_id": job["job_id"],
@@ -1884,6 +2070,26 @@ def _from_runtime_result(
 ) -> GeneratedResourcePayload:
     content, metadata = _generation_metadata(result)
     source = str(metadata.get("source") or "unknown")
+    if isinstance(result, dict):
+        input_tokens = result.get(
+            "input_tokens",
+            metadata.get("input_tokens", 0),
+        )
+        output_tokens = result.get(
+            "output_tokens",
+            metadata.get("output_tokens", 0),
+        )
+    else:
+        input_tokens = getattr(
+            result,
+            "input_tokens",
+            metadata.get("input_tokens", 0),
+        )
+        output_tokens = getattr(
+            result,
+            "output_tokens",
+            metadata.get("output_tokens", 0),
+        )
     raw_payload = (
         result.get("structured_payload") if isinstance(result, dict) else getattr(result, "structured_payload", None)
     )
@@ -1897,6 +2103,8 @@ def _from_runtime_result(
             model=metadata.get("model"),
             fallback_reason=metadata.get("fallback_reason"),
             elapsed_ms=float(metadata.get("elapsed_ms") or 0.0),
+            input_tokens=max(0, int(input_tokens or 0)),
+            output_tokens=max(0, int(output_tokens or 0)),
         )
         return replace(generated, attempt_count=int(metadata.get("attempt_count") or generated.attempt_count))
     fallback = generator.template(context, card_type, str(metadata.get("fallback_reason") or "legacy_unstructured_output"))
@@ -1909,6 +2117,8 @@ def _from_runtime_result(
         attempt_count=int(metadata.get("attempt_count") or 0),
         fallback_reason=metadata.get("fallback_reason") or fallback.fallback_reason,
         elapsed_ms=float(metadata.get("elapsed_ms") or 0.0),
+        input_tokens=max(0, int(input_tokens or 0)),
+        output_tokens=max(0, int(output_tokens or 0)),
     )
 
 
@@ -2029,7 +2239,8 @@ def _resource_card_from_generated(
         metadata["quiz_revision"] = quiz_revision
         metadata["questions"] = payload.get("questions", [])
     elif card_type == "interactive_exercise":
-        metadata.update(_interactive_exercise_metadata(context.node_id, str(binding["title"])))
+        if not context.content_version.startswith("resource-v4"):
+            metadata.update(_interactive_exercise_metadata(context.node_id, str(binding["title"])))
     elif card_type == "code_snippet":
         practice = dict(context.code_practice) if isinstance(context.code_practice, dict) else {}
         if not practice:
@@ -2062,8 +2273,96 @@ def _persist_ready_card(
     context: Any,
     binding: Dict[str, Any],
     card: ResourceCard,
+    owner_id: Optional[str] = None,
 ) -> tuple[Optional[ResourceCard], Optional[Dict[str, Any]]]:
     state = session.agent_state
+    job = repo.get_job(job_id) or {}
+    if (
+        owner_id
+        and str(job.get("lease_owner") or "") != owner_id
+    ):
+        return None, {"code": "worker_lease_lost"}
+    pipeline_version = str(job.get("pipeline_version") or context.content_version)
+    quality = None
+    if pipeline_version.startswith("resource-v4"):
+        structured_payload = (
+            card.metadata.get("structured_payload")
+            if isinstance(card.metadata, dict)
+            else None
+        )
+        if not isinstance(structured_payload, dict):
+            return None, {"code": "structured_payload_missing"}
+        quality = evaluate_resource_quality(
+            card.card_type,
+            structured_payload,
+            context,
+        )
+        if quality.hard_fail or quality.gate_status == "failed":
+            fallback_generated = ResourceGenerator().template(
+                context,
+                card.card_type,
+                "resource_quality_gate_failed",
+            )
+            fallback = _resource_card_from_generated(
+                fallback_generated,
+                context=context,
+                binding=binding,
+                existing_cards=list(state.generated_resources.get(context.node_id, [])),
+                force=False,
+                job_id=job_id,
+            )
+            fallback_metadata = dict(fallback.metadata or {})
+            fallback_metadata["repair_request"] = {
+                "attempt": 1,
+                "fields": sorted({
+                    issue.split(":", 1)[0]
+                    for issue in quality.issue_codes
+                }),
+                "issue_codes": list(quality.issue_codes),
+            }
+            fallback = fallback.model_copy(update={
+                "resource_id": card.resource_id,
+                "metadata": fallback_metadata,
+            })
+            fallback_payload = fallback_metadata.get("structured_payload")
+            quality = evaluate_resource_quality(
+                card.card_type,
+                fallback_payload if isinstance(fallback_payload, dict) else {},
+                context,
+            )
+            if quality.hard_fail or quality.gate_status == "failed":
+                repo.record_quality_evaluation(
+                    job_id,
+                    card.card_type,
+                    quality_version=str(job.get("quality_version") or QUALITY_VERSION),
+                    gate_status=quality.gate_status,
+                    score=quality.score,
+                    dimensions=quality.dimensions,
+                    issue_codes=quality.issue_codes,
+                    artifact_digest=quality.artifact_digest,
+                    content_hash=content_hash(fallback_payload),
+                )
+                return None, {
+                    "code": "quality_gate_failed",
+                    "issues": list(quality.issue_codes),
+                }
+            card = fallback
+
+        metadata = dict(card.metadata or {})
+        payload = dict(metadata.get("structured_payload") or {})
+        payload["quality_profile"] = quality.to_dict()
+        metadata["structured_payload"] = payload
+        metadata["quality_profile"] = quality.to_dict()
+        metadata["quality_status"] = quality.gate_status
+        rendered = render_markdown(card.card_type, payload)
+        generation = metadata.get("generation")
+        if isinstance(generation, dict):
+            rendered = _truthful_generated_content(rendered, generation)
+        card = card.model_copy(update={
+            "content": rendered,
+            "metadata": metadata,
+        })
+
     validation_pipeline = get_validation_pipeline()
     validation_started = time.perf_counter()
     validated, validation = validation_pipeline.validate_resource_card(card)
@@ -2103,18 +2402,94 @@ def _persist_ready_card(
         if validated is None:
             fallback_codes = _record_resource_rejection(state, context.node_id, card.card_type, fallback_validation, stage="resource_job_template")
             return None, {"code": "validation_failed", "issues": issue_codes + fallback_codes}
-    started = time.perf_counter()
-    upsert_resource_card(state, validated)
-    persist_session(session)
-    observe_metric("resource.generation.persist_ms", round((time.perf_counter() - started) * 1000, 3))
-    try:
-        _store_card_in_caches(repo, context, validated)
-    except Exception as exc:
-        # The card is already durable in the session snapshot. Cache loss must
-        # only cost a later regeneration, never suppress card_ready.
-        state.record_error(f"resource_cache_write_failed:{context.node_id}:{card.card_type}:{type(exc).__name__}")
-        incr_metric("resource.generation.cache_write_failed_total", card_type=card.card_type)
-    repo.mark_card_ready(job_id, validated.card_type, resource_contract_from_card(validated).model_dump())
+    contract_payload = resource_contract_from_card(validated).model_dump()
+    if pipeline_version.startswith("resource-v4"):
+        structured_contract = contract_payload.get("structured_payload")
+        structured_contract = (
+            structured_contract
+            if isinstance(structured_contract, dict)
+            else {}
+        )
+        if (
+            not contract_payload.get("source_refs")
+            or not structured_contract.get("evidence_map")
+        ):
+            incr_metric(
+                "resource_unattributed_publication_total",
+                card_type=validated.card_type,
+                gate_status="blocked",
+            )
+            return None, {
+                "code": "publication_attribution_missing",
+            }
+    quality_result = quality.to_dict() if quality is not None else {}
+    published = repo.mark_card_ready(
+        job_id,
+        validated.card_type,
+        contract_payload,
+        quality_result=quality_result,
+        blueprint_snapshot=(
+            validated.metadata.get("structured_payload", {}).get("learning_blueprint")
+            if validated.card_type == "concept_map"
+            else context.blueprint_snapshot
+        ) or {},
+        publication_version=pipeline_version,
+        degraded_reason=(
+            quality.gate_status
+            if quality is not None and quality.gate_status != "normal"
+            else None
+        ),
+        owner_id=owner_id,
+    )
+    if published is None:
+        return None, {"code": "worker_lease_lost"}
+    if quality is not None:
+        repo.record_quality_evaluation(
+            job_id,
+            validated.card_type,
+            quality_version=str(job.get("quality_version") or QUALITY_VERSION),
+            gate_status=quality.gate_status,
+            score=quality.score,
+            dimensions=quality.dimensions,
+            issue_codes=quality.issue_codes,
+            artifact_digest=quality.artifact_digest,
+            content_hash=content_hash(contract_payload),
+        )
+    shadow = str(job.get("exposure_mode") or "") == "shadow"
+    if not shadow:
+        started = time.perf_counter()
+        try:
+            upsert_resource_card(state, validated)
+            persist_session(session)
+            observe_metric(
+                "resource.generation.persist_ms",
+                round((time.perf_counter() - started) * 1000, 3),
+            )
+        except Exception as exc:
+            # The normalized card ledger and SSE event are already committed.
+            # Session projection failures are repairable and must not turn a
+            # successfully published card into a contradictory card_failed.
+            state.record_error(
+                f"resource_session_projection_failed:{context.node_id}:"
+                f"{card.card_type}:{type(exc).__name__}"
+            )
+            incr_metric(
+                "resource.generation.session_projection_failed_total",
+                card_type=card.card_type,
+            )
+        try:
+            _store_card_in_caches(repo, context, validated)
+        except Exception as exc:
+            # Cache loss only costs a later cache miss; PostgreSQL remains the
+            # authoritative publication ledger.
+            state.record_error(
+                f"resource_cache_write_failed:{context.node_id}:"
+                f"{card.card_type}:{type(exc).__name__}"
+            )
+            incr_metric(
+                "resource.generation.cache_write_failed_total",
+                card_type=card.card_type,
+            )
     return validated, None
 
 
@@ -2153,12 +2528,34 @@ def _run_claimed_generation_job(
     job_id: str,
     *,
     repo: Optional[ResourceGenerationRepo] = None,
+    claimed_job: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Claim a slot-admitted job, then persist and publish each card."""
     repository = repo or get_resource_generation_repo()
-    job = repository.claim_job(str(job_id))
+    job = claimed_job or repository.claim_job(str(job_id))
     if job is None:
         return repository.get_job(str(job_id))
+    lease_owner = str(job.get("lease_owner") or "") or None
+
+    class WorkerLeaseLost(RuntimeError):
+        pass
+
+    def require_lease(result: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        if lease_owner and result is None:
+            raise WorkerLeaseLost(
+                f"Resource worker lease lost for job {job_id}"
+            )
+        return result or {}
+
+    def transition_pipeline(pipeline_state: str) -> None:
+        require_lease(
+            repository.transition_pipeline_state(
+                str(job_id),
+                pipeline_state,
+                owner_id=lease_owner,
+            )
+        )
+
     user_id = str(job["user_id"])
     course_id = str(job["course_id"])
     try:
@@ -2171,7 +2568,15 @@ def _run_claimed_generation_job(
             runtime = get_runtime()
             locale = str(job.get("locale") or "zh-CN")
             context_started = time.perf_counter()
-            binding, context = _generation_context(runtime, state, course_id, str(job["node_id"]), locale)
+            transition_pipeline("retrieving")
+            binding, context = _generation_context(
+                runtime,
+                state,
+                course_id,
+                str(job["node_id"]),
+                locale,
+                content_version=str(job.get("pipeline_version") or ""),
+            )
             observe_metric("resource.generation.context_ms", round((time.perf_counter() - context_started) * 1000, 3))
             requested = [card_type for card_type in job.get("card_types", []) if card_type in CARD_TYPES]
             force = bool(job.get("force"))
@@ -2183,7 +2588,12 @@ def _run_claimed_generation_job(
             for card_type in requested:
                 if not force and card_type in existing_by_type:
                     repo_card = resource_contract_from_card(existing_by_type[card_type]).model_dump()
-                    repository.mark_card_ready(str(job_id), card_type, repo_card)
+                    require_lease(repository.mark_card_ready(
+                        str(job_id),
+                        card_type,
+                        repo_card,
+                        owner_id=lease_owner,
+                    ))
                     continue
                 if not force and use_cache:
                     try:
@@ -2195,19 +2605,149 @@ def _run_claimed_generation_job(
                     if cached is not None:
                         incr_metric("resource.generation.cache_hit_total", card_type=card_type)
                         persisted, error = _persist_ready_card(
-                            repo=repository, job_id=str(job_id), session=session, context=context, binding=binding, card=cached,
+                            repo=repository,
+                            job_id=str(job_id),
+                            session=session,
+                            context=context,
+                            binding=binding,
+                            card=cached,
+                            owner_id=lease_owner,
                         )
                         if persisted is None:
-                            repository.mark_card_failed(str(job_id), card_type, error or {"code": "cache_card_invalid"})
+                            if (error or {}).get("code") == "worker_lease_lost":
+                                raise WorkerLeaseLost(
+                                    f"Resource worker lease lost for job {job_id}"
+                                )
+                            require_lease(repository.mark_card_failed(
+                                str(job_id),
+                                card_type,
+                                error or {"code": "cache_card_invalid"},
+                                owner_id=lease_owner,
+                            ))
                         continue
                 if force and card_type == "diagnostic_quiz" and _active_retest_resource_id(state, context.node_id):
-                    repository.mark_card_failed(str(job_id), card_type, {"code": "review_retest_active"})
+                    require_lease(repository.mark_card_failed(
+                        str(job_id),
+                        card_type,
+                        {"code": "review_retest_active"},
+                        owner_id=lease_owner,
+                    ))
                     continue
                 unresolved.append(card_type)
+
+        try:
+            deadline = datetime.fromisoformat(
+                str(job.get("deadline_at") or "").replace("Z", "+00:00")
+            )
+            if deadline.tzinfo is None:
+                deadline = deadline.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            deadline = datetime.fromtimestamp(
+                datetime.now(timezone.utc).timestamp() + BUNDLE_DEADLINE_SECONDS,
+                tz=timezone.utc,
+            )
+        generation_calls_used = 0
+        input_tokens_used = 0
+        output_tokens_used = 0
+        generation_call_budget = max(
+            0,
+            int(job.get("generation_call_budget") or MAX_GENERATION_CALLS),
+        )
+        input_token_budget = max(
+            0,
+            int(job.get("token_budget_input") or MAX_INPUT_TOKENS),
+        )
+        output_token_budget = max(
+            0,
+            int(job.get("token_budget_output") or MAX_OUTPUT_TOKENS),
+        )
+        cost_budget_microunits = max(
+            0,
+            int(job.get("cost_budget_microunits") or 0),
+        )
+        cost_used_microunits = 0
+        prompt_tokens_per_call = max(
+            1,
+            len(
+                json.dumps(
+                    context.to_prompt_dict(),
+                    ensure_ascii=False,
+                    default=str,
+                ).encode("utf-8")
+            )
+            // 4,
+        )
+
+        def external_generation_allowed(call_cost: int = 1) -> bool:
+            projected_cost = _resource_cost_microunits(
+                input_tokens_used + prompt_tokens_per_call * call_cost,
+                output_tokens_used,
+            )
+            return (
+                datetime.now(timezone.utc) < deadline
+                and generation_calls_used + call_cost <= generation_call_budget
+                and input_tokens_used + prompt_tokens_per_call * call_cost
+                <= input_token_budget
+                and output_tokens_used < output_token_budget
+                and (
+                    cost_budget_microunits <= 0
+                    or projected_cost <= cost_budget_microunits
+                )
+            )
+
+        def persist_budget_progress() -> None:
+            nonlocal cost_used_microunits
+            cost_used_microunits = _resource_cost_microunits(
+                input_tokens_used,
+                output_tokens_used,
+            )
+            forecast_ratio = (
+                cost_used_microunits / cost_budget_microunits
+                if cost_budget_microunits > 0
+                else 0.0
+            )
+            set_metric(
+                "resource_cost_forecast_ratio",
+                forecast_ratio,
+            )
+            set_metric(
+                "resource_cost_used_microunits",
+                float(cost_used_microunits),
+            )
+            require_lease(repository.update_job(
+                    str(job_id),
+                    progress={
+                        "generation_calls_used": generation_calls_used,
+                        "generation_call_budget": generation_call_budget,
+                        "input_tokens_used": input_tokens_used,
+                        "input_token_budget": input_token_budget,
+                        "output_tokens_used": output_tokens_used,
+                        "output_token_budget": output_token_budget,
+                        "cost_used_microunits": cost_used_microunits,
+                        "cost_budget_microunits": cost_budget_microunits,
+                        "cost_forecast_ratio": round(forecast_ratio, 6),
+                        "deadline_at": deadline.isoformat(),
+                    },
+                    owner_id=lease_owner,
+                )
+            )
 
         def process(generated: GeneratedResourcePayload) -> bool:
             card_type = generated.card_type
             try:
+                repository.record_attempt(
+                    str(job_id),
+                    card_type,
+                    "generation",
+                    provider=str(generated.provider or ""),
+                    model=str(generated.model or ""),
+                    input_tokens=max(0, int(generated.input_tokens or 0)),
+                    output_tokens=max(0, int(generated.output_tokens or 0)),
+                    elapsed_ms=float(generated.elapsed_ms or 0.0),
+                    issue_code=str(generated.fallback_reason or ""),
+                    artifact_version=str(job.get("prompt_version") or ""),
+                    content_hash=content_hash(generated.structured_payload),
+                )
                 with _resource_session_lock(user_id, course_id):
                     state = session.agent_state
                     card = _resource_card_from_generated(
@@ -2219,18 +2759,43 @@ def _run_claimed_generation_job(
                         job_id=str(job_id),
                     )
                     persisted, error = _persist_ready_card(
-                        repo=repository, job_id=str(job_id), session=session, context=context, binding=binding, card=card,
+                        repo=repository,
+                        job_id=str(job_id),
+                        session=session,
+                        context=context,
+                        binding=binding,
+                        card=card,
+                        owner_id=lease_owner,
                     )
                     if persisted is None:
-                        repository.mark_card_failed(str(job_id), card_type, error or {"code": "card_persist_failed"})
+                        if (error or {}).get("code") == "worker_lease_lost":
+                            raise WorkerLeaseLost(
+                                f"Resource worker lease lost for job {job_id}"
+                            )
+                        require_lease(repository.mark_card_failed(
+                            str(job_id),
+                            card_type,
+                            error or {"code": "card_persist_failed"},
+                            owner_id=lease_owner,
+                        ))
                         return False
                     return True
+            except WorkerLeaseLost:
+                raise
             except Exception as exc:
                 with _resource_session_lock(user_id, course_id):
                     session.agent_state.record_error(
                         f"resource_generation_card_failed:{context.node_id}:{card_type}:{type(exc).__name__}"
                     )
-                repository.mark_card_failed(str(job_id), card_type, {"code": "card_exception", "error": type(exc).__name__})
+                require_lease(repository.mark_card_failed(
+                    str(job_id),
+                    card_type,
+                    {
+                        "code": "card_exception",
+                        "error": type(exc).__name__,
+                    },
+                    owner_id=lease_owner,
+                ))
                 return False
 
         completed_before_generation = set(
@@ -2238,22 +2803,109 @@ def _run_claimed_generation_job(
         )
         concept_ready = "concept_map" in completed_before_generation
         if "concept_map" in unresolved:
+            transition_pipeline("blueprint")
             model_started = time.perf_counter()
-            generated = _generate_phase(runtime, context, ["concept_map"]).get("concept_map")
+            if external_generation_allowed():
+                generated = _generate_phase(
+                    runtime,
+                    context,
+                    ["concept_map"],
+                ).get("concept_map")
+                generation_calls_used += 1
+                input_tokens_used += prompt_tokens_per_call
+                if generated is not None:
+                    output_tokens_used += max(
+                        1,
+                        len(
+                            json.dumps(
+                                generated.structured_payload,
+                                ensure_ascii=False,
+                                default=str,
+                            ).encode("utf-8")
+                        )
+                        // 4,
+                    )
+            else:
+                generated = ResourceGenerator().template(
+                    context,
+                    "concept_map",
+                    "budget_or_deadline_exhausted",
+                )
+            persist_budget_progress()
             observe_metric("resource.generation.model_ms", round((time.perf_counter() - model_started) * 1000, 3), card_type="concept_map")
             if generated is None:
-                repository.mark_card_failed(str(job_id), "concept_map", {"code": "generator_returned_no_card"})
+                require_lease(repository.mark_card_failed(
+                    str(job_id),
+                    "concept_map",
+                    {"code": "generator_returned_no_card"},
+                    owner_id=lease_owner,
+                ))
             else:
+                transition_pipeline("concept")
                 concept_ready = process(generated)
+                blueprint = generated.structured_payload.get("learning_blueprint")
+                if concept_ready and isinstance(blueprint, dict):
+                    context = replace(
+                        context,
+                        blueprint_snapshot=dict(blueprint),
+                    )
         supporting = [card_type for card_type in unresolved if card_type != "concept_map"]
         if supporting:
+            transition_pipeline("supporting")
             model_started = time.perf_counter()
-            generated_cards = _generate_phase(runtime, context, supporting)
+            supporting_call_cost = (
+                2
+                if {
+                    "code_snippet",
+                    "video_summary",
+                }.intersection(supporting)
+                and {
+                    "interactive_exercise",
+                    "diagnostic_quiz",
+                }.intersection(supporting)
+                else 1
+            )
+            if external_generation_allowed(supporting_call_cost):
+                generated_cards = _generate_phase(runtime, context, supporting)
+                generation_calls_used += supporting_call_cost
+                input_tokens_used += (
+                    prompt_tokens_per_call * supporting_call_cost
+                )
+                output_tokens_used += sum(
+                    max(
+                        1,
+                        len(
+                            json.dumps(
+                                generated.structured_payload,
+                                ensure_ascii=False,
+                                default=str,
+                            ).encode("utf-8")
+                        )
+                        // 4,
+                    )
+                    for generated in generated_cards.values()
+                )
+            else:
+                generated_cards = {
+                    card_type: ResourceGenerator().template(
+                        context,
+                        card_type,
+                        "budget_or_deadline_exhausted",
+                    )
+                    for card_type in supporting
+                }
+            persist_budget_progress()
             observe_metric("resource.generation.model_ms", round((time.perf_counter() - model_started) * 1000, 3), card_type="supporting_bundle")
+            transition_pipeline("validating")
             for card_type in supporting:
                 generated = generated_cards.get(card_type)
                 if generated is None:
-                    repository.mark_card_failed(str(job_id), card_type, {"code": "generator_returned_no_card"})
+                    require_lease(repository.mark_card_failed(
+                        str(job_id),
+                        card_type,
+                        {"code": "generator_returned_no_card"},
+                        owner_id=lease_owner,
+                    ))
                 else:
                     process(generated)
 
@@ -2265,6 +2917,11 @@ def _run_claimed_generation_job(
         ]
         if concept_ready and auto_supporting_card_types:
             try:
+                require_lease(repository.update_job(
+                    str(job_id),
+                    progress={},
+                    owner_id=lease_owner,
+                ))
                 supporting_job = request_generation(
                     user_id,
                     course_id,
@@ -2282,6 +2939,8 @@ def _run_claimed_generation_job(
                         "follow_up_job_id": follow_up_job_id,
                         "follow_up_card_types": auto_supporting_card_types,
                     }
+            except WorkerLeaseLost:
+                raise
             except Exception as exc:
                 with _resource_session_lock(user_id, course_id):
                     session.agent_state.record_error(
@@ -2289,16 +2948,55 @@ def _run_claimed_generation_job(
                     )
                 follow_up_payload = {"follow_up_error": type(exc).__name__}
                 incr_metric("resource.generation.supporting_enqueue_failed_total")
-        return repository.mark_completed(str(job_id), event_payload=follow_up_payload)
+        terminal_job = repository.get_job(str(job_id)) or {}
+        terminal_progress = terminal_job.get("progress")
+        terminal_progress = terminal_progress if isinstance(terminal_progress, dict) else {}
+        if terminal_progress.get("failed_card_types"):
+            return require_lease(
+                repository.mark_partial(
+                    str(job_id),
+                    progress=terminal_progress,
+                    event_payload=follow_up_payload,
+                    owner_id=lease_owner,
+                )
+            )
+        return require_lease(
+            repository.mark_completed(
+                str(job_id),
+                event_payload=follow_up_payload,
+                owner_id=lease_owner,
+            )
+        )
+    except WorkerLeaseLost:
+        log_event(
+            "resource_worker.lease_fenced",
+            level="warning",
+            job_id=str(job_id),
+            owner_id=lease_owner,
+        )
+        return repository.get_job(str(job_id))
     except Exception as exc:
         error = {"code": "job_exception", "error": type(exc).__name__}
         current = repository.get_job(str(job_id)) or {}
         if int(current.get("retry_count") or 0) < int(current.get("max_retries") or 0):
-            retried = repository.retry_job(str(job_id), error=error)
+            retried = repository.retry_job(
+                str(job_id),
+                error=error,
+                owner_id=lease_owner,
+            )
             if retried is not None:
-                _submit_generation_job(str(job_id), repo=repository, replace_active=True)
+                if claimed_job is None:
+                    _submit_generation_job(
+                        str(job_id),
+                        repo=repository,
+                        replace_active=True,
+                    )
                 return retried
-        return repository.mark_failed(str(job_id), error)
+        return repository.mark_failed(
+            str(job_id),
+            error,
+            owner_id=lease_owner,
+        )
 
 
 def _repair_legacy_cards(

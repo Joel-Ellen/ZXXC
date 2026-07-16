@@ -11,6 +11,24 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterator, Optional, Tuple
 
+try:
+    from prometheus_client import (
+        Counter,
+        Gauge,
+        Histogram,
+        generate_latest,
+        start_http_server,
+    )
+except ImportError:  # pragma: no cover - optional in minimal local installs
+    Counter = Gauge = Histogram = None  # type: ignore[assignment]
+    generate_latest = None  # type: ignore[assignment]
+    start_http_server = None  # type: ignore[assignment]
+
+try:
+    from opentelemetry import trace
+except ImportError:  # pragma: no cover
+    trace = None  # type: ignore[assignment]
+
 
 _REQUEST_CONTEXT: contextvars.ContextVar[Dict[str, Any]] = contextvars.ContextVar(
     "eduagent_request_context",
@@ -20,6 +38,54 @@ _REQUEST_CONTEXT: contextvars.ContextVar[Dict[str, Any]] = contextvars.ContextVa
 _LOGGER = logging.getLogger("eduagent")
 _LOGGING_LOCK = threading.Lock()
 _LOGGING_CONFIGURED = False
+_PROMETHEUS_LOCK = threading.Lock()
+_PROMETHEUS_COLLECTORS: Dict[Tuple[str, str, Tuple[str, ...]], Any] = {}
+_PROMETHEUS_SERVER_STARTED = False
+_FORBIDDEN_METRIC_LABELS = frozenset({
+    "user",
+    "user_id",
+    "email",
+    "job_id",
+    "trace_id",
+    "request_id",
+})
+_METRIC_CONTEXT_LABELS = frozenset({
+    "release",
+    "pipeline_version",
+    "cohort",
+    "card_type",
+    "provider",
+    "gate_status",
+})
+# Prometheus collectors cannot change their label schema after registration.
+# A fixed bounded schema keeps canonical metric names stable across call sites
+# while retaining the dimensions used by production alerts and rollout gates.
+_PROMETHEUS_LABEL_NAMES = (
+    "release",
+    "pipeline_version",
+    "cohort",
+    "card_type",
+    "provider",
+    "gate_status",
+    "outcome",
+    "operation",
+    "fallback",
+    "reason",
+    "lane",
+    "stage",
+    "code",
+    "source",
+    "event_type",
+    "advanced",
+    "mode",
+    "verdict",
+    "surface",
+    "kind",
+    "method",
+    "status_family",
+    "cache_hit",
+    "algorithm",
+)
 
 
 def configure_logging() -> None:
@@ -107,10 +173,77 @@ def _metric_key(name: str, labels: Dict[str, Any]) -> Tuple[str, Tuple[Tuple[str
     return name, normalized
 
 
+def _safe_metric_labels(labels: Dict[str, Any]) -> Dict[str, str]:
+    context = get_request_context()
+    merged = {
+        key: context[key]
+        for key in _METRIC_CONTEXT_LABELS
+        if context.get(key) is not None and context.get(key) != ""
+    }
+    if os.environ.get("RELEASE_VERSION") and "release" not in merged:
+        merged["release"] = os.environ["RELEASE_VERSION"]
+    merged.update(labels)
+    return {
+        str(key): str(value)
+        for key, value in merged.items()
+        if key not in _FORBIDDEN_METRIC_LABELS
+        and value is not None
+        and value != ""
+    }
+
+
+def _prometheus_name(name: str) -> str:
+    normalized = "".join(
+        char if char.isalnum() or char == "_" else "_"
+        for char in str(name)
+    )
+    return normalized.strip("_") or "eduagent_metric"
+
+
+def _prometheus_observe(
+    kind: str,
+    name: str,
+    value: float,
+    labels: Dict[str, Any],
+) -> None:
+    collector_type = {
+        "counter": Counter,
+        "gauge": Gauge,
+        "histogram": Histogram,
+    }.get(kind)
+    if collector_type is None:
+        return
+    safe_labels = _safe_metric_labels(labels)
+    label_names = _PROMETHEUS_LABEL_NAMES
+    metric_labels = {
+        label_name: safe_labels.get(label_name, "")
+        for label_name in label_names
+    }
+    metric_name = _prometheus_name(name)
+    key = (kind, metric_name, label_names)
+    with _PROMETHEUS_LOCK:
+        collector = _PROMETHEUS_COLLECTORS.get(key)
+        if collector is None:
+            collector = collector_type(
+                metric_name,
+                f"EduAgent metric {name}",
+                labelnames=label_names,
+            )
+            _PROMETHEUS_COLLECTORS[key] = collector
+    target = collector.labels(**metric_labels)
+    if kind == "counter":
+        target.inc(value)
+    elif kind == "gauge":
+        target.set(value)
+    else:
+        target.observe(value)
+
+
 class InMemoryMetrics:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._counters: Dict[Tuple[str, Tuple[Tuple[str, str], ...]], int] = {}
+        self._gauges: Dict[Tuple[str, Tuple[Tuple[str, str], ...]], float] = {}
         self._histograms: Dict[Tuple[str, Tuple[Tuple[str, str], ...]], Dict[str, float]] = {}
 
     def incr(self, name: str, amount: int = 1, **labels: Any) -> None:
@@ -134,6 +267,11 @@ class InMemoryMetrics:
             # backend while retaining a representative rolling sample.
             if len(samples) > 2048:
                 del samples[: len(samples) - 2048]
+
+    def set(self, name: str, value: float, **labels: Any) -> None:
+        key = _metric_key(name, labels)
+        with self._lock:
+            self._gauges[key] = float(value)
 
     @staticmethod
     def _percentile(samples: list[float], percentile: float) -> float:
@@ -172,6 +310,14 @@ class InMemoryMetrics:
                 }
                 for (name, label_items), value in sorted(self._counters.items())
             ]
+            gauges = [
+                {
+                    "name": name,
+                    "labels": dict(label_items),
+                    "value": value,
+                }
+                for (name, label_items), value in sorted(self._gauges.items())
+            ]
             histograms = []
             for (name, label_items), bucket in sorted(self._histograms.items()):
                 count = int(bucket["count"])
@@ -191,12 +337,14 @@ class InMemoryMetrics:
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "request_id": get_request_id(),
             "counters": counters,
+            "gauges": gauges,
             "histograms": histograms,
         }
 
     def reset(self) -> None:
         with self._lock:
             self._counters.clear()
+            self._gauges.clear()
             self._histograms.clear()
 
 
@@ -204,11 +352,72 @@ metrics = InMemoryMetrics()
 
 
 def incr_metric(name: str, amount: int = 1, **labels: Any) -> None:
-    metrics.incr(name, amount=amount, **labels)
+    safe_labels = _safe_metric_labels(labels)
+    metrics.incr(name, amount=amount, **safe_labels)
+    _prometheus_observe("counter", name, float(amount), safe_labels)
 
 
 def observe_metric(name: str, value: float, **labels: Any) -> None:
-    metrics.observe(name, value=value, **labels)
+    safe_labels = _safe_metric_labels(labels)
+    metrics.observe(name, value=value, **safe_labels)
+    _prometheus_observe("histogram", name, float(value), safe_labels)
+
+
+def set_metric(name: str, value: float, **labels: Any) -> None:
+    safe_labels = _safe_metric_labels(labels)
+    metrics.set(name, value=value, **safe_labels)
+    _prometheus_observe("gauge", name, float(value), safe_labels)
+
+
+def prometheus_metrics_text() -> bytes:
+    return generate_latest() if generate_latest is not None else b""
+
+
+def start_prometheus_metrics_server(
+    port: int,
+    *,
+    address: str = "0.0.0.0",
+) -> bool:
+    """Start one process-local Prometheus endpoint without changing API routes."""
+    global _PROMETHEUS_SERVER_STARTED
+    if start_http_server is None:
+        return False
+    safe_port = max(1, min(65_535, int(port)))
+    with _PROMETHEUS_LOCK:
+        if _PROMETHEUS_SERVER_STARTED:
+            return True
+        start_http_server(safe_port, addr=str(address or "0.0.0.0"))
+        _PROMETHEUS_SERVER_STARTED = True
+    return True
+
+
+def _start_configured_prometheus_server() -> None:
+    raw_port = str(os.environ.get("EDUAGENT_PROMETHEUS_PORT") or "").strip()
+    if not raw_port:
+        return
+    try:
+        port = int(raw_port)
+    except ValueError:
+        return
+    start_prometheus_metrics_server(
+        port,
+        address=str(
+            os.environ.get("EDUAGENT_PROMETHEUS_ADDRESS") or "0.0.0.0"
+        ),
+    )
+
+
+@contextmanager
+def trace_span(name: str, **attributes: Any) -> Iterator[Any]:
+    if trace is None:
+        yield None
+        return
+    tracer = trace.get_tracer("eduagent.resource-v4")
+    with tracer.start_as_current_span(name) as span:
+        for key, value in attributes.items():
+            if value is not None:
+                span.set_attribute(str(key), _normalize_value(value))
+        yield span
 
 
 def metrics_snapshot() -> Dict[str, Any]:
@@ -342,3 +551,6 @@ def timed_operation(
             observe_metric(metric_name, duration_ms, **labels)
         if event_name:
             log_event(event_name, level=level, duration_ms=duration_ms, **labels)
+
+
+_start_configured_prometheus_server()
