@@ -1494,6 +1494,40 @@ def _schedule_generation_job_retry(
     timer.start()
 
 
+def drain_generation_workers(timeout_seconds: float = 15.0) -> bool:
+    """Cancel pending retries and wait until no background job is in flight.
+
+    A completing job may enqueue follow-up work (a concept map fans out its
+    supporting bundle), so the wait loops until both the retry timers and the
+    submitted futures are empty. Returns False when work is still running at
+    the deadline. Used by graceful shutdown and by the test suite to keep
+    worker threads from leaking across test boundaries.
+    """
+    deadline = time.monotonic() + max(0.0, timeout_seconds)
+    while True:
+        with _RESOURCE_JOB_RETRY_TIMERS_LOCK:
+            timers = list(_RESOURCE_JOB_RETRY_TIMERS.values())
+            _RESOURCE_JOB_RETRY_TIMERS.clear()
+        for timer in timers:
+            timer.cancel()
+        with _RESOURCE_JOB_FUTURES_LOCK:
+            futures = list(_RESOURCE_JOB_FUTURES.values())
+        if not futures and not timers:
+            return True
+        for future in futures:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            try:
+                future.result(timeout=remaining)
+            except concurrent.futures.TimeoutError:
+                return False
+            except Exception:
+                # A failed job still counts as drained; its error is already
+                # recorded on the job row by the worker.
+                pass
+
+
 def request_generation(
     user_id: str,
     course_id: str = "data_structures",
