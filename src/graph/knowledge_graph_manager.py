@@ -207,6 +207,8 @@ class KnowledgeGraphManager:
         neo4j_uri: Optional[str] = None,
         neo4j_user: Optional[str] = None,
         neo4j_password: Optional[str] = None,
+        *,
+        connect_remote: bool = True,
     ) -> None:
         self._neo4j_client: Any = None
         self._neo4j_available: bool = False
@@ -218,7 +220,7 @@ class KnowledgeGraphManager:
         self._init_in_memory()
 
         # 尝试连接 Neo4j
-        if self._try_connect_neo4j(neo4j_uri, neo4j_user, neo4j_password):
+        if connect_remote and self._try_connect_neo4j(neo4j_uri, neo4j_user, neo4j_password):
             self._neo4j_available = True
 
     # ------------------------------------------------------------------
@@ -313,6 +315,13 @@ class KnowledgeGraphManager:
                 username=user or os.getenv("NEO4J_USER", "neo4j"),
                 password=password or os.getenv("NEO4J_PASSWORD", "neo4j"),
                 database=os.getenv("NEO4J_DATABASE", "neo4j"),
+                # The bundled graph is authoritative for request-path work.
+                # A missing optional Neo4j service must not turn application
+                # import or cached resource reads into a 30-60 second wait.
+                connection_timeout=float(os.getenv("EDUAGENT_NEO4J_CONNECT_TIMEOUT_SEC", "0.5")),
+                connection_acquisition_timeout=float(
+                    os.getenv("EDUAGENT_NEO4J_ACQUIRE_TIMEOUT_SEC", "0.75")
+                ),
             )
             self._neo4j_client = Neo4jClient(config)
             self._neo4j_client.connect()
@@ -384,11 +393,13 @@ class KnowledgeGraphManager:
 _kg_manager: Optional[KnowledgeGraphManager] = None
 
 
-def get_kg_manager() -> KnowledgeGraphManager:
+def get_kg_manager(*, connect_remote: Optional[bool] = None) -> KnowledgeGraphManager:
     """获取全局单例 KnowledgeGraphManager。"""
     global _kg_manager
     if _kg_manager is None:
-        _kg_manager = KnowledgeGraphManager()
+        if connect_remote is None:
+            connect_remote = os.getenv("EDUAGENT_ENABLE_NEO4J", "").strip().lower() in {"1", "true", "yes"}
+        _kg_manager = KnowledgeGraphManager(connect_remote=bool(connect_remote))
         backend = "Neo4j" if _kg_manager.is_neo4j_available else "Memory"
         print(f"[KG] KnowledgeGraphManager initialized ({backend} backend)")
     return _kg_manager

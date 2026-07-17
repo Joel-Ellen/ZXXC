@@ -68,6 +68,18 @@ function practiceCard(nodeId) {
   };
 }
 
+function conceptCard(nodeId) {
+  return {
+    resource_id: `concept-${nodeId}`,
+    resource_type: "concept_map",
+    title: `${nodeId} concept`,
+    structured_payload: {
+      summary: "Concept summary",
+      objectives: [],
+    },
+  };
+}
+
 function findButton(wrapper, label) {
   const button = wrapper.findAll("button").find((candidate) => candidate.text() === label);
   if (!button) throw new Error(`Unable to find button: ${label}`);
@@ -283,6 +295,55 @@ describe("ResourceCanvas route recovery", () => {
       card_id: "N01_interactive_exercise_supp",
       expanded: true,
     });
+    wrapper.unmount();
+  });
+
+  it("keeps the active card while later resource cards arrive", async () => {
+    const wrapper = mount(ResourceCanvas, {
+      props: {
+        cards: [conceptCard("N01"), quizCard("N01")],
+        cardStates: {
+          concept_map: { status: "ready" },
+          diagnostic_quiz: { status: "ready" },
+          code_snippet: { status: "waiting" },
+          interactive_exercise: { status: "waiting" },
+          video_summary: { status: "waiting" },
+        },
+        sessionId: "learner:course",
+        currentNode: "N01",
+        nodeTitle: "Node 01",
+        pathNodes: [],
+        getCardLabel: (type) => type,
+        getAgentLabel: () => "Agent",
+        buildQuiz: () => [],
+      },
+    });
+    await settleUi();
+
+    await findButton(wrapper, "反馈").trigger("click");
+    await settleUi();
+    expect(wrapper.find('[data-resource-id="quiz-N01"]').classes()).toContain("is-active");
+
+    await wrapper.setProps({
+      cards: [conceptCard("N01"), quizCard("N01"), practiceCard("N01")],
+      cardStates: {
+        concept_map: { status: "ready" },
+        diagnostic_quiz: { status: "ready" },
+        interactive_exercise: { status: "ready" },
+        code_snippet: { status: "waiting" },
+        video_summary: { status: "waiting" },
+      },
+    });
+    await settleUi();
+
+    expect(wrapper.find('[data-resource-id="quiz-N01"]').classes()).toContain("is-active");
+    expect(wrapper.findAll('[data-resource-type]').map((element) => element.attributes("data-resource-type"))).toEqual([
+      "concept_map",
+      "code_snippet",
+      "interactive_exercise",
+      "video_summary",
+      "diagnostic_quiz",
+    ]);
     wrapper.unmount();
   });
 });

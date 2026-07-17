@@ -122,16 +122,12 @@
         </div>
       </div>
 
-      <div
-        class="resource-canvas__grid"
-        :class="isSingleCardView ? 'resource-canvas__grid--single' : 'resource-canvas__grid--multiple'"
-      >
+      <!-- 全部：原始卡片网格（保持动效、拖拽等原有样式） -->
+      <div v-if="filterType === 'all'" class="resource-canvas__grid resource-canvas__grid--multiple">
         <template v-for="(slot, index) in cardTypeSlots" :key="slot.type">
-
-          <!-- Case 1: card exists and not minimized -->
           <div
             v-if="slot.card && !minimizedIds.includes(slot.card.resource_id)"
-            :draggable="!isSingleCardView"
+            :draggable="true"
             class="resource-canvas__slot animate-cardIn h-full card-depth transition-all duration-300"
             :style="{ animationDelay: `${index * 55}ms` }"
             @dragstart="onDragStart(slot.card.resource_id)"
@@ -155,322 +151,85 @@
               @minimize="minimizeCard(card.resource_id)"
             >
               <template #content>
-              <div v-if="!isSingleCardView" class="space-y-4">
+              <div class="space-y-4">
                 <div class="workspace-shell-card-soft rounded-[20px] p-4">
-                  <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">
-                    {{ previewLabel(resourceType(card)) }}
-                  </p>
-
-                  <pre
-                    v-if="resourceType(card) === 'code_snippet'"
-                    class="mt-3 overflow-x-auto rounded-[16px] border border-subtle/80 bg-[#08111f] px-4 py-3 text-xs leading-6 text-slate-100"
-                  >{{ previewCode(card) }}</pre>
-
-                  <p v-else class="mt-3 text-sm leading-7 text-text-secondary">
-                    {{ previewText(card) }}
-                  </p>
+                  <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">{{ previewLabel(resourceType(card)) }}</p>
+                  <pre v-if="resourceType(card) === 'code_snippet'" class="mt-3 overflow-x-auto rounded-[16px] border border-subtle/80 bg-[#08111f] px-4 py-3 text-xs leading-6 text-slate-100">{{ previewCode(card) }}</pre>
+                  <p v-else class="mt-3 text-sm leading-7 text-text-secondary">{{ previewText(card) }}</p>
                 </div>
-
-                <button
-                  type="button"
-                    class="workspace-shell-btn workspace-shell-btn--accent focus-ring px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.10em]"
-                    @click.stop="openCard(card)"
-                  >
-                  打开完整内容
-                </button>
-              </div>
-
-              <div v-else class="space-y-5">
-                <div v-if="resourceType(card) === 'concept_map'" class="space-y-4">
-                  <div class="workspace-shell-card rounded-[20px] p-4">
-                    <p class="text-sm leading-7 text-text-secondary">{{ conceptSummary(card) }}</p>
-                  </div>
-
-                  <div v-if="conceptObjectives(card).length" class="workspace-shell-card rounded-[20px] p-4">
-                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">学习目标</p>
-                    <ul class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
-                      <li v-for="(item, index) in conceptObjectives(card)" :key="`${card.resource_id}-objective-${index}`">{{ item }}</li>
-                    </ul>
-                  </div>
-
-                  <div v-if="conceptSections(card).length" class="space-y-3">
-                    <div
-                      v-for="(section, index) in conceptSections(card)"
-                      :key="`${card.resource_id}-section-${index}`"
-                      class="workspace-shell-card rounded-[20px] p-4"
-                    >
-                      <p class="text-[11px] font-black uppercase tracking-[0.12em] text-text-muted">{{ section.heading }}</p>
-                      <p class="mt-3 text-sm leading-7 text-text-secondary">{{ section.body }}</p>
-                    </div>
-                  </div>
-
-                  <div v-if="conceptBullets(card).length" class="workspace-shell-card rounded-[20px] p-4">
-                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">关键要点</p>
-                    <ul class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
-                      <li v-for="(item, index) in conceptBullets(card)" :key="`${card.resource_id}-bullet-${index}`">{{ item }}</li>
-                    </ul>
-                  </div>
-
-                  <div v-if="conceptMisconceptions(card).length" class="workspace-shell-card rounded-[20px] p-4">
-                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">常见误区</p>
-                    <ul class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
-                      <li v-for="(item, index) in conceptMisconceptions(card)" :key="`${card.resource_id}-misconception-${index}`">{{ item }}</li>
-                    </ul>
-                  </div>
-
-                  <div v-if="conceptReviewPrompts(card).length" class="workspace-shell-card rounded-[20px] p-4">
-                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">复习提示</p>
-                    <ul class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
-                      <li v-for="(item, index) in conceptReviewPrompts(card)" :key="`${card.resource_id}-review-${index}`">{{ item }}</li>
-                    </ul>
-                  </div>
-
-                  <MarkdownContent
-                    :content="conceptMarkdown(card)"
-                    :mermaid-source="conceptMermaidSource(card)"
-                  />
-                </div>
-
-                <div v-else-if="resourceType(card) === 'code_snippet'" class="space-y-4">
-                  <div class="workspace-shell-card rounded-[20px] p-4">
-                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">场景说明</p>
-                    <p class="mt-3 text-sm leading-7 text-text-secondary">{{ codeScenario(card) }}</p>
-                  </div>
-
-                  <div v-if="codePrerequisites(card).length" class="workspace-shell-card rounded-[20px] p-4">
-                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">前置知识</p>
-                    <ul class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
-                      <li v-for="(item, index) in codePrerequisites(card)" :key="`${card.resource_id}-prereq-${index}`">{{ item }}</li>
-                    </ul>
-                  </div>
-
-                  <div class="workspace-shell-card-soft rounded-[20px] p-4">
-                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">
-                      {{ codeLanguage(card).toUpperCase() }}
-                    </p>
-                    <pre class="mt-3 overflow-x-auto rounded-[16px] border border-subtle/80 bg-[#08111f] px-4 py-3 text-xs leading-6 text-slate-100">{{ fullCode(card) }}</pre>
-                  </div>
-
-                  <div v-if="codeWalkthrough(card).length" class="workspace-shell-card rounded-[20px] p-4">
-                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">逐步讲解</p>
-                    <ol class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
-                      <li v-for="(item, index) in codeWalkthrough(card)" :key="`${card.resource_id}-walkthrough-${index}`">
-                        {{ index + 1 }}. {{ item }}
-                      </li>
-                    </ol>
-                  </div>
-
-                  <MarkdownContent
-                    v-if="codeExplanation(card)"
-                    :content="codeExplanation(card)"
-                  />
-
-                  <div v-if="codeComplexityNotes(card).length" class="workspace-shell-card rounded-[20px] p-4">
-                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">复杂度提示</p>
-                    <ul class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
-                      <li v-for="(item, index) in codeComplexityNotes(card)" :key="`${card.resource_id}-complexity-${index}`">{{ item }}</li>
-                    </ul>
-                  </div>
-
-                  <div v-if="codePitfalls(card).length" class="workspace-shell-card rounded-[20px] p-4">
-                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">常见坑点</p>
-                    <ul class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
-                      <li v-for="(item, index) in codePitfalls(card)" :key="`${card.resource_id}-pitfall-${index}`">{{ item }}</li>
-                    </ul>
-                  </div>
-
-                  <div v-if="codeExperiments(card).length" class="workspace-shell-card rounded-[20px] p-4">
-                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">延伸实验</p>
-                    <ul class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
-                      <li v-for="(item, index) in codeExperiments(card)" :key="`${card.resource_id}-experiment-${index}`">{{ item }}</li>
-                    </ul>
-                  </div>
-                </div>
-
-                <div v-else-if="resourceType(card) === 'interactive_exercise'" class="space-y-4">
-                  <div class="workspace-shell-card rounded-[20px] p-4">
-                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">任务目标</p>
-                    <p class="mt-2 text-sm leading-7 text-text-secondary">{{ exerciseGoal(card) }}</p>
-                    <p class="mt-4 text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">任务说明</p>
-                    <p class="text-sm font-medium text-text-primary">{{ exercisePrompt(card) }}</p>
-                    <div v-if="exerciseSteps(card).length" class="mt-4 space-y-3">
-                      <div
-                        v-for="(step, stepIndex) in exerciseSteps(card)"
-                        :key="`${card.resource_id}-step-${stepIndex}`"
-                         class="workspace-shell-card-soft rounded-[16px] px-4 py-3"
-                      >
-                        <p class="text-[11px] font-black uppercase tracking-[0.12em] text-text-muted">步骤 {{ stepIndex + 1 }}</p>
-                        <p class="mt-2 text-sm leading-6 text-text-secondary">{{ step }}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div v-if="exerciseCheckpoints(card).length" class="workspace-shell-card rounded-[20px] p-4">
-                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">检查点</p>
-                    <ul class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
-                      <li v-for="(checkpoint, checkpointIndex) in exerciseCheckpoints(card)" :key="`${card.resource_id}-checkpoint-${checkpointIndex}`">
-                        {{ checkpoint }}
-                      </li>
-                    </ul>
-                  </div>
-
-                  <div v-if="exerciseHints(card).length" class="workspace-shell-card rounded-[20px] p-4">
-                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">提示</p>
-                    <ul class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
-                      <li v-for="(hint, index) in exerciseHints(card)" :key="`${card.resource_id}-hint-${index}`">{{ hint }}</li>
-                    </ul>
-                  </div>
-
-                  <div v-if="exerciseExpectedOutcome(card) || exerciseSolutionOutline(card)" class="grid gap-4 lg:grid-cols-2">
-                    <div v-if="exerciseExpectedOutcome(card)" class="workspace-shell-card rounded-[20px] p-4">
-                      <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">预期结果</p>
-                      <p class="mt-3 text-sm leading-7 text-text-secondary">{{ exerciseExpectedOutcome(card) }}</p>
-                    </div>
-                    <div v-if="exerciseSolutionOutline(card)" class="workspace-shell-card rounded-[20px] p-4">
-                      <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">参考思路</p>
-                      <p class="mt-3 text-sm leading-7 text-text-secondary">{{ exerciseSolutionOutline(card) }}</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div v-else-if="resourceType(card) === 'video_summary'" class="space-y-4">
-                  <div class="workspace-shell-card rounded-[20px] p-4">
-                    <p class="text-sm leading-7 text-text-secondary">{{ videoSummary(card) }}</p>
-                    <ul v-if="videoKeyPoints(card).length" class="mt-4 space-y-2 text-sm leading-6 text-text-secondary">
-                      <li v-for="(point, pointIndex) in videoKeyPoints(card)" :key="`${card.resource_id}-point-${pointIndex}`">
-                        {{ point }}
-                      </li>
-                    </ul>
-                  </div>
-
-                  <div v-if="videoTimeline(card).length" class="workspace-shell-card rounded-[20px] p-4">
-                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">分段提纲</p>
-                    <div class="mt-3 space-y-3">
-                      <div v-for="(item, index) in videoTimeline(card)" :key="`${card.resource_id}-timeline-${index}`" class="workspace-shell-card-soft rounded-[16px] px-4 py-3">
-                        <p class="text-[11px] font-black uppercase tracking-[0.12em] text-text-muted">{{ item.label }}</p>
-                        <p class="mt-2 text-sm leading-6 text-text-secondary">{{ item.summary }}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div v-if="videoWatchFocus(card).length || videoReviewQuestions(card).length" class="grid gap-4 lg:grid-cols-2">
-                    <div v-if="videoWatchFocus(card).length" class="workspace-shell-card rounded-[20px] p-4">
-                      <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">观看关注点</p>
-                      <ul class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
-                        <li v-for="(item, index) in videoWatchFocus(card)" :key="`${card.resource_id}-watch-${index}`">{{ item }}</li>
-                      </ul>
-                    </div>
-                    <div v-if="videoReviewQuestions(card).length" class="workspace-shell-card rounded-[20px] p-4">
-                      <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">复习问题</p>
-                      <ul class="mt-3 space-y-2 text-sm leading-6 text-text-secondary">
-                        <li v-for="(item, index) in videoReviewQuestions(card)" :key="`${card.resource_id}-review-q-${index}`">{{ item }}</li>
-                      </ul>
-                    </div>
-                  </div>
-
-                  <a
-                    v-if="videoUrl(card)"
-                    :href="videoUrl(card)"
-                    target="_blank"
-                    rel="noreferrer"
-                    class="workspace-shell-btn workspace-shell-btn--secondary px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.10em]"
-                  >
-                    打开视频链接
-                  </a>
-                </div>
-
-                <div v-else-if="resourceType(card) === 'diagnostic_quiz'" class="space-y-4">
-                  <div v-if="quizGuidance(card)" class="workspace-shell-card rounded-[20px] p-4">
-                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">作答建议</p>
-                    <p class="mt-3 text-sm leading-7 text-text-secondary">{{ quizGuidance(card) }}</p>
-                  </div>
-
-                  <div
-                    v-for="question in quizQuestions"
-                    :key="question.id"
-                    class="workspace-shell-card rounded-[20px] p-4"
-                  >
-                    <p class="text-sm font-medium text-text-primary">{{ question.prompt }}</p>
-                    <p v-if="question.skillTag || question.difficulty" class="mt-2 text-[11px] leading-5 text-text-muted">
-                      {{ [question.skillTag, question.difficulty].filter(Boolean).join(" · ") }}
-                    </p>
-                    <div class="mt-3 space-y-2">
-                      <button
-                        v-for="(option, optionIndex) in question.options"
-                        :key="`${question.id}-${optionIndex}`"
-                        type="button"
-                        class="focus-ring w-full rounded-[14px] border px-3 py-2.5 text-left text-sm font-light transition-all duration-200 active:scale-[0.99]"
-                        :class="answerClass(question.id, optionIndex)"
-                        @click="setAnswer(question.id, optionIndex)"
-                      >
-                        {{ option }}
-                      </button>
-                    </div>
-                    <div v-if="submittedScore !== null && question.explanation" class="mt-3 workspace-shell-card-soft rounded-[16px] px-4 py-3">
-                      <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">题目解释</p>
-                      <p class="mt-2 text-sm leading-6 text-text-secondary">{{ question.explanation }}</p>
-                    </div>
-                  </div>
-
-                  <div class="workspace-shell-card flex flex-wrap items-center justify-between gap-3 rounded-[20px] p-4">
-                    <div class="text-sm font-light text-text-muted">
-                      {{ diagnosticStatusText }}
-                    </div>
-                    <button
-                      type="button"
-                      class="focus-ring btn-capsule"
-                      :disabled="!allAnswered || loading"
-                      @click="submitQuizScore"
-                    >
-                      提交诊断
-                    </button>
-                  </div>
-
-                  <div v-if="quizAfterGuidance(card) && submittedScore !== null" class="workspace-shell-card rounded-[20px] p-4">
-                    <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">提交后建议</p>
-                    <p class="mt-3 text-sm leading-7 text-text-secondary">{{ quizAfterGuidance(card) }}</p>
-                  </div>
-                </div>
-
-                <MarkdownContent
-                  v-else
-                  :content="bodyMarkdown(card)"
-                />
+                <button type="button" class="workspace-shell-btn workspace-shell-btn--accent focus-ring px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.10em]" @click.stop="openCard(card)">打开完整内容</button>
               </div>
             </template>
           </ResourceCard>
-          </template><!-- end alias -->
-          </div><!-- end existing-card slot -->
-
-          <!-- Case 2: empty slot — show placeholder with generate button -->
-          <div
-            v-else
-            class="resource-canvas__slot animate-cardIn h-full transition-all duration-300"
-            :style="{ animationDelay: `${index * 40}ms` }"
-          >
-            <div
-              class="slot-empty group h-full rounded-[22px] border border-dashed border-subtle/50 bg-space-elevated/40 flex flex-col items-center justify-center gap-4 p-6"
-              :style="{ '--rail-accent': slot.color }"
-            >
-              <span class="slot-empty-icon text-[2.25rem] opacity-40 group-hover:opacity-75 transition-opacity duration-300"
-                    :style="{ animationDelay: `${index * 0.4}s` }"
-                    aria-hidden="true">{{ slot.icon }}</span>
-              <div class="text-center space-y-0.5">
-                <p class="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted">{{ slot.label }}</p>
-                <p class="text-[11px] text-text-muted opacity-50">尚未生成</p>
-              </div>
-              <button
-                v-if="currentNode"
-                type="button"
-                class="btn-ripple workspace-shell-btn workspace-shell-btn--accent focus-ring px-4 py-2 text-[11px] font-semibold tracking-[0.06em] opacity-0 group-hover:opacity-100 translate-y-1 group-hover:translate-y-0 transition-all duration-200"
-                @click="$emit('generate-card', { nodeId: currentNode, cardType: slot.type })"
-              >
-                生成
-              </button>
+          </template>
+          </div>
+          <div v-else class="resource-canvas__slot animate-cardIn h-full transition-all duration-300" :style="{ animationDelay: `${index * 40}ms` }">
+            <div class="slot-empty group h-full rounded-[22px] border border-dashed border-subtle/50 bg-space-elevated/40 flex flex-col items-center justify-center gap-4 p-6" :style="{ '--rail-accent': slot.color }">
+              <span class="slot-empty-icon text-[2.25rem] opacity-40 group-hover:opacity-75 transition-opacity duration-300" :style="{ animationDelay: `${index * 0.4}s` }" aria-hidden="true">{{ slot.icon }}</span>
+              <div class="text-center space-y-0.5"><p class="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted">{{ slot.label }}</p><p class="text-[11px] text-text-muted opacity-50">尚未生成</p></div>
+              <button v-if="currentNode" type="button" class="btn-ripple workspace-shell-btn workspace-shell-btn--accent focus-ring px-4 py-2 text-[11px] font-semibold tracking-[0.06em] opacity-0 group-hover:opacity-100 translate-y-1 group-hover:translate-y-0 transition-all duration-200" @click="$emit('generate-card', { nodeId: currentNode, cardType: slot.type })">生成</button>
             </div>
           </div>
+        </template>
+      </div>
 
-        </template><!-- end cardTypeSlots v-for -->
+      <!-- 单类型：大页面式 -->
+      <div v-else class="space-y-6">
+        <template v-for="slot in cardTypeSlots" :key="slot.type">
+          <div v-if="slot.card && !minimizedIds.includes(slot.card.resource_id)" class="rounded-xl border border-subtle bg-card p-6">
+            <template v-for="card of [slot.card]" :key="slot.type">
+              <div class="flex items-center gap-3 mb-5">
+                <span class="text-xs font-semibold text-text-muted">{{ slot.label }}</span>
+                <span class="h-px flex-1 bg-subtle" />
+              </div>
+              <article v-if="resourceType(card) === 'concept_map'" class="text-sm leading-7 text-text-secondary">
+                <p class="text-text-primary">{{ conceptSummary(card) }}</p>
+                <template v-if="conceptSections(card).length"><section v-for="(section, index) in conceptSections(card)" :key="'sec-'+index" class="mt-10"><h3 class="text-base font-semibold text-text-primary">{{ section.heading }}</h3><p class="mt-3">{{ section.body }}</p></section></template>
+                <ul v-if="conceptObjectives(card).length" class="mt-10 space-y-2"><li v-for="(item, index) in conceptObjectives(card)" :key="'obj-'+index">{{ index + 1 }}. {{ item }}</li></ul>
+                <ul v-if="conceptBullets(card).length" class="mt-10 space-y-2"><li v-for="item in conceptBullets(card)" :key="'b-'+item">{{ item }}</li></ul>
+                <MarkdownContent v-if="conceptMermaidSource(card)" class="mt-10" :content="''" :mermaid-source="conceptMermaidSource(card)" />
+                <ul v-if="conceptMisconceptions(card).length" class="mt-10 space-y-2"><li v-for="item in conceptMisconceptions(card)" :key="'mis-'+item" class="text-text-muted text-xs">* {{ item }}</li></ul>
+                <ul v-if="conceptReviewPrompts(card).length" class="mt-10 space-y-2"><li v-for="(item, index) in conceptReviewPrompts(card)" :key="'rev-'+index">{{ index + 1 }}. {{ item }}</li></ul>
+              </article>
+              <article v-else-if="resourceType(card) === 'code_snippet'" class="text-sm leading-7 text-text-secondary">
+                <p>{{ codeScenario(card) }}</p>
+                <ul v-if="codePrerequisites(card).length" class="mt-10 space-y-2"><li v-for="item in codePrerequisites(card)" :key="'pre-'+item">{{ item }}</li></ul>
+                <div class="mt-10 overflow-hidden rounded-lg border border-subtle bg-[#0d1117]"><div class="px-4 py-2 border-b border-white/5"><span class="text-xs text-slate-400">{{ codeLanguage(card) }}</span></div><pre class="overflow-x-auto p-4 text-[13px] leading-6 text-slate-100"><code>{{ fullCode(card) }}</code></pre></div>
+                <MarkdownContent v-if="codeExplanation(card)" class="mt-10" :content="codeExplanation(card)" />
+                <ol v-if="codeWalkthrough(card).length" class="mt-10 space-y-3"><li v-for="(item, index) in codeWalkthrough(card)" :key="'walk-'+index" :value="index + 1">{{ item }}</li></ol>
+                <ul v-if="codeComplexityNotes(card).length" class="mt-10 space-y-2"><li v-for="item in codeComplexityNotes(card)" :key="'cx-'+item">{{ item }}</li></ul>
+                <ul v-if="codePitfalls(card).length" class="mt-10 space-y-2"><li v-for="item in codePitfalls(card)" :key="'pit-'+item" class="text-text-muted text-xs">* {{ item }}</li></ul>
+                <ul v-if="codeExperiments(card).length" class="mt-10 space-y-2"><li v-for="item in codeExperiments(card)" :key="'exp-'+item">{{ item }}</li></ul>
+              </article>
+              <article v-else-if="resourceType(card) === 'interactive_exercise'" class="text-sm leading-7 text-text-secondary">
+                <p class="text-text-primary font-medium">{{ exerciseGoal(card) }}</p><p class="mt-4">{{ exercisePrompt(card) }}</p>
+                <ol v-if="exerciseSteps(card).length" class="mt-10 space-y-4"><li v-for="(step, stepIndex) in exerciseSteps(card)" :key="'step-'+stepIndex" :value="stepIndex + 1"><p>{{ step }}</p></li></ol>
+                <ul v-if="exerciseCheckpoints(card).length" class="mt-10 space-y-2"><li v-for="item in exerciseCheckpoints(card)" :key="'cp-'+item">{{ item }}</li></ul>
+                <ul v-if="exerciseHints(card).length" class="mt-10 space-y-2"><li v-for="(hint, index) in exerciseHints(card)" :key="'hint-'+index" class="text-text-muted text-xs">{{ index + 1 }}. {{ hint }}</li></ul>
+                <div v-if="exerciseExpectedOutcome(card) || exerciseSolutionOutline(card)" class="mt-10 grid gap-8 sm:grid-cols-2"><div v-if="exerciseExpectedOutcome(card)"><h4 class="text-xs font-semibold text-text-muted mb-2">预期结果</h4><p>{{ exerciseExpectedOutcome(card) }}</p></div><div v-if="exerciseSolutionOutline(card)"><h4 class="text-xs font-semibold text-text-muted mb-2">参考思路</h4><p>{{ exerciseSolutionOutline(card) }}</p></div></div>
+              </article>
+              <article v-else-if="resourceType(card) === 'video_summary'" class="text-sm leading-7 text-text-secondary">
+                <p>{{ videoSummary(card) }}</p>
+                <ul v-if="videoKeyPoints(card).length" class="mt-10 space-y-2"><li v-for="point in videoKeyPoints(card)" :key="'kp-'+point">{{ point }}</li></ul>
+                <div v-if="videoTimeline(card).length" class="mt-10 space-y-4"><div v-for="item in videoTimeline(card)" :key="'tl-'+item.label"><span class="text-xs font-medium text-text-muted">{{ item.label }}</span><p class="mt-1">{{ item.summary }}</p></div></div>
+                <div v-if="videoWatchFocus(card).length || videoReviewQuestions(card).length" class="mt-10 grid gap-8 sm:grid-cols-2"><ul v-if="videoWatchFocus(card).length" class="space-y-2"><li v-for="item in videoWatchFocus(card)" :key="'wf-'+item">{{ item }}</li></ul><ul v-if="videoReviewQuestions(card).length" class="space-y-2"><li v-for="(item, index) in videoReviewQuestions(card)" :key="'rq-'+index">{{ index + 1 }}. {{ item }}</li></ul></div>
+                <a v-if="videoUrl(card)" :href="videoUrl(card)" target="_blank" rel="noreferrer" class="inline-block mt-10 text-xs font-medium text-primary hover:underline">打开视频链接 &rarr;</a>
+              </article>
+              <article v-else-if="resourceType(card) === 'diagnostic_quiz'" class="text-sm leading-7 text-text-secondary">
+                <p v-if="quizGuidance(card)" class="text-text-muted">{{ quizGuidance(card) }}</p>
+                <div v-for="question in quizQuestions" :key="question.id" class="mt-10"><p class="font-medium text-text-primary">{{ question.prompt }}</p><p v-if="question.skillTag || question.difficulty" class="mt-1 text-xs text-text-muted">{{ [question.skillTag, question.difficulty].filter(Boolean).join(" · ") }}</p><div class="mt-4 space-y-2"><button v-for="(option, optionIndex) in question.options" :key="`${question.id}-${optionIndex}`" type="button" class="focus-ring w-full rounded-lg border px-4 py-2.5 text-left text-sm transition-colors" :class="answerClass(question.id, optionIndex)" @click="setAnswer(question.id, optionIndex)">{{ option }}</button></div><div v-if="submittedScore !== null && question.explanation" class="mt-4 text-xs text-text-muted">{{ question.explanation }}</div></div>
+                <div class="mt-10 flex flex-wrap items-center justify-between gap-3"><p class="text-xs text-text-muted">{{ diagnosticStatusText }}</p><button type="button" class="focus-ring btn-capsule" :disabled="!allAnswered || loading" @click="submitQuizScore">提交诊断</button></div>
+                <p v-if="quizAfterGuidance(card) && submittedScore !== null" class="mt-8">{{ quizAfterGuidance(card) }}</p>
+              </article>
+              <MarkdownContent v-else :content="bodyMarkdown(card)" />
+            </template>
+          </div>
+          <div v-else class="rounded-xl border border-dashed border-subtle/30 p-8 flex flex-col items-center justify-center gap-3">
+            <span class="text-3xl opacity-30" aria-hidden="true">{{ slot.icon }}</span>
+            <p class="text-xs text-text-muted">{{ slot.label }} · 尚未生成</p>
+            <button v-if="currentNode" type="button" class="focus-ring rounded-lg border border-subtle px-4 py-2 text-xs text-text-muted hover:text-text-primary hover:border-primary/30 transition-colors" @click="$emit('generate-card', { nodeId: currentNode, cardType: slot.type })">生成</button>
+          </div>
+        </template>
       </div>
 
     </div>

@@ -278,6 +278,24 @@ def problem_binding_for_node(node_id: str) -> Dict[str, Any]:
     }
 
 
+def problem_context_for_node(node_id: str) -> Dict[str, Any]:
+    """Return generator-safe executable practice context without answer keys.
+
+    Resource prompts need the actual task and starter code to avoid generic
+    examples, but reference solutions and hidden tests must remain server-only.
+    """
+    problem_id = _NODE_PROBLEM_IDS.get(str(node_id or "").strip(), "ds-list-sum")
+    problem = _PROBLEMS[problem_id]
+    return {
+        **problem_binding_for_node(node_id),
+        "title": problem.title,
+        "prompt": problem.prompt,
+        "constraints": problem.constraints,
+        "function_name": problem.function_name,
+        "public_tests": [_public_test_payload(test) for test in problem.public_tests],
+    }
+
+
 def _as_resource_id(value: object) -> str:
     return str(value or "").strip()
 

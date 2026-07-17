@@ -1,8 +1,11 @@
 import os
 import sys
+import time
 import types
 import uuid
+from urllib.parse import quote
 
+import pytest
 from starlette.testclient import TestClient
 from src.auth.security import SecurityManager
 
@@ -40,7 +43,19 @@ from frontend.server import (  # noqa: E402
     app,
     sessions,
 )
+from frontend import server  # noqa: E402
 from src.application._common import get_session  # noqa: E402
+from src.application import resource_service  # noqa: E402
+from src.database.resource_generation_repo import (  # noqa: E402
+    MemoryResourceGenerationRepo,
+    _MemoryGenerationStore,
+)
+from tests.helpers import (  # noqa: E402
+    FakeValidationPipeline,
+    consume_sse_handler,
+    disable_persistence,
+    install_fake_runtime,
+)
 
 
 def _new_identity() -> tuple[str, str]:
@@ -49,6 +64,41 @@ def _new_identity() -> tuple[str, str]:
 
 def _client() -> TestClient:
     return TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_resource_generation(monkeypatch: pytest.MonkeyPatch) -> None:
+    runtime = install_fake_runtime(monkeypatch)
+    monkeypatch.setattr("src.orchestration_runtime._runtime", runtime)
+    disable_persistence(monkeypatch)
+    # The repository's default in-memory store is process-wide so workers can
+    # coordinate in development. Contract cases need a genuinely cold cache.
+    repository = MemoryResourceGenerationRepo(store=_MemoryGenerationStore())
+    monkeypatch.setattr(resource_service, "get_resource_generation_repo", lambda: repository)
+    monkeypatch.setattr(resource_service, "get_validation_pipeline", lambda: FakeValidationPipeline())
+
+    def evaluate_verified_diagnostic(inp):
+        state = inp.agent_state
+        node_id = inp.raw_behavior.node_id
+        before = state.dynamic_profile.knowledge_mastery.get(node_id, 0.0)
+        correctness = float(inp.raw_behavior.answer_correctness)
+        delta = 0.1 if correctness >= 1.0 else 0.0
+        after = min(1.0, before + delta)
+        state.dynamic_profile.knowledge_mastery[node_id] = after
+        return types.SimpleNamespace(
+            agent_state=state,
+            cleaned_behavior=types.SimpleNamespace(
+                effective_correctness=correctness,
+                anomaly=types.SimpleNamespace(anomaly_type=types.SimpleNamespace(value="none")),
+            ),
+            anomaly_detected=False,
+            mastery_delta=delta,
+            pid_error=0.0,
+            replan_decision=types.SimpleNamespace(value="none"),
+            updated_mastery=after,
+        )
+
+    monkeypatch.setattr(runtime, "evaluator", evaluate_verified_diagnostic)
 
 
 def _init_workspace(client: TestClient, user_id: str, course_id: str) -> str:
@@ -62,7 +112,53 @@ def _init_workspace(client: TestClient, user_id: str, course_id: str) -> str:
     return state["current_node_id"] or state["active_path"][0]
 
 
-def _load_node(client: TestClient, user_id: str, course_id: str, node_id: str) -> dict:
+def _session_path(user_id: str, course_id: str) -> str:
+    return quote(f"{user_id}:{course_id}", safe="")
+
+
+def _auth_headers(user_id: str) -> dict[str, str]:
+    token = SecurityManager.create_token_pair(user_id, "STUDENT")["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _request_generation(
+    client: TestClient,
+    user_id: str,
+    course_id: str,
+    node_id: str,
+    card_types: list[str],
+    *,
+    priority: str,
+) -> str:
+    response = client.post(
+        f"/api/sessions/{_session_path(user_id, course_id)}/resources/{node_id}/generation",
+        json={"card_types": card_types, "force": False, "priority": priority},
+        headers=_auth_headers(user_id),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["missing_card_types"] == card_types
+    job_id = payload["job_id"]
+    assert job_id
+    stream = consume_sse_handler(
+        server.api_resource_generation_events,
+        path=f"/api/resource-generation-jobs/{job_id}/events",
+        path_params={"job_id": job_id},
+        headers=_auth_headers(user_id),
+    )
+    assert "'event': 'card_ready'" in stream
+    assert "'event': 'completed'" in stream
+    return stream
+
+
+def _load_node(
+    client: TestClient,
+    user_id: str,
+    course_id: str,
+    node_id: str,
+    *,
+    generate_resources: bool = True,
+) -> dict:
     response = client.post(
         "/api/pipeline/step",
         json={
@@ -74,12 +170,39 @@ def _load_node(client: TestClient, user_id: str, course_id: str, node_id: str) -
     )
     assert response.status_code == 200
     resources_response = client.get(
-        f"/api/sessions/{user_id}:{course_id}/resources/{node_id}",
-        headers={
-            "Authorization": "Bearer " + SecurityManager.create_token_pair(user_id, "STUDENT")["access_token"]
-        },
+        f"/api/sessions/{_session_path(user_id, course_id)}/resources/{node_id}",
+        headers=_auth_headers(user_id),
     )
     assert resources_response.status_code == 200
+    resources = resources_response.json()
+    if generate_resources:
+        # The read is intentionally empty on a cold node. The learning flow
+        # then prioritizes the concept map; the server enqueues its supporting
+        # bundle after that card persists, without a second client POST.
+        assert resources["resources"] == []
+        concept_stream = _request_generation(
+            client,
+            user_id,
+            course_id,
+            node_id,
+            ["concept_map"],
+            priority="concept_map",
+        )
+        assert "concept_map" in concept_stream
+        assert "follow_up_job_id" in concept_stream
+        deadline = time.monotonic() + 3.0
+        while True:
+            concept_response = client.get(
+                f"/api/sessions/{_session_path(user_id, course_id)}/resources/{node_id}",
+                headers=_auth_headers(user_id),
+            )
+            assert concept_response.status_code == 200
+            resource_types = [card["resource_type"] for card in concept_response.json()["resources"]]
+            if resource_types == RESOURCE_CARD_ORDER or time.monotonic() >= deadline:
+                break
+            time.sleep(0.02)
+        assert "concept_map" in resource_types
+        assert resource_types == RESOURCE_CARD_ORDER
     return response.json()
 
 
@@ -149,7 +272,7 @@ def test_repeated_load_node_does_not_duplicate_cards() -> None:
     node_id = _init_workspace(client, user_id, course_id)
 
     _load_node(client, user_id, course_id, node_id)
-    _load_node(client, user_id, course_id, node_id)
+    _load_node(client, user_id, course_id, node_id, generate_resources=False)
 
     state = _fetch_state(client, user_id, course_id)
     cards = _cards_for_node(state, node_id)

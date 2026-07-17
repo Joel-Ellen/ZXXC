@@ -81,6 +81,23 @@
 
 工具为 [`scripts/release_smoke.py`](../../scripts/release_smoke.py)。它只从环境读取地址和令牌，不创建账号、不写学习事件、不跟随重定向，也不输出响应正文或请求头。
 
+远端验证统一通过 [`.github/workflows/staging-verify.yml`](../../.github/workflows/staging-verify.yml) 手工发起。发起人必须选择默认分支，输入精确的 `VERIFY-STAGING`、所选完整 commit SHA、模式和同一 release/window 的可信前端会话样本数。任一确认、SHA、分支或样本输入不合法都会在网络请求前失败。目标地址不接受手工输入，只能读取 GitHub `staging` environment 中由管理员维护的 `EDUAGENT_STAGING_BASE_URL` variable，避免发起人把凭据导向其他主机。
+
+该 workflow 只从 GitHub `staging` environment 的固定 variable 和两个 Actions secret 读取目标及凭据：
+
+- `EDUAGENT_STAGING_BASE_URL`
+
+- `EDUAGENT_STAGING_ACCESS_TOKEN`
+- `EDUAGENT_STAGING_OPS_TOKEN`
+
+secret 只注入执行 `release_smoke.py` 的单个 step，不传给 checkout、Python setup 或 artifact action。工作流不得输出环境、请求头、token 或响应正文。三个模式的行为为：
+
+- `preflight`：仅执行固定的只读 GET preflight。
+- `gates`：仅 GET `/api/ops/metrics`，使用输入的前端会话样本和固定最小样本 200 计算闸门。
+- `preflight-load`：先通过 preflight，再显式设置 `EDUAGENT_SMOKE_ALLOW_LOAD=true`，只对 `/api/ready` 执行 100 请求、5 并发的 GET load。目标仍必须满足脚本的 staging/loopback/`.test`/`.internal` 命名限制，且请求数、并发、超时和路径继续受脚本硬上限约束；workflow 不提供绕过 host allowlist 或放大负载的输入。
+
+成功或失败都会上传 `staging-verification-<run>-<attempt>` artifact。固定的 `staging-evidence/` 目录只包含非敏感运行上下文、脚本 JSON、错误 JSON、job 状态和 SHA256 校验和。artifact 是 staging 证据，不代表生产灰度已经获批。
+
 支持的秘密环境变量：
 
 - `EDUAGENT_SMOKE_BASE_URL` 或 `BASE_URL`

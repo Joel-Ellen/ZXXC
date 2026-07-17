@@ -34,7 +34,10 @@ from datetime import datetime
 from enum import Enum
 
 import httpx
-from openai import AsyncOpenAI
+try:
+    from openai import AsyncOpenAI
+except ImportError:  # Providers are optional in offline/test deployments.
+    AsyncOpenAI = None  # type: ignore[assignment,misc]
 
 from .token_estimator import TokenEstimator
 from .input_manager import InputManager
@@ -148,6 +151,8 @@ class LLMClientV2:
             self._client = None
             return
 
+        if AsyncOpenAI is None:
+            raise ImportError("openai is required for OpenAI-compatible LLM providers")
         self._client = AsyncOpenAI(
             api_key=api_key,
             base_url=self.config["api_url"],
@@ -681,8 +686,17 @@ class LLMClientV2:
         temperature: float = None,
         max_tokens: int = None,
         json_mode: bool = False,
+        timeout_sec: Optional[float] = None,
     ) -> Dict[str, Any]:
         """同步版本的 chat()，返回与 async chat() 相同的 dict 结构。"""
+        bounded_timeout = max(0.1, float(timeout_sec)) if timeout_sec is not None else 45.0
+
+        async def invoke() -> Dict[str, Any]:
+            return await asyncio.wait_for(
+                self.chat(messages, temperature, max_tokens, json_mode),
+                timeout=bounded_timeout,
+            )
+
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
@@ -690,15 +704,13 @@ class LLMClientV2:
                 with concurrent.futures.ThreadPoolExecutor() as pool:
                     future = pool.submit(
                         asyncio.run,
-                        self.chat(messages, temperature, max_tokens, json_mode)
+                        invoke(),
                     )
-                    return future.result(timeout=45.0)
+                    return future.result(timeout=bounded_timeout + 0.5)
             else:
-                return loop.run_until_complete(
-                    self.chat(messages, temperature, max_tokens, json_mode)
-                )
+                return loop.run_until_complete(invoke())
         except RuntimeError:
-            return asyncio.run(self.chat(messages, temperature, max_tokens, json_mode))
+            return asyncio.run(invoke())
 
 
 # ============================================================================

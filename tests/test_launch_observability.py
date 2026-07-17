@@ -6,7 +6,9 @@ from starlette.responses import JSONResponse
 from starlette.testclient import TestClient
 
 from frontend import server
+from src.auth.security import SecurityManager
 from src.observability import metrics, metrics_snapshot, reset_metrics
+from tests.helpers import consume_sse_handler
 
 
 def setup_function() -> None:
@@ -97,6 +99,89 @@ def test_client_events_accept_only_fixed_non_pii_dimensions() -> None:
     assert all("user_id" not in labels and "message" not in labels for labels in counter_labels)
 
 
+def test_resource_latency_client_events_are_bounded_and_histogrammed() -> None:
+    client = TestClient(server.app)
+
+    cached = client.post(
+        "/api/ops/client-events",
+        json={
+            "event": "resource_cache_read",
+            "surface": "learn",
+            "duration_ms": 82,
+            "cache_hit": True,
+            "outcome": "success",
+        },
+    )
+    cold = client.post(
+        "/api/ops/client-events",
+        json={
+            "event": "resource_concept_ready",
+            "surface": "learn",
+            "duration_ms": 9_400,
+            "cache_hit": False,
+            "outcome": "success",
+        },
+    )
+    invalid = client.post(
+        "/api/ops/client-events",
+        json={
+            "event": "resource_cache_read",
+            "surface": "learn",
+            "duration_ms": 82.5,
+            "cache_hit": "yes",
+            "outcome": "success",
+        },
+    )
+
+    assert cached.status_code == 202
+    assert cold.status_code == 202
+    assert invalid.status_code == 422
+    assert metrics.counter_value(
+        "frontend.resource_cache_read_total",
+        surface="learn",
+        cache_hit="true",
+        outcome="success",
+    ) == 1
+    assert metrics.counter_value(
+        "frontend.resource_concept_ready_total",
+        surface="learn",
+        cache_hit="false",
+        outcome="success",
+    ) == 1
+    histograms = {
+        histogram["name"]: histogram
+        for histogram in metrics_snapshot()["histograms"]
+    }
+    assert histograms["frontend.resource_cache_read_ms"]["p95"] == 82.0
+    assert histograms["frontend.resource_concept_ready_ms"]["p95"] == 9400.0
+
+
+def test_historical_sync_resource_routes_are_not_mounted() -> None:
+    paths = {
+        route.path
+        for route in server.app.routes
+        if hasattr(route, "path")
+    }
+    assert "/api/resources/generate" in paths
+    assert "/api/resources/generate-all" in paths
+    assert all(route.path not in server._RETIRED_RESOURCE_GENERATION_PATHS for route in server._MOUNTED_NEW_ROUTES)
+
+    client = TestClient(server.app)
+    assert client.post("/api/resources/generate", json={}).status_code == 404
+    assert client.post("/api/resources/generate-all", json={}).status_code == 404
+
+
+def test_legacy_resource_bridge_requires_its_own_explicit_switch(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("EDUAGENT_ENABLE_COMPAT_API", "true")
+    monkeypatch.setenv("EDUAGENT_ENABLE_LEGACY_RESOURCE_GENERATION", "false")
+    client = TestClient(server.app)
+
+    response = client.post("/api/resources/generate-node", json={})
+
+    assert response.status_code == 404
+
+
 def test_production_release_metrics_require_authenticated_telemetry(monkeypatch) -> None:
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setattr(
@@ -137,18 +222,69 @@ def test_production_release_metrics_require_authenticated_telemetry(monkeypatch)
 
 
 def test_resource_and_code_execution_outcomes_feed_launch_rates(monkeypatch) -> None:
-    monkeypatch.setattr(server, "_event_session_auth_error", lambda *_args: None)
-
-    def generate(_user_id, _course_id, node_id, _force, **_kwargs):
+    def request_generation(_user_id, _course_id, node_id, *, card_types, force, priority):
         if node_id == "failed":
             return {"status": "failed", "status_code": 503}
-        return {"status": "generated", "resources": []}
+        assert card_types == ["concept_map"]
+        assert force is False
+        assert priority == "concept_map"
+        return {
+            "job_id": "launch-resource-job",
+            "status": "queued",
+            "existing_resources": [],
+            "missing_card_types": ["concept_map"],
+        }
 
-    monkeypatch.setattr(server.resource_service, "generate_current_node_resources", generate)
+    def get_job(job_id, user_id=None):
+        assert job_id == "launch-resource-job"
+        assert user_id in (None, "user")
+        return {"job_id": job_id, "user_id": "user", "status": "completed"}
+
+    def list_events(job_id, *, after_event_id=0, user_id=None):
+        assert job_id == "launch-resource-job"
+        assert user_id == "user"
+        return [
+            event
+            for event in [
+                {"event_id": 1, "event_type": "queued", "payload": {"status": "queued"}},
+                {
+                    "event_id": 2,
+                    "event_type": "card_ready",
+                    "payload": {"card_type": "concept_map", "card": {"resource_type": "concept_map"}},
+                },
+                {"event_id": 3, "event_type": "completed", "payload": {"status": "completed"}},
+            ]
+            if event["event_id"] > after_event_id
+        ]
+
+    monkeypatch.setattr(server.resource_service, "request_generation", request_generation)
+    monkeypatch.setattr(server.resource_service, "get_generation_job", get_job)
+    monkeypatch.setattr(server.resource_service, "list_generation_events", list_events)
     client = TestClient(server.app)
+    token = SecurityManager.create_token_pair("user", "STUDENT")["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
 
-    assert client.get("/api/sessions/user%3Acourse/resources/N01").status_code == 200
-    assert client.get("/api/sessions/user%3Acourse/resources/failed").status_code == 503
+    accepted = client.post(
+        "/api/sessions/user%3Acourse/resources/N01/generation",
+        json={"card_types": ["concept_map"], "priority": "concept_map"},
+        headers=headers,
+    )
+    assert accepted.status_code == 200
+    stream = consume_sse_handler(
+        server.api_resource_generation_events,
+        path="/api/resource-generation-jobs/launch-resource-job/events",
+        path_params={"job_id": "launch-resource-job"},
+        headers=headers,
+    )
+    assert "'event': 'card_ready'" in stream
+    assert "'event': 'completed'" in stream
+
+    rejected = client.post(
+        "/api/sessions/user%3Acourse/resources/failed/generation",
+        json={"card_types": ["concept_map"], "priority": "concept_map"},
+        headers=headers,
+    )
+    assert rejected.status_code == 503
 
     server._practice_response({"status": "ok", "verdict": "accepted", "runtime_ms": 5}, mode="run")
     server._practice_response({"status": "ok", "verdict": "wrong_answer", "runtime_ms": 7}, mode="run")
@@ -156,6 +292,10 @@ def test_resource_and_code_execution_outcomes_feed_launch_rates(monkeypatch) -> 
 
     launch = metrics_snapshot()["launch"]
     assert launch["resource_failure"]["rate"] == 0.5
+    assert metrics.counter_value("resource.generation_request_total", outcome="success") == 1
+    assert metrics.counter_value("resource.generation_request_total", outcome="failure") == 1
+    assert metrics.counter_value("resource.generate_total", outcome="success", card_type="concept_map") == 1
+    assert metrics.counter_value("resource.generate_total", outcome="failure", card_type="concept_map") == 1
     assert launch["code_execution_failure"]["rate"] == 0.666667
     assert launch["code_execution_failure"]["infrastructure_rate"] == 0.333333
 

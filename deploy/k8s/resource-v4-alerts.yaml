@@ -1,0 +1,60 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: resource-v4-alerts
+spec:
+  groups:
+    - name: resource-v4-immediate
+      rules:
+        - alert: ResourceCrossCourseRecall
+          expr: increase(resource_cross_course_recall_total[5m]) > 0
+          for: 0m
+          labels:
+            severity: critical
+        - alert: ResourceUnsupportedCriticalClaim
+          expr: increase(resource_unsupported_critical_claim_total[5m]) > 0
+          for: 0m
+          labels:
+            severity: critical
+        - alert: SandboxEscape
+          expr: increase(sandbox_escape_total[5m]) > 0
+          for: 0m
+          labels:
+            severity: critical
+        - alert: ResourcePublicationWithoutAttribution
+          expr: increase(resource_unattributed_publication_total[5m]) > 0
+          for: 0m
+          labels:
+            severity: critical
+        - alert: ResourceTelemetrySchemaInvalid
+          expr: absent(resource_telemetry_schema_valid) or max(resource_telemetry_schema_valid) == 0
+          for: 1m
+          labels:
+            severity: critical
+    - name: resource-v4-operational
+      rules:
+        - alert: ResourceQueueOldestOver60Seconds
+          expr: max(resource_queue_oldest_age_seconds) > 60
+          for: 5m
+          labels:
+            severity: warning
+        - alert: ResourceGenerationFailureRate
+          expr: sum(rate(resource_generate_total{outcome="failure"}[10m])) / clamp_min(sum(rate(resource_generate_total[10m])), 1) > 0.01
+          for: 10m
+          labels:
+            severity: warning
+        - alert: ResourceFallbackRate
+          expr: sum(rate(llm_fallback_total[10m])) / clamp_min(sum(rate(resource_generate_total[10m])), 1) > 0.05
+          for: 10m
+          labels:
+            severity: warning
+        - alert: ResourceProviderCircuitOpen
+          expr: max by (provider) (resource_provider_circuit_open) == 1
+          for: 5m
+          labels:
+            severity: warning
+        - alert: ResourceCostForecastOverBudget
+          expr: max(resource_cost_forecast_ratio) > 1.2
+          for: 15m
+          labels:
+            severity: warning

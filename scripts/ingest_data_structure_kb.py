@@ -77,6 +77,20 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Delete and recreate the target index before ingesting.",
     )
+    parser.add_argument("--course-id", default="data_structures")
+    parser.add_argument(
+        "--node-ids",
+        default="",
+        help="Comma-separated node ids covered by this document.",
+    )
+    parser.add_argument("--content-kind", default="explanation")
+    parser.add_argument("--locale", default="zh-CN")
+    parser.add_argument("--content-version", default="resource-kb-v4")
+    parser.add_argument(
+        "--activate-aliases",
+        action="store_true",
+        help="Atomically point resource-kb-v4 read/write aliases at this index.",
+    )
     return parser.parse_args()
 
 
@@ -108,9 +122,23 @@ def main() -> int:
         chunks = pipeline.ingest_markdown_file(
             args.file,
             document_id="data_structure_kb",
-            extra_metadata={"course": "数据结构", "retrieval": "bm25+hnsw+rrf"},
+            extra_metadata={
+                "course": "数据结构",
+                "course_id": args.course_id,
+                "node_ids": [
+                    value.strip()
+                    for value in args.node_ids.split(",")
+                    if value.strip()
+                ],
+                "content_kind": args.content_kind,
+                "locale": args.locale,
+                "content_version": args.content_version,
+                "retrieval": "bm25+hnsw+rrf",
+            },
             recreate_index=args.recreate,
         )
+        if args.activate_aliases:
+            client.switch_aliases(config.index_name)
     except Exception as exc:
         print(f"Ingestion failed: {exc}", file=sys.stderr)
         print("Check Elasticsearch host/auth settings and confirm the service is running.", file=sys.stderr)

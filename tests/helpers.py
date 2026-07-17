@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
+
+from starlette.requests import Request
 
 from src.infrastructure.cold_start import ColdStartEngine
 from src.orchestration_runtime import RuntimeSession
@@ -111,3 +114,49 @@ def disable_persistence(monkeypatch):
     monkeypatch.setattr("src.application.resource_service.persist_session", lambda session: None)
     monkeypatch.setattr("src.application.tutor_service.persist_session", lambda session: None)
     monkeypatch.setattr("src.application._common.load_persisted_session", lambda user_id, course_id="data_structures": None)
+
+
+def consume_sse_handler(
+    handler: Callable[[Request], Any],
+    *,
+    path: str,
+    path_params: Dict[str, str],
+    headers: Dict[str, str],
+) -> str:
+    """Consume an SSE handler without binding sse-starlette to TestClient loops."""
+
+    async def consume() -> str:
+        sent = False
+
+        async def receive():
+            nonlocal sent
+            if sent:
+                return {"type": "http.request", "body": b"", "more_body": False}
+            sent = True
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        request = Request(
+            {
+                "type": "http",
+                "method": "GET",
+                "path": path,
+                "path_params": path_params,
+                "query_string": b"",
+                "headers": [
+                    (key.lower().encode("ascii"), value.encode("ascii"))
+                    for key, value in headers.items()
+                ],
+                "server": ("testserver", 80),
+                "client": ("testclient", 50000),
+                "scheme": "http",
+            },
+            receive,
+        )
+        response = await handler(request)
+        assert response.status_code == 200
+        chunks = []
+        async for chunk in response.body_iterator:
+            chunks.append(chunk.decode("utf-8") if isinstance(chunk, bytes) else str(chunk))
+        return "".join(chunks)
+
+    return asyncio.run(consume())

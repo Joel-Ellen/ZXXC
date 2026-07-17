@@ -11,7 +11,18 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-import psycopg2
+try:
+    import psycopg2
+except ImportError:  # Keep JSON/in-memory application paths importable without Postgres.
+    class _PsycopgUnavailable:
+        class IntegrityError(Exception):
+            pass
+
+        class errors:
+            class UniqueViolation(Exception):
+                pass
+
+    psycopg2 = _PsycopgUnavailable()  # type: ignore[assignment]
 
 from .connection import db
 

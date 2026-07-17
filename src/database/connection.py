@@ -13,8 +13,15 @@ import threading
 from datetime import datetime, timezone
 from typing import Mapping, Optional
 
-import psycopg2
-import psycopg2.extras
+try:
+    import psycopg2
+    import psycopg2.extras
+except ImportError:  # Optional in the in-memory/test runtime.
+    class _PsycopgUnavailable:
+        class IntegrityError(Exception):
+            pass
+
+    psycopg2 = _PsycopgUnavailable()  # type: ignore[assignment]
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -135,6 +142,8 @@ class Database:
     # ------------------------------------------------------------------
 
     def _get_conn(self):
+        if not hasattr(psycopg2, "connect"):
+            raise RuntimeError("psycopg2 is unavailable")
         if not hasattr(self._local, "conn") or self._local.conn is None or self._local.conn.closed:
             self._local.conn = psycopg2.connect(DATABASE_URL)
             self._local.conn.autocommit = False
@@ -147,7 +156,8 @@ class Database:
     def execute(self, sql: str, params=()):
         self._ensure_init()
         conn = self._get_conn()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor_factory = getattr(getattr(psycopg2, "extras", None), "RealDictCursor", None)
+        cur = conn.cursor(cursor_factory=cursor_factory) if cursor_factory is not None else conn.cursor()
         cur.execute(sql, params)
         return _CursorWrapper(cur, conn)
 

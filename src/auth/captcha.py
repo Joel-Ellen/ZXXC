@@ -3,18 +3,22 @@
 验证码生成器 — SVG 数学公式验证码
 =================================
 生成简单算术运算的 SVG 验证码图片，无需外部图片库依赖。
-验证码答案存入内存，带 TTL 过期机制。
+开发环境可使用进程内 TTL 存储；生产环境使用共享 Redis，保证多副本可验证。
 """
 
 from __future__ import annotations
 
 import random
 import secrets
+import string
 import time
 import threading
-from typing import Dict, Tuple
-from dataclasses import dataclass, field
-from datetime import datetime
+from typing import Any, Dict, Tuple
+from dataclasses import dataclass
+
+
+class CaptchaBackendUnavailable(RuntimeError):
+    """Raised when the required shared captcha backend cannot be used."""
 
 
 @dataclass
@@ -47,10 +51,21 @@ class CaptchaGenerator:
     SVG_FONT_SIZE: int = 28
     MAX_RECORDS: int = 10_000
 
-    def __init__(self) -> None:
+    def __init__(self, *, redis_client: Any = None, require_shared: bool = False) -> None:
+        if require_shared and redis_client is None:
+            raise CaptchaBackendUnavailable("shared captcha backend is required")
+        self._redis = redis_client
         self._records: Dict[str, CaptchaRecord] = {}
         self._cleanup_counter: int = 0
         self._lock = threading.RLock()
+
+    @property
+    def uses_shared_backend(self) -> bool:
+        return self._redis is not None
+
+    @staticmethod
+    def _redis_key(token: str) -> str:
+        return f"eduagent:auth:captcha:{token}"
 
     # ------------------------------------------------------------------
     # 验证码生成
@@ -84,19 +99,37 @@ class CaptchaGenerator:
             answer = a * b
             expr = f"{a} x {b} = ?"
 
-        token = secrets.token_hex(8)
-
-        with self._lock:
-            if len(self._records) >= self.MAX_RECORDS:
-                oldest = min(self._records.values(), key=lambda record: record.created_at)
-                self._records.pop(oldest.token, None)
-            self._records[token] = CaptchaRecord(
-                token=token,
-                answer=str(answer),
-                expression=expr,
-                created_at=time.time(),
-                ttl_seconds=self.EXPIRE_SECONDS,
-            )
+        if self._redis is not None:
+            token = ""
+            for _attempt in range(3):
+                candidate = secrets.token_hex(8)
+                try:
+                    stored = self._redis.set(
+                        self._redis_key(candidate),
+                        str(answer),
+                        ex=self.EXPIRE_SECONDS,
+                        nx=True,
+                    )
+                except Exception as exc:
+                    raise CaptchaBackendUnavailable("shared captcha backend unavailable") from exc
+                if stored:
+                    token = candidate
+                    break
+            if not token:
+                raise CaptchaBackendUnavailable("captcha token collision")
+        else:
+            token = secrets.token_hex(8)
+            with self._lock:
+                if len(self._records) >= self.MAX_RECORDS:
+                    oldest = min(self._records.values(), key=lambda record: record.created_at)
+                    self._records.pop(oldest.token, None)
+                self._records[token] = CaptchaRecord(
+                    token=token,
+                    answer=str(answer),
+                    expression=expr,
+                    created_at=time.time(),
+                    ttl_seconds=self.EXPIRE_SECONDS,
+                )
 
         return self._render_svg(expr), token
 
@@ -110,17 +143,35 @@ class CaptchaGenerator:
         Returns:
             True 若正确且在有效期内。
         """
+        normalized_token = str(token or "").strip().lower()
+        if len(normalized_token) != 16 or any(
+            character not in string.hexdigits for character in normalized_token
+        ):
+            return False
+        normalized_answer = str(user_answer or "").strip()
+        if self._redis is not None:
+            try:
+                expected = self._redis.getdel(self._redis_key(normalized_token))
+            except Exception as exc:
+                raise CaptchaBackendUnavailable("shared captcha backend unavailable") from exc
+            if isinstance(expected, bytes):
+                expected = expected.decode("utf-8")
+            return bool(
+                expected is not None
+                and secrets.compare_digest(str(expected).strip(), normalized_answer)
+            )
+
         self._maybe_cleanup()
         with self._lock:
-            record = self._records.get(token)
+            record = self._records.get(normalized_token)
             if record is None:
                 return False
             if record.is_expired():
-                del self._records[token]
+                del self._records[normalized_token]
                 return False
             # 验证后立即删除（一次性使用）
-            is_correct = record.answer.strip() == user_answer.strip()
-            del self._records[token]
+            is_correct = secrets.compare_digest(record.answer.strip(), normalized_answer)
+            del self._records[normalized_token]
             return is_correct
 
     # ------------------------------------------------------------------
@@ -180,6 +231,8 @@ class CaptchaGenerator:
 
     def _maybe_cleanup(self) -> None:
         """定期清理过期记录（每 50 次调用执行一次）。"""
+        if self._redis is not None:
+            return
         with self._lock:
             self._cleanup_counter += 1
             if self._cleanup_counter < 50:

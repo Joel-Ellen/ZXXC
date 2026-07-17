@@ -1,0 +1,45 @@
+name: resource-v4-backend
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "scripts/**"
+      - "alembic/**"
+      - "deploy/k8s/**"
+      - "requirements.txt"
+  workflow_dispatch:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: eduagent_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d eduagent_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/eduagent_test
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/eduagent_test
+      EDUAGENT_RUN_POSTGRES_INTEGRATION: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: alembic upgrade head --sql > /tmp/resource-v4.sql
+      - run: alembic upgrade head
+      - run: python scripts/run_resource_v4_eval.py
+      - run: pytest -q

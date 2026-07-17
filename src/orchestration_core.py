@@ -678,7 +678,7 @@ def run_official_learning_step(
     from src.agents.profiler_node import ProfilerInput
     from src.agents.tutor_node import TutorInput
     from src.application._common import RESOURCE_CARD_ORDER, normalize_state_resources
-    from src.application.resource_service import generate_current_node_resources
+    from src.application.resource_service import request_generation
 
     _runtime = runtime if runtime is not None else _get_runtime()
     state: AgentState = session.agent_state
@@ -742,6 +742,10 @@ def run_official_learning_step(
         mastery_update_reason = "unsupported_learning_event"
 
     logs: List[Dict[str, Any]] = []
+    # Resource work must stay outside the learning-event critical path. Keep
+    # the enqueue request until state reconciliation below, so a fast worker
+    # cannot race evaluator or assessment updates.
+    pending_resource_generation: Optional[Dict[str, Any]] = None
 
     # ── Step 1 + 2: Evaluator → Profiler (verified completion only) ─────
     if not evidence_verified:
@@ -900,30 +904,22 @@ def run_official_learning_step(
             "reason": "resource_service validates cards before publishing",
         })
     else:
-        session.agent_state = state
-        resource_result = generate_current_node_resources(
-            session.agent_state.user_id
-            if hasattr(session.agent_state, "user_id")
-            else "",
-            session.agent_state.course_id
-            if hasattr(session.agent_state, "course_id")
-            else "data_structures",
-            current_node,
-            force=False,
-        )
-        state = session.agent_state
-        generated_cards = state.generated_resources.get(current_node, [])
-        logs.append({
-            "agent": "ContentMesh",
-            "status": resource_result.get("status", "generated"),
-            "generated_cards": len(generated_cards),
-            "card_types": [getattr(card, "card_type", "") for card in generated_cards],
-        })
-        logs.append({
-            "agent": "Validator",
-            "status": "handled_by_resource_service",
-            "reason": "resource_service validates cards before publishing",
-        })
+        missing_card_types = [
+            card_type
+            for card_type in RESOURCE_CARD_ORDER
+            if card_type not in existing_types
+        ]
+        # Advancing to a new node can originate outside the browser route.
+        # Preserve the same first-paint contract here: enqueue only the
+        # concept map, then let its durable job create the supporting bundle.
+        concept_missing = "concept_map" in missing_card_types
+        pending_resource_generation = {
+            "user_id": str(getattr(state, "user_id", "")),
+            "course_id": str(getattr(state, "course_id", "") or "data_structures"),
+            "node_id": current_node,
+            "card_types": ["concept_map"] if concept_missing else missing_card_types,
+            "priority": "concept_map" if concept_missing else "supporting_bundle",
+        }
 
     # ── Step 8: Assessment (verified completion only) ────────────────────
     if not evidence_verified:
@@ -982,6 +978,41 @@ def run_official_learning_step(
 
     normalize_state_resources(state)
     session.agent_state = state
+
+    if pending_resource_generation is not None:
+        try:
+            resource_result = request_generation(
+                pending_resource_generation["user_id"],
+                pending_resource_generation["course_id"],
+                pending_resource_generation["node_id"],
+                card_types=pending_resource_generation["card_types"],
+                force=False,
+                priority=pending_resource_generation["priority"],
+            )
+        except Exception as exc:
+            # Learner evidence has already been verified. A queue outage must
+            # not roll back mastery or turn the event endpoint into an LLM
+            # wait path; the learning page can request the missing cards again.
+            resource_result = {
+                "status": "queue_failed",
+                "error_type": type(exc).__name__,
+                "missing_card_types": pending_resource_generation["card_types"],
+            }
+        logs.append({
+            "agent": "ContentMesh",
+            "status": resource_result.get("status", "queued"),
+            "job_id": resource_result.get("job_id"),
+            "missing_card_types": resource_result.get(
+                "missing_card_types",
+                pending_resource_generation["card_types"],
+            ),
+            "reason": "background_generation_requested",
+        })
+        logs.append({
+            "agent": "Validator",
+            "status": "handled_by_resource_service",
+            "reason": "resource_service validates cards before publishing",
+        })
     session.pipeline_log.extend(logs)
 
     return LearningStepResult(

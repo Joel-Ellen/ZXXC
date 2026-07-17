@@ -16,6 +16,7 @@
     :user="currentUser"
     :current-node="currentNode"
     :cards="currentCards"
+    :resource-card-states="currentResourceCardStates"
     :path-nodes="currentPathNodes"
     :node-title="currentNodeTitle"
     :messages="messages"
@@ -152,6 +153,7 @@ const {
   agentStatuses,
   bootMode,
   currentCards,
+  currentResourceCardStates,
   currentNode,
   currentNodeTitle,
   currentPathNodes,

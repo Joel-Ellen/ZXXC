@@ -9,7 +9,16 @@ from starlette.testclient import TestClient
 
 from src.observability import reset_metrics
 from src.auth.security import SecurityManager
-from tests.helpers import FakeValidationPipeline, disable_persistence, install_fake_runtime
+from src.database.resource_generation_repo import (
+    MemoryResourceGenerationRepo,
+    _MemoryGenerationStore,
+)
+from tests.helpers import (
+    FakeValidationPipeline,
+    consume_sse_handler,
+    disable_persistence,
+    install_fake_runtime,
+)
 
 
 def _install_import_stubs() -> None:
@@ -62,7 +71,15 @@ def _counter_value(payload, name, **labels):
 def _prepare_app(monkeypatch):
     reset_metrics()
     fake = install_fake_runtime(monkeypatch)
+    monkeypatch.setattr("src.orchestration_runtime._runtime", fake)
     disable_persistence(monkeypatch)
+    # The default memory store is shared by local workers. This E2E flow must
+    # begin cold so its first cache read cannot inherit another test's card.
+    generation_repo = MemoryResourceGenerationRepo(store=_MemoryGenerationStore())
+    monkeypatch.setattr(
+        "src.application.resource_service.get_resource_generation_repo",
+        lambda: generation_repo,
+    )
     monkeypatch.setattr(
         "src.application.resource_service.get_validation_pipeline",
         lambda: FakeValidationPipeline(),
@@ -81,6 +98,18 @@ def _prepare_app(monkeypatch):
 
     monkeypatch.setattr(fake, "tutor", fake_tutor)
     return fake, TestClient(server.app)
+
+
+def _wait_for_resource_generation(job_id: str, headers: dict[str, str]) -> str:
+    stream = consume_sse_handler(
+        server.api_resource_generation_events,
+        path=f"/api/resource-generation-jobs/{job_id}/events",
+        path_params={"job_id": job_id},
+        headers=headers,
+    )
+    assert "'event': 'card_ready'" in stream
+    assert "'event': 'completed'" in stream
+    return stream
 
 
 def test_frontend_backend_main_session_flow_regression(monkeypatch):
@@ -119,7 +148,37 @@ def test_frontend_backend_main_session_flow_regression(monkeypatch):
     assert resource_response.status_code == 200
     resource_payload = resource_response.json()
     assert resource_payload["node_id"] == node_id
-    assert len(resource_payload["resources"]) >= 1
+    assert resource_payload["resources"] == []
+
+    generation_response = client.post(
+        f"/api/sessions/{session_path}/resources/{node_id}/generation",
+        json={"card_types": ["concept_map"], "force": False, "priority": "concept_map"},
+        headers=headers,
+    )
+    assert generation_response.status_code == 200
+    generation_payload = generation_response.json()
+    assert generation_payload["missing_card_types"] == ["concept_map"]
+    assert generation_payload["job_id"]
+    stream = _wait_for_resource_generation(generation_payload["job_id"], headers)
+    assert "concept_map" in stream
+    assert "follow_up_job_id" in stream
+    expected_resource_types = [
+        "concept_map",
+        "code_snippet",
+        "interactive_exercise",
+        "video_summary",
+        "diagnostic_quiz",
+    ]
+    deadline = time.monotonic() + 3.0
+    while True:
+        resource_response = client.get(f"/api/sessions/{session_path}/resources/{node_id}", headers=headers)
+        assert resource_response.status_code == 200
+        resource_payload = resource_response.json()
+        resource_types = [resource["resource_type"] for resource in resource_payload["resources"]]
+        if resource_types == expected_resource_types or time.monotonic() >= deadline:
+            break
+        time.sleep(0.02)
+    assert resource_types == expected_resource_types
 
     tutor_response = client.post(
         f"/api/sessions/{session_path}/tutor",

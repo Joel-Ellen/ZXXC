@@ -55,8 +55,6 @@ def _captcha_answer(svg: str) -> str:
 
 
 def test_request_id_header_round_trip_and_metrics_endpoint(monkeypatch):
-    from src.auth.security import SecurityManager
-
     reset_metrics()
     monkeypatch.setattr(
         "frontend.server.session_service.restore_or_create_session",
@@ -67,10 +65,7 @@ def test_request_id_header_round_trip_and_metrics_endpoint(monkeypatch):
     response = client.post(
         "/api/sessions",
         json={"user_id": "http-obs", "course_id": "data_structures"},
-        headers={
-            "X-Request-ID": "req-observe-123",
-            "Authorization": "Bearer " + SecurityManager.create_token_pair("http-obs", "STUDENT")["access_token"],
-        },
+        headers={"X-Request-ID": "req-observe-123"},
     )
     assert response.status_code == 200
     assert response.headers["x-request-id"] == "req-observe-123"
