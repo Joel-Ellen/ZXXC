@@ -15,6 +15,7 @@ venv/
 # IDE
 .vscode/
 .idea/
+.claude/*.local.json
 *.swp
 *.swo
 
@@ -44,10 +45,12 @@ node_modules/
 # Backup files
 *.bak
 *.snapshot.txt
+*.tar.gz
 
 # Test outputs
 test-results/
 frontend/test-results/
+/output/
 
 # Playwright / screenshot outputs
 output/playwright/
@@ -63,6 +66,10 @@ skills-lock.json
 # Neo4j / Milvus data (local dev)
 data/
 src/auth/_users.json
+frontend/_account_state.json
+frontend/_user_profiles.json
+frontend/_enrollments.json
+frontend/*.tmp
 nul
 fix_pkg.tar.gz
 update_pkg.tar.gz

@@ -83,15 +83,12 @@ def _validate_semantics(
     issues: list[ValidationIssue] = []
     ref_ids = payload.get("source_ref_ids") or []
     known_refs = _source_ids(context)
-    grounding_ids = set(context.grounding_ref_ids)
-    if not grounding_ids and not context.knowledge_refs:
-        pass  # development / in-memory mode: skip source-ref checks
-    else:
-        if not ref_ids:
-            issues.append(ValidationIssue("source_refs_missing", "At least one source reference is required.", "source_ref_ids"))
-        elif any(ref_id not in known_refs for ref_id in ref_ids):
-            issues.append(ValidationIssue("source_ref_unknown", "A source reference is not in the generation context.", "source_ref_ids"))
+    if not ref_ids:
+        issues.append(ValidationIssue("source_refs_missing", "At least one source reference is required.", "source_ref_ids"))
+    elif any(ref_id not in known_refs for ref_id in ref_ids):
+        issues.append(ValidationIssue("source_ref_unknown", "A source reference is not in the generation context.", "source_ref_ids"))
 
+    grounding_ids = set(context.grounding_ref_ids)
     if grounding_ids and not grounding_ids.intersection(str(ref_id) for ref_id in ref_ids):
         issues.append(ValidationIssue(
             "knowledge_source_required",

@@ -35,6 +35,7 @@ from src.agents.tutor_node import (
     MermaidSyntaxGuard,
     create_tutor_node,
 )
+from src.api_models.tutor_request import TutorRequest
 from src.state.agent_state import (
     AgentState,
     LatestBehavior,
@@ -185,6 +186,36 @@ class TestTutorAgentNode:
         assert len(resp["text_explanation"]) > 0
         # Mermaid 应为合法 graph
         assert "graph TD" in resp["mermaid_src"]
+
+    def test_code_debug_request_reaches_mode_prompt(self) -> None:
+        class DebugLlm:
+            def __init__(self) -> None:
+                self.messages = []
+
+            def chat_sync(self, messages, **kwargs):
+                self.messages = messages
+                return {"content": "{}"}
+
+            def extract_json(self, _content):
+                return {"text_explanation": "The index is out of range.", "root_cause": "empty list"}
+
+        llm = DebugLlm()
+        node = TutorAgentNode(llm_generator=llm)
+        state = AgentState(user_id="U-debug", course_id="CS101", current_node_id="N_BST")
+        request = TutorRequest(
+            question="Why does the lookup fail?",
+            contextType="code_debug",
+            codeSnippet="items[0]",
+            errorMessage="IndexError: list index out of range",
+        )
+
+        result = node(TutorInput(agent_state=state, request=request))
+
+        prompt = llm.messages[1]["content"]
+        assert "items[0]" in prompt
+        assert "IndexError: list index out of range" in prompt
+        assert result.agent_state.tutor_response["tutoring_mode"] == "code_debug"
+        assert result.agent_state.tutor_response["root_cause"] == "empty list"
 
     def test_empty_behavior_skips_tutor(
         self, tutor_node: TutorAgentNode, agent_state_empty_behavior: AgentState

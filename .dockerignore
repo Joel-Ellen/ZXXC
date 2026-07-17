@@ -29,6 +29,14 @@ frontend/dist/          # 将在 Docker 内重新构建
 .env
 .env.local
 .env.*.local
+.claude/
+output/
+
+# Runtime identity/state must never enter an image layer.
+src/auth/_users.json
+frontend/_account_state.json
+frontend/_user_profiles.json
+frontend/_enrollments.json
 
 # 文档 & 素材 (太大，不需要打入镜像)
 DataStructures.md
@@ -39,21 +47,20 @@ algorithm_design.md
 *.gif
 *.svg
 docs/
+*.tar.gz
 
 # 日志
 logs/
 *.log
 
 # 测试 & 开发工具
+tests/
 node_modules/
-.pytest_cache/
-.agents/
-.claude/
-.codex/
-output/
-frontend/output/
-backups/
-*.tar.gz
+
+# Vite public assets are production build inputs. These negations must remain
+# after the generic image ignores above so Docker receives the real assets.
+!frontend/public/
+!frontend/public/**
 
 # Docker 相关
 Dockerfile*

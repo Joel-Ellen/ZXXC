@@ -10,7 +10,7 @@ Profiler Node — 单元测试套件
   4. ThompsonSampler: AgentState ↔ 参数双向同步
   5. EbbinghausForgettingEngine: 遗忘曲线衰减
   6. EbbinghausForgettingEngine: 记忆强度更新
-  7. EbbinghausForgettingEngine: 最低保底值
+  7. EbbinghausForgettingEngine: non-increasing decay boundary
   8. ProfilerNode: 完整画像演进管线
   9. ProfilerNode: C_fail ≥ 3 硬切换干预
  10. ProfilerNode: 推荐风格选择
@@ -213,11 +213,11 @@ class TestEbbinghausForgetting:
         )
         assert result.mastery_after < 0.5
 
-    def test_mastery_floor(self, forgetting: EbbinghausForgettingEngine) -> None:
-        """掌握度不应跌破保底值 0.15。"""
+    def test_decay_can_reach_zero(self, forgetting: EbbinghausForgettingEngine) -> None:
+        """Forgetting may reduce mastery to zero, but never below it."""
         now = time.time()
         result = forgetting.apply_decay("N3", 1.0, now - 3600000, now)
-        assert result.mastery_after >= 0.15
+        assert result.mastery_after == 0.0
 
     def test_stronger_memory_decays_slower(self, forgetting: EbbinghausForgettingEngine) -> None:
         """高记忆强度应导致更慢的衰减。"""
@@ -420,6 +420,21 @@ class TestBoundaryConditions:
         )
         output = profiler(inp)
         assert output is not None
+
+    def test_repeated_failures_do_not_raise_zero_mastery(
+        self, profiler: ProfilerNode, agent_state: AgentState
+    ) -> None:
+        agent_state.dynamic_profile.knowledge_mastery["N_PROF"] = 0.0
+        agent_state.dynamic_profile.continuous_fail_counter = 4
+
+        output = profiler(ProfilerInput(
+            agent_state=agent_state,
+            resource_style_delivered="visual",
+            evaluator_mastery_delta=-0.1,
+            node_id="N_PROF",
+        ))
+
+        assert output.agent_state.dynamic_profile.knowledge_mastery["N_PROF"] == 0.0
 
     def test_perfect_mastery(self, profiler: ProfilerNode, agent_state: AgentState) -> None:
         """掌握度为 1.0 时不应崩溃。"""
