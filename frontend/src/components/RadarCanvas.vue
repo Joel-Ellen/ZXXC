@@ -29,9 +29,9 @@ const dimensionColors = [
 ];
 
 function getColor(varName) {
-  if (!canvasRef.value) return "#64748B";
+  if (!canvasRef.value) return "#5A7A6F";
   const value = getComputedStyle(canvasRef.value).getPropertyValue(varName).trim();
-  return value || "#64748B";
+  return value || "#5A7A6F";
 }
 
 function draw() {
@@ -40,7 +40,7 @@ function draw() {
   }
 
   const computedStyle = getComputedStyle(canvasRef.value);
-  const mutedColor = computedStyle.getPropertyValue("--text-muted").trim() || "#64748B";
+  const mutedColor = computedStyle.getPropertyValue("--text-muted").trim() || "#5A7A6F";
   const gridColor = computedStyle.getPropertyValue("--border-strong").trim() || "rgba(127,127,127,0.15)";
   const bgColor = computedStyle.getPropertyValue("--space-bg").trim() || "#05060A";
 

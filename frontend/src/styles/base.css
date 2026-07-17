@@ -104,8 +104,8 @@ a {
 }
 
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 3px;
+  height: 3px;
 }
 
 ::-webkit-scrollbar-track {
@@ -113,20 +113,29 @@ a {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
-  border: 2px solid transparent;
+  background: transparent;
   border-radius: var(--radius-pill);
-  background-clip: content-box;
+  transition: background 0.3s;
+}
+
+:hover::-webkit-scrollbar-thumb,
+:active::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--border-hover);
-  background-clip: content-box;
 }
 
 .aurora-scroll {
-  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-color: transparent transparent;
   scrollbar-width: thin;
+  transition: scrollbar-color 0.3s;
+}
+
+.aurora-scroll:hover,
+.aurora-scroll:active {
+  scrollbar-color: var(--border-strong) transparent;
 }
 
 .focus-ring:focus-visible {

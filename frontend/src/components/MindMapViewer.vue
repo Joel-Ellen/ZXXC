@@ -26,7 +26,7 @@
           <div
             class="mindmap-node"
             :class="'depth-' + (nodeProps.data.depth || 0)"
-            :style="{ borderColor: nodeProps.data.color || '#7CB342' }"
+            :style="{ borderColor: nodeProps.data.color || '#1E5E4D' }"
           >
             <div class="node-label">{{ nodeProps.data.label }}</div>
             <div class="node-children-count" v-if="nodeProps.data.childrenCount > 0">
@@ -83,12 +83,12 @@ const edges = ref([])
 
 // ── Color palette for different depth levels ──
 const DEPTH_COLORS = [
-  '#7CB342', // Green (root)
-  '#2196F3', // Blue (level 1)
-  '#FF9800', // Orange (level 2)
-  '#9C27B0', // Purple (level 3)
-  '#F44336', // Red (level 4)
-  '#00BCD4', // Cyan (level 5)
+  '#1E5E4D', // Pine Green (root)
+  '#2E8C8A', // Stone Green (level 1)
+  '#7FBFA6', // Celadon Green (level 2)
+  '#B8D6A7', // Moss Green (level 3)
+  '#C8A858', // Xiangye Yellow (level 4)
+  '#5BA69E', // Teal (level 5)
 ]
 
 // ── Layout constants ──
@@ -216,7 +216,7 @@ watch(
 /* ── Custom node styling ── */
 .mindmap-node {
   background: #fff;
-  border: 2px solid #7CB342;
+  border: 2px solid #1E5E4D;
   border-radius: 10px;
   padding: 10px 16px;
   min-width: 120px;
@@ -275,7 +275,7 @@ watch(
   background: #fff;
 }
 .mermaid-preview summary:hover {
-  color: var(--primary, #7CB342);
+  color: var(--primary, #1E5E4D);
 }
 .mermaid-preview pre {
   margin: 0;

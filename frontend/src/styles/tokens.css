@@ -57,120 +57,144 @@
 [data-theme="light"] {
   color-scheme: light;
 
-  --space-bg: #f1f4f3;
-  --space-surface: #ffffff;
-  --space-panel: rgba(255, 255, 255, 0.98);
-  --space-line: rgba(18, 48, 45, 0.08);
-  --space-elevated: #f8faf9;
-  --app-background: #f1f4f3;
+  /* ═══════════════════════════════════════════
+     青绿山水 · 组件级配色映射
+     主按钮 #1E5E4D  · 次按钮 #E6D7B1
+     标题   #1E5E4D  · 正文   #2E8C8A
+     卡片底 #DDE2DE  · 卡片框 #7FBFA6
+     分割线 #7FBFA6  · 标签   #E6D7B1
+     导航激活 #1E5E4D · 悬停 #2E8C8A
+     ═══════════════════════════════════════════ */
+
+  /* ── 页面基底：微微黄 ── */
+  --space-bg: #FAF7EF;
+  --space-surface: #FFFEF9;
+  --space-panel: rgba(255, 254, 249, 0.98);
+  --space-line: rgba(127, 191, 166, 0.18);
+  --space-elevated: #F5F1E6;
+  --app-background: #FAF7EF;
   --body-overlay: none;
 
-  --workspace-veil: rgba(255, 255, 255, 0.9);
-  --workspace-veil-strong: rgba(255, 255, 255, 0.98);
-  --workspace-shadow-soft: 0 12px 34px rgba(20, 42, 39, 0.07);
-  --workspace-shadow-focus: 0 18px 44px rgba(20, 42, 39, 0.11);
+  --workspace-veil: rgba(255, 254, 249, 0.88);
+  --workspace-veil-strong: rgba(255, 254, 249, 0.97);
+  --workspace-shadow-soft: 0 12px 34px rgba(30, 94, 77, 0.06);
+  --workspace-shadow-focus: 0 18px 44px rgba(30, 94, 77, 0.11);
 
-  --text-primary: #12211f;
-  --text-secondary: #3b504c;
-  --text-muted: #667773;
-  --text-inverse: #f7faf9;
+  /* ── 文字：高对比度 ── */
+  --text-primary: #0B1E18;
+  --text-secondary: #1A5A56;
+  --text-muted: #4A7A6A;
+  --text-inverse: #ffffff;
 
-  --color-primary: #176f73;
-  --color-primary-light: #70aeb0;
-  --color-primary-dark: #0d5357;
-  --color-primary-soft: rgba(23, 111, 115, 0.12);
+  /* ═══ 主按钮 · 导航激活 · 标题 → #1E5E4D ═══ */
+  --color-primary: #1E5E4D;
+  --color-primary-light: #2A7A64;           /* hover */
+  --color-primary-dark: #144236;             /* active */
+  --color-primary-soft: rgba(30, 94, 77, 0.10);
   --color-primary-text: #ffffff;
 
-  --color-secondary: #176f73;
-  --color-secondary-light: #70aeb0;
-  --color-secondary-dark: #0d5357;
-  --color-secondary-soft: rgba(23, 111, 115, 0.1);
-  --color-secondary-text: #ffffff;
+  /* ═══ 次按钮 · 标签 · 高亮 → #E6D7B1 ═══ */
+  --color-secondary: #E6D7B1;
+  --color-secondary-light: #F0E5CC;         /* hover */
+  --color-secondary-dark: #D4C190;           /* active */
+  --color-secondary-soft: rgba(230, 215, 177, 0.25);
+  --color-secondary-text: #2F2000;
 
-  --color-tertiary: #55706b;
-  --color-tertiary-light: #a9bab6;
-  --color-tertiary-dark: #354f4a;
-  --color-tertiary-soft: rgba(85, 112, 107, 0.1);
+  /* ═══ 正文 · 导航悬停 · 图标 → #2E8C8A ═══ */
+  --color-tertiary: #2E8C8A;
+  --color-tertiary-light: #4AABA8;          /* hover */
+  --color-tertiary-dark: #1F6361;            /* active */
+  --color-tertiary-soft: rgba(46, 140, 138, 0.10);
   --color-tertiary-text: #ffffff;
 
-  --color-success: #247a61;
-  --color-success-light: #56b89b;
-  --color-success-dark: #155d49;
-  --color-success-soft: rgba(36, 122, 97, 0.11);
+  /* ═══ success → 鲜绿 ═══ */
+  --color-success: #3E8C6F;
+  --color-success-light: #7FBFA6;
+  --color-success-dark: #2A6B53;
+  --color-success-soft: rgba(62, 140, 111, 0.12);
   --color-success-text: #ffffff;
 
-  --color-warning: #a76616;
-  --color-warning-light: #e1a14f;
-  --color-warning-dark: #7d4a0c;
-  --color-warning-soft: rgba(167, 102, 22, 0.12);
-  --color-warning-text: #2f1a00;
+  /* ═══ warning → 细叶黄 ═══ */
+  --color-warning: #C8A858;
+  --color-warning-light: #E6D7B1;
+  --color-warning-dark: #9E8038;
+  --color-warning-soft: rgba(230, 215, 177, 0.30);
+  --color-warning-text: #2F2000;
 
-  --color-error: #b73535;
-  --color-error-light: #e37272;
-  --color-error-dark: #8d2424;
-  --color-error-soft: rgba(183, 53, 53, 0.11);
+  /* ── error → 暖红 ── */
+  --color-error: #C45A5A;
+  --color-error-light: #E49A9A;
+  --color-error-dark: #9E3A3A;
+  --color-error-soft: rgba(196, 90, 90, 0.10);
   --color-error-text: #ffffff;
 
-  --color-info: #2f6faa;
-  --color-info-light: #72a8d8;
-  --color-info-dark: #1e5181;
-  --color-info-soft: rgba(47, 111, 170, 0.11);
+  /* ── info → 蓝石青 ── */
+  --color-info: #3A8CBF;
+  --color-info-light: #7FBFA6;
+  --color-info-dark: #256B99;
+  --color-info-soft: rgba(58, 140, 191, 0.10);
   --color-info-text: #ffffff;
 
-  --aurora-mint: #5fa3cb;
-  --aurora-purple: #586fb8;
-  --aurora-crimson: #d8706c;
-  --aurora-mint-contrast: #004e82;
-  --aurora-purple-contrast: #334f97;
+  /* ── 装饰色 ── */
+  --aurora-mint: #B8D6A7;
+  --aurora-purple: #7FBFA6;
+  --aurora-crimson: #E6D7B1;
+  --aurora-mint-contrast: #1E5E4D;
+  --aurora-purple-contrast: #2E8C8A;
 
-  --border-subtle: rgba(18, 48, 45, 0.11);
-  --border-hover: rgba(18, 48, 45, 0.2);
-  --border-strong: rgba(18, 48, 45, 0.3);
-  --focus-ring-color: rgba(23, 111, 115, 0.3);
+  /* ── 边框 ── */
+  --border-subtle: rgba(127, 191, 166, 0.32);
+  --border-hover: rgba(30, 94, 77, 0.35);
+  --border-strong: rgba(30, 94, 77, 0.50);
+  --focus-ring-color: rgba(30, 94, 77, 0.35);
 
+  /* ── 卡片：白色 ── */
   --card-bg: #ffffff;
-  --card-bg-hover: #f7faf9;
+  --card-bg-hover: #F5FEF7;
   --input-bg: #ffffff;
 
-  --shadow-xs: 0 1px 2px rgba(7, 31, 51, 0.06);
-  --shadow-sm: 0 4px 12px rgba(0, 79, 126, 0.08);
-  --shadow-md: 0 10px 28px rgba(0, 79, 126, 0.1);
-  --shadow-lg: 0 18px 48px rgba(0, 79, 126, 0.14);
-  --shadow-glass: 0 16px 44px rgba(0, 79, 126, 0.11);
-  --shadow-card: 0 7px 22px rgba(0, 79, 126, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.92);
-  --shadow-glow: 0 0 0 3px rgba(95, 163, 203, 0.24);
+  /* ── 阴影 ── */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-sm: 0 4px 12px rgba(0, 0, 0, 0.07);
+  --shadow-md: 0 10px 28px rgba(0, 0, 0, 0.09);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.12);
+  --shadow-glass: 0 16px 44px rgba(30, 94, 77, 0.10);
+  --shadow-card: 0 7px 22px rgba(30, 94, 77, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.70);
+  --shadow-glow: 0 0 0 3px rgba(30, 94, 77, 0.25);
 
-  --aurora-orb-1: rgba(95, 163, 203, 0.2);
-  --aurora-orb-2: rgba(88, 111, 184, 0.18);
-  --aurora-orb-3: rgba(216, 112, 108, 0.14);
-  --aurora-orb-4: rgba(0, 107, 173, 0.1);
-  --aurora-mesh-1: rgba(95, 163, 203, 0.16);
-  --aurora-mesh-2: rgba(88, 111, 184, 0.13);
-  --aurora-mesh-3: rgba(216, 112, 108, 0.11);
-  --aurora-mesh-4: rgba(0, 107, 173, 0.08);
+  /* ── aurora mesh：6色全展开 ── */
+  --aurora-orb-1: rgba(30, 94, 77, 0.14);
+  --aurora-orb-2: rgba(46, 140, 138, 0.16);
+  --aurora-orb-3: rgba(127, 191, 166, 0.18);
+  --aurora-orb-4: rgba(184, 214, 167, 0.20);
+  --aurora-mesh-1: rgba(230, 215, 177, 0.16);
+  --aurora-mesh-2: rgba(221, 226, 222, 0.18);
+  --aurora-mesh-3: rgba(127, 191, 166, 0.12);
+  --aurora-mesh-4: rgba(184, 214, 167, 0.14);
 
-  --learning-concept: #5fa3cb;
-  --learning-concept-soft: rgba(95, 163, 203, 0.15);
-  --learning-concept-dark: #006bad;
-  --learning-code: #586fb8;
-  --learning-code-soft: rgba(88, 111, 184, 0.13);
-  --learning-code-dark: #334f97;
-  --learning-practice: #b85b5b;
-  --learning-practice-soft: rgba(216, 112, 108, 0.14);
-  --learning-practice-dark: #893b3e;
-  --learning-quiz: #a76616;
-  --learning-quiz-soft: rgba(167, 102, 22, 0.12);
-  --learning-quiz-dark: #7d4a0c;
-  --learning-video: #4c7fbe;
-  --learning-video-soft: rgba(76, 127, 190, 0.13);
-  --learning-video-dark: #2f5f9c;
-  --learning-home: #4f9e98;
-  --learning-home-soft: rgba(79, 158, 152, 0.13);
-  --learning-home-dark: #2f7470;
-  --learning-path: #79b3d0;
-  --learning-path-soft: rgba(121, 179, 208, 0.16);
-  --learning-all: #006bad;
-  --learning-all-soft: rgba(0, 107, 173, 0.1);
+  /* ── learning 分类色 ── */
+  --learning-concept: #1E5E4D;
+  --learning-concept-soft: rgba(30, 94, 77, 0.10);
+  --learning-concept-dark: #144236;
+  --learning-code: #2E8C8A;
+  --learning-code-soft: rgba(46, 140, 138, 0.10);
+  --learning-code-dark: #1F6361;
+  --learning-practice: #C8A858;
+  --learning-practice-soft: rgba(200, 168, 88, 0.16);
+  --learning-practice-dark: #9E8038;
+  --learning-quiz: #C45A5A;
+  --learning-quiz-soft: rgba(196, 90, 90, 0.10);
+  --learning-quiz-dark: #9E3A3A;
+  --learning-video: #3A8CBF;
+  --learning-video-soft: rgba(58, 140, 191, 0.11);
+  --learning-video-dark: #256B99;
+  --learning-home: #B8D6A7;
+  --learning-home-soft: rgba(184, 214, 167, 0.16);
+  --learning-home-dark: #8BAE7A;
+  --learning-path: #E6D7B1;
+  --learning-path-soft: rgba(230, 215, 177, 0.20);
+  --learning-all: #1E5E4D;
+  --learning-all-soft: rgba(30, 94, 77, 0.08);
 }
 
 [data-theme="dark"] {

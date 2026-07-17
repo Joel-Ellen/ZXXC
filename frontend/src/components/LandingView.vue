@@ -1407,23 +1407,23 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .landing-root {
-  --space-bg: #fff8e8;
-  --space-surface: #fffaf0;
-  --space-panel: rgba(255, 255, 255, 0.92);
-  --space-line: rgba(78, 59, 31, 0.1);
-  --space-elevated: rgba(255, 255, 255, 0.98);
-  --text-primary: #172033;
-  --text-secondary: #5b5142;
-  --text-muted: #7a6f5f;
-  --border-subtle: rgba(78, 59, 31, 0.12);
-  --border-hover: rgba(78, 59, 31, 0.2);
-  --border-strong: rgba(78, 59, 31, 0.28);
+  --space-bg: #FAF7EF;
+  --space-surface: #FFFEF9;
+  --space-panel: rgba(255, 254, 249, 0.92);
+  --space-line: rgba(127, 191, 166, 0.18);
+  --space-elevated: rgba(255, 254, 249, 0.98);
+  --text-primary: #0B1E18;
+  --text-secondary: #1A5A56;
+  --text-muted: #4A7A6A;
+  --border-subtle: rgba(127, 191, 166, 0.32);
+  --border-hover: rgba(30, 94, 77, 0.35);
+  --border-strong: rgba(30, 94, 77, 0.50);
   --card-bg: #ffffff;
-  --card-bg-hover: #fffdf8;
+  --card-bg-hover: #F5FEF7;
   --input-bg: #ffffff;
-  --shadow-glass: 0 24px 60px rgba(78, 59, 31, 0.12);
-  --shadow-card: 0 12px 34px rgba(78, 59, 31, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.7);
-  background: #fff8e8;
+  --shadow-glass: 0 24px 60px rgba(30, 94, 77, 0.10);
+  --shadow-card: 0 12px 34px rgba(30, 94, 77, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.70);
+  background: #FAF7EF;
   color: var(--text-primary);
   scroll-behavior: smooth;
 }

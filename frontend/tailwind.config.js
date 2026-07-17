@@ -107,13 +107,13 @@ export default {
         mono: ["JetBrains Mono", "Menlo", "monospace"],
       },
       boxShadow: {
-        aurora: "0 0 28px rgba(124, 201, 191, 0.18)",
+        aurora: "0 0 28px rgba(184, 214, 167, 0.14)",
         glass: "var(--shadow-glass)",
         glow: "var(--shadow-glow)",
         card: "var(--shadow-card)",
-        "glow-primary": "0 0 28px rgba(34, 211, 238, 0.20)",
-        "glow-secondary": "0 0 28px rgba(168, 85, 247, 0.20)",
-        "glow-tertiary": "0 0 28px rgba(251, 113, 133, 0.18)",
+        "glow-primary": "0 0 28px rgba(30, 94, 77, 0.18)",
+        "glow-secondary": "0 0 28px rgba(230, 215, 177, 0.20)",
+        "glow-tertiary": "0 0 28px rgba(127, 191, 166, 0.14)",
       },
       borderRadius: {
         "4xl": "2rem",
@@ -133,8 +133,8 @@ export default {
           "50%": { opacity: "1", transform: "scale(1.05)" },
         },
         cardIn: {
-          from: { opacity: "0", transform: "translateY(10px) scale(0.982)", filter: "blur(3px)" },
-          to:   { opacity: "1", transform: "translateY(0) scale(1)",        filter: "blur(0)" },
+          from: { opacity: "0", transform: "translateY(24px) scale(0.96)", filter: "blur(6px)" },
+          to:   { opacity: "1", transform: "translateY(0) scale(1)",       filter: "blur(0)" },
         },
         fadeIn: {
           from: { opacity: "0" },
@@ -189,7 +189,7 @@ export default {
         shimmer:         "shimmer 1.8s linear infinite",
         halo:            "pulseHalo 2.4s ease-in-out infinite",
         breathe:         "breathe 2.2s ease-in-out infinite",
-        cardIn:          "cardIn 340ms cubic-bezier(0.16, 1, 0.3, 1) forwards",
+        cardIn:          "cardIn 700ms cubic-bezier(0.16, 1, 0.3, 1) forwards",
         fadeIn:          "fadeIn 280ms cubic-bezier(0.16, 1, 0.3, 1) forwards",
         slideUp:         "slideUp 380ms cubic-bezier(0.16, 1, 0.3, 1) forwards",
         slideDown:       "slideDown 280ms cubic-bezier(0.16, 1, 0.3, 1) forwards",
