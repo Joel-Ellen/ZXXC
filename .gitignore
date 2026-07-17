@@ -33,6 +33,7 @@ htmlcov/
 # Environment
 .env
 .env.local
+frontend/.env
 
 # Logs
 *.log
@@ -40,6 +41,7 @@ htmlcov/
 # Frontend
 node_modules/
 .mermaid-runtime/
+.vite/
 
 # Backup files
 *.bak
@@ -49,21 +51,42 @@ node_modules/
 test-results/
 frontend/test-results/
 
-# Playwright / screenshot outputs
-output/playwright/
-output/*.json
+# Playwright / screenshot / browser-profile outputs
+output/
 .playwright-cli/
-
-# Runtime regression logs
-output/runtime/*.err
 
 # Lock files
 skills-lock.json
+package-lock.json
+
+# Deploy packages
+*.tar.gz
+
+# Office temp files
+~$*
+*~$*
 
 # Neo4j / Milvus data (local dev)
 data/
 src/auth/_users.json
+
+# Dev state (auto-generated)
+frontend/_account_state.json
+frontend/_enrollments.json
+
+# Git merge temp
+_merge_tmp/
+
+# Claude / agent skills
+.agents/
+
+# Temporary scripts (non-project)
+auto_deploy.py
+deploy_light.py
+fix_captcha.sh
+fix_docker.py
+install_deps.sh
+pg_setup.sh
+server_setup.sh
+test_full.py
 nul
-fix_pkg.tar.gz
-update_pkg.tar.gz
-update_pkg.tar.gz
