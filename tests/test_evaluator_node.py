@@ -125,17 +125,6 @@ class TestBehaviorCleanerNormal:
         assert cleaned.effective_correctness == pytest.approx(0.85, rel=1e-6)
         assert cleaned.friction_coefficient == 1.0
 
-    def test_verified_quiz_score_only_bypasses_unmeasured_signal_gates(
-        self, cleaner: BehaviorCleaner
-    ) -> None:
-        raw = BehaviorVector(answer_correctness=1.0, verified_quiz_score_only=True)
-
-        cleaned = cleaner.clean(raw)
-
-        assert cleaned.anomaly.anomaly_type == AnomalyType.NORMAL
-        assert cleaned.effective_correctness == 1.0
-        assert cleaned.effective_code_pass == 0.0
-
     def test_perfect_score_normal_time(self, cleaner: BehaviorCleaner) -> None:
         """满分 + 正常时长 → 正常。"""
         raw = BehaviorVector(

@@ -54,7 +54,6 @@
       :user="currentUser"
       :current-node="currentNode"
       :cards="currentCards"
-      :resource-card-states="currentResourceCardStates"
       :path-nodes="currentPathNodes"
       :node-title="currentNodeTitle"
       :messages="messages"
@@ -83,7 +82,7 @@
       @go-home="goHome"
       @switch-course="onSwitchCourse"
       @browse-courses="openCourseSelection"
-      @refresh-resources="() => refreshNodeResources(currentNode, { force: true })"
+      @refresh-resources="() => refreshNodeResources(currentNode, true)"
       @generate-card="onGenerateCard"
       @restart-probe="restartProbe"
     />
@@ -113,7 +112,6 @@ const {
   currentUser,
   capabilityRadar,
   currentCards,
-  currentResourceCardStates,
   currentNodeTitle,
   currentPathNodes,
   messages,
@@ -192,7 +190,7 @@ function onSwitchCourse(courseId) {
   handleSwitchCourse(courseId);
 }
 
-async function onGenerateCard({ nodeId, force = false, cardType = "" } = {}) {
+async function onGenerateCard({ nodeId, cardType = "", force = false } = {}) {
   const targetNode = nodeId || currentNode.value;
   if (!targetNode) return;
   await refreshNodeResources(targetNode, { force, cardType });

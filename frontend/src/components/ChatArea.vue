@@ -1,4 +1,18 @@
 <template>
+<<<<<<< HEAD
+  <section class="flex h-full min-h-0 flex-col" @wheel="forwardWheelToMessages">
+    <!-- 头部 -->
+    <header class="shrink-0 flex items-center justify-between gap-3 px-5 pt-4 pb-3">
+      <h2 class="text-base font-bold text-text-primary">学习辅导</h2>
+      <button
+        v-if="collapsible"
+        type="button"
+        class="focus-ring rounded-lg px-3 py-1.5 text-sm font-medium text-text-muted hover:text-text-primary transition-colors"
+        @click="$emit('collapse')"
+      >
+        收起
+      </button>
+=======
   <section class="flex h-full min-h-0 flex-col px-3 py-3 sm:px-4" @wheel="forwardWheelToMessages">
     <header class="shrink-0 pb-3">
       <div class="flex items-center justify-between gap-3">
@@ -39,13 +53,15 @@
           {{ prompt }}
         </button>
       </div>
+>>>>>>> origin/main
     </header>
 
+    <!-- 内容区 -->
     <div
       ref="scrollRoot"
-      class="aurora-scroll min-h-0 flex-1 overflow-y-auto pr-1"
+      class="min-h-0 flex-1 px-5"
+      :class="messages.length ? 'overflow-y-auto' : 'overflow-y-hidden'"
       data-chat-scroll="true"
-      aria-live="polite"
       @scroll.passive="handleScroll"
     >
       <ProbeDeck
@@ -57,31 +73,21 @@
         @submit="$emit('submit-probe', $event)"
       />
 
-      <div
-        v-else-if="!messages.length"
-        class="workspace-shell-card rounded-[24px] p-5"
-      >
-        <div class="flex items-start gap-4">
-          <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary-soft text-primary">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-              <path d="M12 5v14M5 12h14" stroke-linecap="round" />
-            </svg>
-          </div>
-          <div class="min-w-0">
-            <p class="text-sm font-semibold text-text-primary">从当前节点开始提问</p>
-            <p class="mt-2 text-sm leading-7 text-text-muted">
-              你可以让辅导智能体解释概念、拆解代码、总结本节点和上一节点的关系，或者直接给出下一步练习建议。
-            </p>
-          </div>
-        </div>
-
-        <div class="mt-4 grid gap-3">
+      <!-- 空状态 -->
+      <div v-else-if="!messages.length" class="h-full flex flex-col pt-6">
+        <p class="text-sm font-semibold text-text-primary">你可以这样问我</p>
+        <div class="mt-4 space-y-2.5">
           <button
             v-for="prompt in quickPrompts"
             :key="`empty-${prompt}`"
             type="button"
+<<<<<<< HEAD
+            class="focus-ring block w-full rounded-xl border border-subtle px-4 py-3 text-left text-sm text-text-muted transition-colors hover:text-text-primary hover:border-primary/25 hover:bg-card-hover"
+            :disabled="busy"
+=======
             class="workspace-shell-card-soft focus-ring rounded-[18px] px-4 py-3 text-left text-sm text-text-secondary transition-all duration-200 hover:text-text-primary"
             :disabled="busy || sendPending"
+>>>>>>> origin/main
             @click="sendPrompt(prompt)"
           >
             {{ prompt }}
@@ -89,99 +95,96 @@
         </div>
       </div>
 
-      <div v-else class="space-y-6">
+      <!-- 消息列表 -->
+      <div v-else class="py-3 space-y-7">
         <article
           v-for="(message, index) in messages"
           :key="message.id"
           class="flex"
-          :class="[
-            message.role === 'user' ? 'justify-end msg-user-enter' : 'justify-start msg-assistant-enter',
-          ]"
-          :style="{ animationDelay: `${Math.min(index, 3) * 50}ms` }"
+          :class="message.role === 'user' ? 'justify-end' : 'justify-start'"
         >
-          <div class="max-w-[92%]">
+          <div :class="message.role === 'user' ? 'max-w-[85%]' : 'max-w-[92%]'">
             <div
               v-if="message.role === 'assistant'"
-               class="workspace-shell-card rounded-r-2xl rounded-bl-2xl rounded-tl-md border border-primary/20 bg-primary-soft/40 px-4 py-3"
+              class="text-sm leading-7 text-text-primary"
             >
-              <div class="mb-2 flex items-center gap-2">
-                <span class="h-1.5 w-1.5 rounded-full bg-primary shadow-[0_0_10px_var(--color-primary)] animate-breathe" />
-                <span class="text-[10px] font-mono uppercase tracking-[0.2em] text-primary/90">辅导智能体</span>
-              </div>
-
               <StreamText
                 v-if="message.isStreaming && message.tokenStream"
                 :token-stream="message.tokenStream"
               />
-
-              <!-- Streaming typing indicator: three animated dots -->
               <div
                 v-else-if="message.isStreaming && !message.content"
                 class="flex items-center gap-1.5 py-1"
-                aria-label="正在生成..."
               >
                 <span class="generating-dot" />
                 <span class="generating-dot" />
                 <span class="generating-dot" />
               </div>
-
-              <!-- Streaming partial text: show content + cursor -->
               <div v-else-if="message.isStreaming && message.content">
                 <MarkdownContent :content="message.content" />
                 <span class="streaming-cursor" aria-hidden="true" />
               </div>
-
               <MarkdownContent
                 v-else
                 :content="message.content"
                 :mermaid-source="message.mermaidSource"
               />
             </div>
-
             <div
               v-else
-               class="workspace-shell-card rounded-l-[20px] rounded-br-[20px] rounded-tr-md border border-secondary/20 bg-secondary-soft/40 px-4 py-3 text-right"
+              class="rounded-2xl bg-card-hover border border-subtle px-4 py-3"
             >
-              <div class="mb-2 flex items-center justify-end gap-2">
-                <span class="text-[10px] font-mono uppercase tracking-[0.2em] text-secondary/90">我</span>
-                <span class="h-1.5 w-1.5 rounded-full bg-secondary shadow-[0_0_10px_var(--color-secondary)]" />
-              </div>
-              <p class="whitespace-pre-wrap text-sm font-light leading-7 text-text-primary">
+              <p class="whitespace-pre-wrap text-sm leading-7 text-text-primary">
                 {{ message.content }}
               </p>
             </div>
           </div>
         </article>
+        <div class="h-2" />
       </div>
     </div>
 
-    <footer class="shrink-0 pt-3 space-y-3">
-      <!-- 上下文类型选择器 -->
+    <!-- 底部 -->
+    <footer class="shrink-0 px-4 pb-4 pt-1.5 space-y-2.5">
+      <!-- 模式选择 -->
       <div v-if="bootMode !== 'probe'" class="flex flex-wrap gap-2">
         <button
           v-for="ctx in contextTypes"
           :key="ctx.value"
           type="button"
-          class="focus-ring rounded-full px-3 py-1 text-[11px] font-medium transition-all duration-200"
+          class="focus-ring rounded-full px-3.5 py-1.5 text-sm transition-colors"
           :class="selectedContext === ctx.value
+<<<<<<< HEAD
+            ? 'bg-primary-soft text-primary font-medium'
+            : 'text-text-muted hover:text-text-secondary'"
+          @click="selectedContext = selectedContext === ctx.value ? 'concept' : ctx.value"
+=======
             ? 'workspace-shell-btn workspace-shell-btn--accent text-white shadow-sm'
             : 'workspace-shell-btn text-text-muted hover:text-text-secondary'"
           :aria-pressed="String(selectedContext === ctx.value)"
           :disabled="busy || sendPending"
           @click="selectContext(ctx.value)"
+>>>>>>> origin/main
         >
           {{ ctx.label }}
         </button>
       </div>
 
-      <!-- 代码调试面板 -->
-      <div
-        v-if="selectedContext === 'code_debug' && bootMode !== 'probe'"
-        class="workspace-shell-card rounded-2xl p-3"
-      >
-        <label class="mb-1 block text-xs font-semibold text-text-secondary">代码片段</label>
+      <!-- 代码调试 -->
+      <div v-if="selectedContext === 'code_debug' && bootMode !== 'probe'" class="space-y-2.5">
         <textarea
           v-model="codeSnippet"
+<<<<<<< HEAD
+          class="focus-ring w-full rounded-xl border border-subtle bg-card px-4 py-3 font-mono text-sm text-text-primary placeholder:text-text-muted resize-none"
+          rows="5"
+          placeholder="粘贴代码..."
+        />
+        <div class="flex gap-2">
+          <input
+            v-model="errorMessage"
+            class="focus-ring flex-1 rounded-xl border border-subtle bg-card px-4 py-3 text-sm text-text-primary placeholder:text-text-muted"
+            placeholder="报错信息（可选）"
+=======
           class="workspace-shell-input focus-ring mb-2 w-full rounded-xl px-3 py-2 font-mono text-xs text-text-primary placeholder:text-text-muted"
           @input="markDraftDirty"
           rows="4"
@@ -242,10 +245,20 @@
             :disabled="bootMode === 'probe' || busy || sendPending"
             :placeholder="inputPlaceholder"
             @keydown.enter.exact.prevent="submit"
+>>>>>>> origin/main
           />
           <button
             type="button"
             class="btn-ripple focus-ring btn-capsule shrink-0"
+<<<<<<< HEAD
+            :disabled="busy || !codeSnippet.trim()"
+            @click="submitCodeDebug"
+          >
+            <span v-if="busy" class="flex items-center gap-1.5">
+              <span class="generating-dot" style="width:4px;height:4px" />
+              <span class="generating-dot" style="width:4px;height:4px;animation-delay:.15s" />
+              <span class="generating-dot" style="width:4px;height:4px;animation-delay:.3s" />
+=======
             :disabled="bootMode === 'probe' || busy || sendPending || !draft.trim()"
             @click="submit"
           >
@@ -253,15 +266,33 @@
               <span class="generating-dot" style="width:5px;height:5px" />
               <span class="generating-dot" style="width:5px;height:5px;animation-delay:.15s" />
               <span class="generating-dot" style="width:5px;height:5px;animation-delay:.3s" />
+>>>>>>> origin/main
             </span>
-            <span v-else>发送</span>
+            <span v-else>调试</span>
           </button>
         </div>
+      </div>
 
-        <div class="mt-3 flex flex-wrap items-center justify-between gap-2 px-2">
-          <p class="text-[11px] text-text-muted">`Enter` 发送，`Shift + Enter` 换行</p>
-          <p class="text-[11px] text-text-muted">{{ footerHint }}</p>
-        </div>
+      <!-- 输入区 -->
+      <div v-if="selectedContext !== 'code_debug'" class="flex items-end gap-3">
+        <textarea
+          id="chat-input"
+          v-model="draft"
+          class="focus-ring min-h-[80px] max-h-[160px] flex-1 resize-none rounded-xl border border-subtle bg-card px-4 py-3.5 text-sm text-text-primary placeholder:text-text-muted leading-7"
+          :disabled="bootMode === 'probe' || busy"
+          :placeholder="inputPlaceholder"
+          rows="1"
+          @keydown.enter.exact.prevent="submit"
+          @input="autoResize"
+        />
+        <button
+          type="button"
+          class="btn-ripple focus-ring btn-capsule shrink-0"
+          :disabled="bootMode === 'probe' || busy || !draft.trim()"
+          @click="submit"
+        >
+          发送
+        </button>
       </div>
     </footer>
   </section>
@@ -336,7 +367,7 @@ const modeLabel = computed(() => (props.bootMode === "probe" ? "入学诊断" : 
 const inputPlaceholder = computed(() => (
   props.bootMode === "probe"
     ? "完成当前测评后即可进入辅导问答。"
-    : "询问某个知识点、代码路径，或这个概念为什么要这样设计。"
+    : "问点什么好呢..."
 ));
 const footerHint = computed(() => (
   props.bootMode === "probe"
@@ -425,6 +456,12 @@ watch(
   },
 );
 
+function autoResize(e) {
+  const el = e.target;
+  el.style.height = "auto";
+  el.style.height = Math.min(el.scrollHeight, 160) + "px";
+}
+
 function submit() {
   const value = draft.value.trim();
   if (!value || sendPending.value) {
@@ -442,6 +479,14 @@ function submit() {
     draftKey: tutorDraftKey.value,
     editorSnapshot: currentEditorSnapshot(),
   });
+<<<<<<< HEAD
+  draft.value = "";
+  const el = document.getElementById("chat-input");
+  if (el) el.style.height = "auto";
+  if (selectedContext.value === "code_debug") {
+    codeSnippet.value = "";
+    errorMessage.value = "";
+=======
 }
 
 function selectContext(contextType) {
@@ -455,6 +500,25 @@ function markDraftDirty() {
   retrySubmission.value = null;
   draftDirty.value = true;
   scheduleDraftSave();
+}
+
+function submitCodeDebug() {
+  const snippet = codeSnippet.value.trim();
+  if (!snippet || props.busy || props.bootMode === "probe") {
+    return;
+>>>>>>> origin/main
+  }
+
+  const error = errorMessage.value.trim();
+  isPinnedToBottom.value = true;
+  emit("send", {
+    text: error ? "请根据错误信息调试这段代码" : "请分析并调试这段代码",
+    contextType: "code_debug",
+    codeSnippet: snippet,
+    errorMessage: error,
+  });
+  codeSnippet.value = "";
+  errorMessage.value = "";
 }
 
 function submitCodeDebug() {

@@ -19,6 +19,9 @@
         <div class="resource-canvas__actions">
           <button
             type="button"
+<<<<<<< HEAD
+            class="workspace-shell-btn workspace-shell-btn--secondary focus-ring px-3 py-2 text-[11px] font-semibold"
+=======
             class="workspace-shell-btn focus-ring min-h-11 px-3 py-2 text-[11px] font-semibold"
             @click="isExpanded = !isExpanded"
           >
@@ -27,6 +30,7 @@
           <button
             type="button"
             class="workspace-shell-btn workspace-shell-btn--secondary focus-ring min-h-11 px-3 py-2 text-[11px] font-semibold"
+>>>>>>> origin/main
             @click="focusMode = !focusMode"
           >
             {{ focusMode ? "退出聚焦" : "聚焦模式" }}
@@ -65,7 +69,7 @@
           <strong>{{ masteredCount }}/{{ pathNodes.length }}</strong>
         </div>
         <p class="resource-canvas__guidance">
-          {{ currentNodeMeta ? `先完成 ${activeCardTitle}，再进入诊断。` : "选择课程节点后，资料会在这里自动装配。" }}
+          {{ currentNodeMeta ? resourceGuidance : "选择课程节点后，资料会在这里自动装配。" }}
         </p>
       </div>
 
@@ -87,6 +91,24 @@
         </div>
       </div>
 
+<<<<<<< HEAD
+      <div class="resource-canvas__filters" aria-label="资源类型">
+        <span class="resource-canvas__filters-label">资源类型</span>
+        <div class="resource-canvas__filter-scroll aurora-scroll" role="group" aria-label="筛选学习资源">
+          <button
+            v-for="item in resourceFilterItems"
+            :key="item.key"
+            type="button"
+            class="resource-canvas__filter focus-ring"
+            :class="{ 'resource-canvas__filter--active': filterType === item.key }"
+            :aria-pressed="String(filterType === item.key)"
+            @click="emit('filter-change', item.key)"
+          >
+            <span>{{ item.label }}</span>
+            <span class="resource-canvas__filter-count" aria-hidden="true">{{ item.count }}</span>
+          </button>
+        </div>
+=======
       <div class="flex min-w-0 gap-2 overflow-x-auto" role="tablist" aria-label="学习任务顺序">
         <button
           v-for="slot in cardTypeSlots"
@@ -101,6 +123,7 @@
         >
           {{ taskStageLabel(slot.type) }}
         </button>
+>>>>>>> origin/main
       </div>
     </header>
 
@@ -136,13 +159,19 @@
         </div>
       </div>
 
-      <div
-        class="grid w-full grid-cols-1 gap-5 md:grid-cols-12 auto-rows-[minmax(240px,auto)]"
-      >
+      <!-- 全部：原始卡片网格（保持动效、拖拽等原有样式） -->
+      <div v-if="filterType === 'all'" class="resource-canvas__grid resource-canvas__grid--multiple">
         <template v-for="(slot, index) in cardTypeSlots" :key="slot.type">
-
-          <!-- Case 1: card exists and not minimized -->
           <div
+<<<<<<< HEAD
+            v-if="slot.card && !minimizedIds.includes(slot.card.resource_id)"
+            :draggable="true"
+            class="resource-canvas__slot animate-cardIn h-full card-depth transition-all duration-300"
+            :style="{ animationDelay: `${index * 55}ms` }"
+            @dragstart="onDragStart(slot.card.resource_id)"
+            @dragover.prevent
+            @drop="onDrop(slot.card.resource_id)"
+=======
             v-if="slot.card"
             :data-resource-id="slot.card.resource_id"
             :data-resource-type="resourceType(slot.card)"
@@ -150,6 +179,7 @@
             :style="{ animationDelay: `${index * 55}ms` }"
             :class="[getGridSpanClass(slot.type), slot.card.resource_id === activeCardId ? 'is-active md:-translate-y-1.5' : '']"
             @mouseup="captureSelectedText(slot.card)"
+>>>>>>> origin/main
           >
             <template v-for="card of [slot.card]" :key="card.resource_id">
             <ResourceCard
@@ -160,6 +190,14 @@
               :progress="null"
               :is-ready="!isSlotPending(slot)"
               :is-active="card.resource_id === activeCardId"
+<<<<<<< HEAD
+              :is-expanded="isSingleCardView"
+              :activatable="!loading"
+              :color="cardColor(resourceType(card))"
+              @activate="openCard(card)"
+              @pin="pinCard(card.resource_id)"
+              @minimize="minimizeCard(card.resource_id)"
+=======
               :is-expanded="isCardHydrated(card.resource_id)"
               :is-bookmarked="isBookmarked(card)"
               :activatable="false"
@@ -168,23 +206,28 @@
               :color="cardColor(resourceType(card))"
               @activate="activateCard(card.resource_id)"
               @bookmark="toggleBookmark(card)"
+>>>>>>> origin/main
             >
               <template #content>
-              <div v-if="!isCardHydrated(card.resource_id)" class="space-y-4">
+              <div class="space-y-4">
                 <div class="workspace-shell-card-soft rounded-[20px] p-4">
-                  <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">
-                    {{ previewLabel(resourceType(card)) }}
-                  </p>
-
-                  <pre
-                    v-if="resourceType(card) === 'code_snippet'"
-                    class="mt-3 overflow-x-auto rounded-[16px] border border-subtle/80 bg-[#08111f] px-4 py-3 text-xs leading-6 text-slate-100"
-                  >{{ previewCode(card) }}</pre>
-
-                  <p v-else class="mt-3 text-sm leading-7 text-text-secondary">
-                    {{ previewText(card) }}
-                  </p>
+                  <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">{{ previewLabel(resourceType(card)) }}</p>
+                  <pre v-if="resourceType(card) === 'code_snippet'" class="mt-3 overflow-x-auto rounded-[16px] border border-subtle/80 bg-[#08111f] px-4 py-3 text-xs leading-6 text-slate-100">{{ previewCode(card) }}</pre>
+                  <p v-else class="mt-3 text-sm leading-7 text-text-secondary">{{ previewText(card) }}</p>
                 </div>
+<<<<<<< HEAD
+                <button type="button" class="workspace-shell-btn workspace-shell-btn--accent focus-ring px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.10em]" @click.stop="openCard(card)">打开完整内容</button>
+              </div>
+            </template>
+          </ResourceCard>
+          </template>
+          </div>
+          <div v-else class="resource-canvas__slot animate-cardIn h-full transition-all duration-300" :style="{ animationDelay: `${index * 40}ms` }">
+            <div class="slot-empty group h-full rounded-[22px] border border-dashed border-subtle/50 bg-space-elevated/40 flex flex-col items-center justify-center gap-4 p-6" :style="{ '--rail-accent': slot.color }">
+              <span class="slot-empty-icon text-[2.25rem] opacity-40 group-hover:opacity-75 transition-opacity duration-300" :style="{ animationDelay: `${index * 0.4}s` }" aria-hidden="true">{{ slot.icon }}</span>
+              <div class="text-center space-y-0.5"><p class="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted">{{ slot.label }}</p><p class="text-[11px] text-text-muted opacity-50">尚未生成</p></div>
+              <button v-if="currentNode" type="button" class="btn-ripple workspace-shell-btn workspace-shell-btn--accent focus-ring px-4 py-2 text-[11px] font-semibold tracking-[0.06em] opacity-0 group-hover:opacity-100 translate-y-1 group-hover:translate-y-0 transition-all duration-200" @click="$emit('generate-card', { nodeId: currentNode, cardType: slot.type })">生成</button>
+=======
 
                 <button
                   type="button"
@@ -597,10 +640,69 @@
                   {{ isSlotFailed(slot) ? "重试生成" : "生成" }}
                 </button>
               </template>
+>>>>>>> origin/main
             </div>
           </div>
+        </template>
+      </div>
 
-        </template><!-- end cardTypeSlots v-for -->
+      <!-- 单类型：大页面式 -->
+      <div v-else class="space-y-6">
+        <template v-for="slot in cardTypeSlots" :key="slot.type">
+          <div v-if="slot.card && !minimizedIds.includes(slot.card.resource_id)" class="rounded-xl border border-subtle bg-card p-6">
+            <template v-for="card of [slot.card]" :key="slot.type">
+              <div class="flex items-center gap-3 mb-5">
+                <span class="text-xs font-semibold text-text-muted">{{ slot.label }}</span>
+                <span class="h-px flex-1 bg-subtle" />
+              </div>
+              <article v-if="resourceType(card) === 'concept_map'" class="text-sm leading-7 text-text-secondary">
+                <p class="text-text-primary">{{ conceptSummary(card) }}</p>
+                <template v-if="conceptSections(card).length"><section v-for="(section, index) in conceptSections(card)" :key="'sec-'+index" class="mt-10"><h3 class="text-base font-semibold text-text-primary">{{ section.heading }}</h3><p class="mt-3">{{ section.body }}</p></section></template>
+                <ul v-if="conceptObjectives(card).length" class="mt-10 space-y-2"><li v-for="(item, index) in conceptObjectives(card)" :key="'obj-'+index">{{ index + 1 }}. {{ item }}</li></ul>
+                <ul v-if="conceptBullets(card).length" class="mt-10 space-y-2"><li v-for="item in conceptBullets(card)" :key="'b-'+item">{{ item }}</li></ul>
+                <MarkdownContent v-if="conceptMermaidSource(card)" class="mt-10" :content="''" :mermaid-source="conceptMermaidSource(card)" />
+                <ul v-if="conceptMisconceptions(card).length" class="mt-10 space-y-2"><li v-for="item in conceptMisconceptions(card)" :key="'mis-'+item" class="text-text-muted text-xs">* {{ item }}</li></ul>
+                <ul v-if="conceptReviewPrompts(card).length" class="mt-10 space-y-2"><li v-for="(item, index) in conceptReviewPrompts(card)" :key="'rev-'+index">{{ index + 1 }}. {{ item }}</li></ul>
+              </article>
+              <article v-else-if="resourceType(card) === 'code_snippet'" class="text-sm leading-7 text-text-secondary">
+                <p>{{ codeScenario(card) }}</p>
+                <ul v-if="codePrerequisites(card).length" class="mt-10 space-y-2"><li v-for="item in codePrerequisites(card)" :key="'pre-'+item">{{ item }}</li></ul>
+                <div class="mt-10 overflow-hidden rounded-lg border border-subtle bg-[#0d1117]"><div class="px-4 py-2 border-b border-white/5"><span class="text-xs text-slate-400">{{ codeLanguage(card) }}</span></div><pre class="overflow-x-auto p-4 text-[13px] leading-6 text-slate-100"><code>{{ fullCode(card) }}</code></pre></div>
+                <MarkdownContent v-if="codeExplanation(card)" class="mt-10" :content="codeExplanation(card)" />
+                <ol v-if="codeWalkthrough(card).length" class="mt-10 space-y-3"><li v-for="(item, index) in codeWalkthrough(card)" :key="'walk-'+index" :value="index + 1">{{ item }}</li></ol>
+                <ul v-if="codeComplexityNotes(card).length" class="mt-10 space-y-2"><li v-for="item in codeComplexityNotes(card)" :key="'cx-'+item">{{ item }}</li></ul>
+                <ul v-if="codePitfalls(card).length" class="mt-10 space-y-2"><li v-for="item in codePitfalls(card)" :key="'pit-'+item" class="text-text-muted text-xs">* {{ item }}</li></ul>
+                <ul v-if="codeExperiments(card).length" class="mt-10 space-y-2"><li v-for="item in codeExperiments(card)" :key="'exp-'+item">{{ item }}</li></ul>
+              </article>
+              <article v-else-if="resourceType(card) === 'interactive_exercise'" class="text-sm leading-7 text-text-secondary">
+                <p class="text-text-primary font-medium">{{ exerciseGoal(card) }}</p><p class="mt-4">{{ exercisePrompt(card) }}</p>
+                <ol v-if="exerciseSteps(card).length" class="mt-10 space-y-4"><li v-for="(step, stepIndex) in exerciseSteps(card)" :key="'step-'+stepIndex" :value="stepIndex + 1"><p>{{ step }}</p></li></ol>
+                <ul v-if="exerciseCheckpoints(card).length" class="mt-10 space-y-2"><li v-for="item in exerciseCheckpoints(card)" :key="'cp-'+item">{{ item }}</li></ul>
+                <ul v-if="exerciseHints(card).length" class="mt-10 space-y-2"><li v-for="(hint, index) in exerciseHints(card)" :key="'hint-'+index" class="text-text-muted text-xs">{{ index + 1 }}. {{ hint }}</li></ul>
+                <div v-if="exerciseExpectedOutcome(card) || exerciseSolutionOutline(card)" class="mt-10 grid gap-8 sm:grid-cols-2"><div v-if="exerciseExpectedOutcome(card)"><h4 class="text-xs font-semibold text-text-muted mb-2">预期结果</h4><p>{{ exerciseExpectedOutcome(card) }}</p></div><div v-if="exerciseSolutionOutline(card)"><h4 class="text-xs font-semibold text-text-muted mb-2">参考思路</h4><p>{{ exerciseSolutionOutline(card) }}</p></div></div>
+              </article>
+              <article v-else-if="resourceType(card) === 'video_summary'" class="text-sm leading-7 text-text-secondary">
+                <p>{{ videoSummary(card) }}</p>
+                <ul v-if="videoKeyPoints(card).length" class="mt-10 space-y-2"><li v-for="point in videoKeyPoints(card)" :key="'kp-'+point">{{ point }}</li></ul>
+                <div v-if="videoTimeline(card).length" class="mt-10 space-y-4"><div v-for="item in videoTimeline(card)" :key="'tl-'+item.label"><span class="text-xs font-medium text-text-muted">{{ item.label }}</span><p class="mt-1">{{ item.summary }}</p></div></div>
+                <div v-if="videoWatchFocus(card).length || videoReviewQuestions(card).length" class="mt-10 grid gap-8 sm:grid-cols-2"><ul v-if="videoWatchFocus(card).length" class="space-y-2"><li v-for="item in videoWatchFocus(card)" :key="'wf-'+item">{{ item }}</li></ul><ul v-if="videoReviewQuestions(card).length" class="space-y-2"><li v-for="(item, index) in videoReviewQuestions(card)" :key="'rq-'+index">{{ index + 1 }}. {{ item }}</li></ul></div>
+                <a v-if="videoUrl(card)" :href="videoUrl(card)" target="_blank" rel="noreferrer" class="inline-block mt-10 text-xs font-medium text-primary hover:underline">打开视频链接 &rarr;</a>
+              </article>
+              <article v-else-if="resourceType(card) === 'diagnostic_quiz'" class="text-sm leading-7 text-text-secondary">
+                <p v-if="quizGuidance(card)" class="text-text-muted">{{ quizGuidance(card) }}</p>
+                <div v-for="question in quizQuestions" :key="question.id" class="mt-10"><p class="font-medium text-text-primary">{{ question.prompt }}</p><p v-if="question.skillTag || question.difficulty" class="mt-1 text-xs text-text-muted">{{ [question.skillTag, question.difficulty].filter(Boolean).join(" · ") }}</p><div class="mt-4 space-y-2"><button v-for="(option, optionIndex) in question.options" :key="`${question.id}-${optionIndex}`" type="button" class="focus-ring w-full rounded-lg border px-4 py-2.5 text-left text-sm transition-colors" :class="answerClass(question.id, optionIndex)" @click="setAnswer(question.id, optionIndex)">{{ option }}</button></div><div v-if="submittedScore !== null && question.explanation" class="mt-4 text-xs text-text-muted">{{ question.explanation }}</div></div>
+                <div class="mt-10 flex flex-wrap items-center justify-between gap-3"><p class="text-xs text-text-muted">{{ diagnosticStatusText }}</p><button type="button" class="focus-ring btn-capsule" :disabled="!allAnswered || loading" @click="submitQuizScore">提交诊断</button></div>
+                <p v-if="quizAfterGuidance(card) && submittedScore !== null" class="mt-8">{{ quizAfterGuidance(card) }}</p>
+              </article>
+              <MarkdownContent v-else :content="bodyMarkdown(card)" />
+            </template>
+          </div>
+          <div v-else class="rounded-xl border border-dashed border-subtle/30 p-8 flex flex-col items-center justify-center gap-3">
+            <span class="text-3xl opacity-30" aria-hidden="true">{{ slot.icon }}</span>
+            <p class="text-xs text-text-muted">{{ slot.label }} · 尚未生成</p>
+            <button v-if="currentNode" type="button" class="focus-ring rounded-lg border border-subtle px-4 py-2 text-xs text-text-muted hover:text-text-primary hover:border-primary/30 transition-colors" @click="$emit('generate-card', { nodeId: currentNode, cardType: slot.type })">生成</button>
+          </div>
+        </template>
       </div>
 
     </div>
@@ -638,6 +740,9 @@ const props = defineProps({
   buildQuiz: { type: Function, required: true },
 });
 
+<<<<<<< HEAD
+const emit = defineEmits(["submit-quiz", "select-node", "refresh", "generate-card", "filter-change"]);
+=======
 const emit = defineEmits([
   "submit-quiz",
   "select-node",
@@ -651,14 +756,21 @@ const emit = defineEmits([
   "open-review",
   "prepare-review-retest",
 ]);
+>>>>>>> origin/main
 
 const orderedIds = ref([]);
 const activeCardId = ref("");
 const activeCardTypeHint = ref("");
 const focusMode = ref(false);
-const isExpanded = ref(false);
 const answers = ref({});
+<<<<<<< HEAD
+const submittedScore = ref(null);
+const quizAttemptNumber = ref(1);
+const quizStartedAt = ref(Date.now());
+const quizEventId = ref("");
+=======
 const hydratedCardIds = ref([]);
+>>>>>>> origin/main
 const scrollViewport = ref(null);
 const nodeScroller = ref(null);
 const nodeButtonRefs = new Map();
@@ -700,12 +812,21 @@ watch(
 
 // ── 5-type slot system ─────────────────────────────────────────────────
 const CARD_TYPES = [
-  { type: "concept_map",          label: "概念导图", icon: "🗺", sidebarKey: "concept",  color: "var(--learning-concept)" },
-  { type: "code_snippet",         label: "代码示例", icon: "💻", sidebarKey: "code",     color: "var(--learning-code)" },
-  { type: "interactive_exercise", label: "互动练习", icon: "✏️", sidebarKey: "practice", color: "var(--learning-practice)" },
-  { type: "video_summary",        label: "视频摘要", icon: "🎬", sidebarKey: "video",    color: "var(--learning-video)" },
-  { type: "diagnostic_quiz",      label: "诊断测验", icon: "📋", sidebarKey: "quiz",     color: "var(--learning-quiz)" },
+  { type: "concept_map",          label: "概念导图", filterLabel: "概念", icon: "🗺", sidebarKey: "concept",  color: "var(--learning-concept)" },
+  { type: "code_snippet",         label: "代码示例", filterLabel: "代码", icon: "💻", sidebarKey: "code",     color: "var(--learning-code)" },
+  { type: "interactive_exercise", label: "互动练习", filterLabel: "练习", icon: "✏️", sidebarKey: "practice", color: "var(--learning-practice)" },
+  { type: "video_summary",        label: "视频摘要", filterLabel: "视频", icon: "🎬", sidebarKey: "video",    color: "var(--learning-video)" },
+  { type: "diagnostic_quiz",      label: "诊断测验", filterLabel: "测验", icon: "📋", sidebarKey: "quiz",     color: "var(--learning-quiz)" },
 ];
+
+const resourceFilterItems = computed(() => [
+  { key: "all", label: "全部", count: props.cards.length },
+  ...CARD_TYPES.map((item) => ({
+    key: item.sidebarKey,
+    label: item.filterLabel,
+    count: props.cards.filter((card) => resourceType(card) === item.type).length,
+  })),
+]);
 
 /** Map card_type → latest card */
 const cardsByType = computed(() => {
@@ -722,17 +843,49 @@ const cardsByType = computed(() => {
  * "all" → all 5 types; otherwise only the matching type.
  */
 const cardTypeSlots = computed(() => {
+<<<<<<< HEAD
+  let filtered = props.filterType && props.filterType !== "all"
+    ? CARD_TYPES.filter((m) => m.sidebarKey === props.filterType)
+    : CARD_TYPES;
+
+  if (focusMode.value && activeCardId.value) {
+    const activeType = resourceType(props.cards.find((card) => card.resource_id === activeCardId.value));
+    filtered = filtered.filter((meta) => meta.type === activeType);
+  }
+
+  return filtered.map((meta) => ({
+=======
   const filtered = props.filterType && props.filterType !== "all"
     ? CARD_TYPES.filter((meta) => meta.sidebarKey === props.filterType)
     : CARD_TYPES;
   const visibleTypes = filtered.length ? filtered : CARD_TYPES;
   return visibleTypes.map((meta) => ({
+>>>>>>> origin/main
     ...meta,
     card: cardsByType.value[meta.type] ?? null,
     state: props.cardStates?.[meta.type] ?? { status: cardsByType.value[meta.type] ? "ready" : "idle" },
   }));
 });
 
+<<<<<<< HEAD
+const singleCardId = computed(() => {
+  if (cardTypeSlots.value.length !== 1) {
+    return "";
+  }
+
+  const cardId = cardTypeSlots.value[0].card?.resource_id ?? "";
+  return minimizedIds.value.includes(cardId) ? "" : cardId;
+});
+
+const isSingleCardView = computed(() => Boolean(singleCardId.value));
+
+watch(
+  () => props.filterType,
+  () => {
+    focusMode.value = false;
+  },
+);
+=======
 const canvasContextKey = computed(() => [
   props.sessionId,
   props.currentNode,
@@ -778,6 +931,7 @@ function syncCardsWithoutReset() {
     restoreReviewPracticeProgress();
   }
 }
+>>>>>>> origin/main
 
 watch(
   canvasContextKey,
@@ -785,6 +939,20 @@ watch(
     const cards = props.cards;
     const nextIds = cards.map((card) => resourceId(card)).filter(Boolean);
     orderedIds.value = nextIds;
+<<<<<<< HEAD
+    minimizedIds.value = [];
+    activeCardId.value = nextIds[0] ?? "";
+    focusMode.value = false;
+  },
+  { immediate: true },
+);
+
+watch(
+  singleCardId,
+  (cardId) => {
+    if (cardId) {
+      setActiveCard(cardId);
+=======
     hydratedCardIds.value = [];
     focusMode.value = false;
     answers.value = {};
@@ -818,6 +986,7 @@ watch(
     if (reviewKey) {
       lastReviewPracticeProgressKey = reviewKey;
       restoreReviewPracticeProgress();
+>>>>>>> origin/main
     }
   },
   { immediate: true },
@@ -853,6 +1022,17 @@ const sortedCards = computed(() => {
 
 const quizCard = computed(() =>
   sortedCards.value.find((card) => resourceType(card) === "diagnostic_quiz"),
+);
+
+watch(
+  [() => props.currentNode, () => quizCard.value?.resource_id ?? quizCard.value?.id ?? ""],
+  () => {
+    answers.value = {};
+    submittedScore.value = null;
+    quizAttemptNumber.value = 1;
+    quizStartedAt.value = Date.now();
+    quizEventId.value = "";
+  },
 );
 
 const quizQuestions = computed(() => {
@@ -907,6 +1087,16 @@ const currentMastery = computed(() =>
   Math.round((currentNodeMeta.value?.mastery ?? 0) * 100),
 );
 
+<<<<<<< HEAD
+const resourceGuidance = computed(() => ({
+  concept: "概念导图帮助你建立当前知识点的整体结构。",
+  code: "代码示例帮助你理解知识点如何落到实际实现。",
+  practice: "互动练习帮助你通过应用与反思巩固理解。",
+  video: "视频摘要帮助你快速回顾当前知识点的核心内容。",
+  quiz: "诊断测验用于检验掌握程度并发现薄弱环节。",
+  all: "多种学习资源共同支持理解、实践与诊断的完整过程。",
+}[props.filterType] ?? "当前资源帮助你理解并掌握这个知识点。"));
+=======
 const activeCardType = computed(() => {
   const activeCard = sortedCards.value.find((card) => resourceId(card) === activeCardId.value);
   return resourceType(activeCard) || activeCardTypeHint.value;
@@ -916,6 +1106,7 @@ const activeCardTitle = computed(() => {
   const activeCard = sortedCards.value.find((card) => card.resource_id === activeCardId.value) ?? sortedCards.value[0];
   return activeCard ? cardLabel(resourceType(activeCard)) : "当前内容";
 });
+>>>>>>> origin/main
 
 const isAllCardsPending = computed(() => CARD_TYPES.every((meta) => isCardPending(meta.type)));
 
@@ -1327,24 +1518,6 @@ function quizAfterGuidance(card) {
   return cardMetadata(card).after_quiz_guidance || "";
 }
 
-watch(
-  () => focusMode.value,
-  (enabled) => {
-    if (enabled && activeCardId.value) {
-      hydrateCard(activeCardId.value);
-    }
-  },
-);
-
-watch(
-  () => activeCardId.value,
-  (cardId) => {
-    if (focusMode.value && cardId) {
-      hydrateCard(cardId);
-    }
-  },
-);
-
 function cardLabel(cardType) {
   return props.getCardLabel(cardType);
 }
@@ -1374,6 +1547,16 @@ function cardColor(cardType) {
   }
 }
 
+<<<<<<< HEAD
+function progressHint(cardType) {
+  if (cardType === "diagnostic_quiz") {
+    return 72;
+  }
+  if (cardType === "code_snippet") {
+    return 58;
+  }
+  return 84;
+=======
 function getGridSpanClass(cardType) {
   switch (cardType) {
     case "concept_map":
@@ -1386,6 +1569,7 @@ function getGridSpanClass(cardType) {
     default:
       return "col-span-1 md:col-span-6";
   }
+>>>>>>> origin/main
 }
 
 function nodeChipClass(node) {
@@ -1438,6 +1622,8 @@ function alignNodeToLeft(nodeId) {
   });
 }
 
+<<<<<<< HEAD
+=======
 function isCardHydrated(cardId) {
   return hydratedCardIds.value.includes(cardId);
 }
@@ -1472,26 +1658,49 @@ function persistCanvasState(cardId) {
   });
 }
 
+>>>>>>> origin/main
 function activateCard(cardId) {
   if (!cardId) {
     return;
   }
 
-  setActiveCard(cardId, true);
+  setActiveCard(cardId);
 }
 
-function setActiveCard(cardId, shouldHydrate = false) {
+function openCard(card) {
+  if (!card?.resource_id) {
+    return;
+  }
+
+  setActiveCard(card.resource_id);
+  if (isSingleCardView.value) {
+    return;
+  }
+
+  const filterKey = CARD_TYPES.find((item) => item.type === resourceType(card))?.sidebarKey;
+  if (filterKey) {
+    emit("filter-change", filterKey);
+    return;
+  }
+
+  activateCard(card.resource_id);
+}
+
+function setActiveCard(cardId) {
   if (!cardId) {
     return;
   }
 
   activeCardId.value = cardId;
+<<<<<<< HEAD
+=======
   activeCardTypeHint.value = resourceType(props.cards.find((card) => resourceId(card) === cardId));
 
   if (shouldHydrate) {
     hydrateCard(cardId);
   }
   persistCanvasState(cardId);
+>>>>>>> origin/main
 }
 
 function textPreview(content) {
@@ -1813,12 +2022,40 @@ function submitQuizAnswers() {
     onRecorded: () => settleSubmission(true),
     onFailure: (error) => settleSubmission(false, error),
   });
+<<<<<<< HEAD
+  const score = quizQuestions.value.length ? correct / quizQuestions.value.length : 0;
+  const resourceId = quizCard.value?.resource_id ?? quizCard.value?.id;
+  if (!resourceId) return;
+  if (!quizEventId.value) {
+    quizEventId.value = `diagnostic-${resourceId}-${quizAttemptNumber.value}-${Date.now()}`;
+  }
+  submittedScore.value = score;
+  emit("submit-quiz", {
+    eventId: quizEventId.value,
+    resourceId: String(resourceId),
+    durationMs: Math.max(0, Date.now() - quizStartedAt.value),
+    attemptNumber: quizAttemptNumber.value,
+    usedHint: false,
+    answers: quizQuestions.value.map((question) => ({
+      questionId: question.id,
+      selectedOptionIndex: answers.value[question.id],
+    })),
+    onRecorded() {
+      quizAttemptNumber.value += 1;
+      quizEventId.value = "";
+    },
+    onFailure() {
+      submittedScore.value = null;
+    },
+  });
+=======
 }
 
 function learningEventId(kind, progress, ...parts) {
   return ["eduagent", kind, progress?.sessionId, progress?.nodeId, ...parts]
     .map((part) => String(part ?? "").trim().replace(/\s+/g, "_"))
     .join(":");
+>>>>>>> origin/main
 }
 
 function forwardWheelToContent(event) {
@@ -1848,6 +2085,29 @@ function forwardWheelToContent(event) {
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--space-elevated) 62%, transparent), transparent 22rem);
   overscroll-behavior: contain;
+}
+
+.resource-canvas__grid {
+  display: grid;
+  width: 100%;
+  gap: 1rem;
+}
+
+.resource-canvas__grid--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.resource-canvas__grid--single .resource-canvas__slot {
+  min-height: max(36rem, calc(100dvh - 18rem));
+}
+
+.resource-canvas__grid--multiple {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr));
+  grid-auto-rows: 30rem;
+}
+
+.resource-canvas__slot {
+  min-width: 0;
 }
 
 .resource-canvas__header {
@@ -1948,6 +2208,72 @@ function forwardWheelToContent(event) {
   flex-shrink: 0;
 }
 
+.resource-canvas__filters {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.75rem;
+  padding-top: 0.15rem;
+}
+
+.resource-canvas__filters-label {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.resource-canvas__filter-scroll {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  gap: 0.35rem;
+  overflow-x: auto;
+  padding: 0.15rem;
+}
+
+.resource-canvas__filter {
+  display: inline-flex;
+  min-height: 2.75rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border-radius: var(--radius-sm);
+  padding: 0 0.8rem;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 750;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.resource-canvas__filter:hover {
+  background: var(--space-elevated);
+  color: var(--text-primary);
+}
+
+.resource-canvas__filter--active {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-dark);
+}
+
+.resource-canvas__filter-count {
+  display: inline-flex;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  padding: 0 0.3rem;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  line-height: 1;
+}
+
 @media (max-width: 767px) {
   .resource-canvas__heading-row {
     align-items: flex-start;
@@ -1972,6 +2298,16 @@ function forwardWheelToContent(event) {
     align-items: flex-start;
     flex-direction: column;
     gap: 0.4rem;
+  }
+
+  .resource-canvas__filters {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .resource-canvas__filter-scroll {
+    width: 100%;
   }
 }
 </style>

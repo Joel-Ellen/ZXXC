@@ -64,6 +64,9 @@
         @select-node="(id) => onSelectNode(id)"
         @refresh="$emit('refresh-resources')"
         @generate-card="(payload) => $emit('generate-card', payload)"
+<<<<<<< HEAD
+        @filter-change="onResourceFilterChange"
+=======
         @content-viewed="(payload) => $emit('content-viewed', payload)"
         @hint-requested="(payload) => $emit('hint-requested', payload)"
         @answer-selected="(payload) => $emit('answer-selected', payload)"
@@ -71,6 +74,7 @@
         @code-submitted="(payload) => $emit('code-submitted', payload)"
         @open-review="$emit('open-review')"
         @prepare-review-retest="(payload) => $emit('prepare-review-retest', payload)"
+>>>>>>> origin/main
       />
 
       <button
@@ -196,7 +200,6 @@ const props = defineProps({
   capabilityRadar: { type: Array, default: () => [0.5, 0.5, 0.5, 0.5, 0.5] },
   overallProgress: { type: Number, default: 0 },
   masteredCount: { type: Number, default: 0 },
-  statuses: { type: Array, default: () => [] },
   infoMessage: { type: String, default: "" },
   isBusy: { type: Boolean, default: false },
   isLoadingNode: { type: Boolean, default: false },
@@ -227,6 +230,8 @@ const emit = defineEmits([
   "generate-card",
   "restart-probe",
   "browse-courses",
+<<<<<<< HEAD
+=======
   "content-viewed",
   "hint-requested",
   "answer-selected",
@@ -235,6 +240,7 @@ const emit = defineEmits([
   "open-review",
   "prepare-review-retest",
   "navigate",
+>>>>>>> origin/main
 ]);
 
 const WORKSPACE_VIEWS = new Set(["study", "path", "agents", "evidence"]);
@@ -244,8 +250,13 @@ const WORKSPACE_DRAWER_PANELS = {
   evidence: "radar",
 };
 const drawerOpen = ref(false);
+<<<<<<< HEAD
+const sidebarPanel = ref("all");
+const activeResourceCategory = ref("all");
+=======
 const sidebarPanel = ref("concept");
 const activeResourceCategory = ref("all"); // Show real available cards before the learner applies a filter.
+>>>>>>> origin/main
 const learnPanelRef = ref(null);
 const coachPanelRef = ref(null);
 
@@ -261,6 +272,16 @@ const isTutorCollapsed = computed(() => (
   isDesktopViewport.value && tutorCollapsed.value && props.bootMode !== "probe"
 ));
 
+<<<<<<< HEAD
+const workspaceNav = [
+  { key: "study", label: "学习工作台" },
+  { key: "path", label: "学习路径" },
+  { key: "agents", label: "智能体协同" },
+  { key: "evidence", label: "学习成果" },
+];
+
+=======
+>>>>>>> origin/main
 const dockActions = [
   { key: "study", label: "学习" },
   { key: "coach", label: "辅导" },
@@ -269,6 +290,19 @@ const dockActions = [
   { key: "evidence", label: "成果" },
 ];
 
+<<<<<<< HEAD
+const workspaceNavItems = computed(() =>
+  workspaceNav.map((item) => ({
+    ...item,
+    active: isWorkspaceNavActive(item.key),
+    expanded: item.key !== "study" ? String(isWorkspaceNavActive(item.key)) : undefined,
+    hasPopup: item.key !== "study",
+    targetId: item.key === "study" ? LEARN_PANEL_ID : DRAWER_PANEL_ID,
+  })),
+);
+
+=======
+>>>>>>> origin/main
 const coachPrompts = computed(() => {
   const nodeLabel = props.nodeTitle || "当前知识点";
   return [
@@ -361,6 +395,11 @@ function updateDesktopViewport(event) {
   isDesktopViewport.value = Boolean(event.matches);
 }
 
+function onResourceFilterChange(filterKey) {
+  activeResourceCategory.value = filterKey;
+  sidebarPanel.value = filterKey;
+}
+
 function onSidebarSelect(panelKey) {
   if (panelKey === "probe") {
     emit("restart-probe");
@@ -405,10 +444,13 @@ function onSwitchCourse(courseId) {
 
 function handleBrowseCourses() {
   emit("browse-courses");
+<<<<<<< HEAD
+=======
 }
 
 function toggleTutor() {
   void handleNav("coach");
+>>>>>>> origin/main
 }
 
 function handleCoachSend(message) {

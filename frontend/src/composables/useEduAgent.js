@@ -143,8 +143,20 @@ const AGENT_CN = {
   diagnostic_quiz: "评估智能体",
 };
 
+<<<<<<< HEAD
+const RESOURCE_CARD_TYPES = [
+  "concept_map",
+  "code_snippet",
+  "interactive_exercise",
+  "video_summary",
+  "diagnostic_quiz",
+];
+
+export function useEduAgent() {
+=======
 function createEduAgent() {
   const learningAssets = useLearningAssetsStore();
+>>>>>>> origin/main
   const isLoggedIn = ref(false);
   const currentUser = ref(null);
   const userId = computed(() => currentUser.value?.user_id ?? "demo_user");
@@ -181,6 +193,9 @@ function createEduAgent() {
     { key: "quiz", kind: "quiz", label: "评估智能体", phase: "等待中", progress: 0, active: false },
     { key: "path", kind: "path", label: "路径规划", phase: "未启动", progress: 0, active: false },
   ]);
+  let resourceGenerationVersion = 0;
+  let resourceGenerationController = null;
+  let quizStartedAt = Date.now();
 
   const currentCards = computed(() => resources.value[currentNode.value] ?? []);
   const currentResourceCardStates = computed(() => (
@@ -326,6 +341,8 @@ function createEduAgent() {
       }));
   }
 
+<<<<<<< HEAD
+=======
   async function hydrateLearningAssets() {
     await learningAssets.hydrate(sessionId.value);
     restoreTutorHistory();
@@ -342,6 +359,7 @@ function createEduAgent() {
     };
   }
 
+>>>>>>> origin/main
   async function fetchCurrentNodeResources(nodeId) {
     return fetchSessionResources(sessionId.value, nodeId);
   }
@@ -350,6 +368,8 @@ function createEduAgent() {
     return resource?.resource_type || resource?.card_type || resource?.type || "";
   }
 
+<<<<<<< HEAD
+=======
   function mergeNodeResources(nodeId, incomingResources, cardType = "") {
     if (!Array.isArray(incomingResources) || !incomingResources.length) return;
 
@@ -377,6 +397,7 @@ function createEduAgent() {
       .filter((cardType) => RESOURCE_CARD_TYPES.includes(cardType)))];
   }
 
+>>>>>>> origin/main
   function resourceListFromResponse(response) {
     const candidates = [
       response?.resources,
@@ -384,6 +405,24 @@ function createEduAgent() {
       response?.data?.resources,
       response?.data?.existing_resources,
     ];
+<<<<<<< HEAD
+    return candidates.find((value) => Array.isArray(value) && value.length)
+      ?? candidates.find(Array.isArray)
+      ?? [];
+  }
+
+  function mergeNodeResources(nodeId, incomingResources) {
+    if (!Array.isArray(incomingResources) || !incomingResources.length) return;
+    const incomingTypes = new Set(incomingResources.map(resourceCardType).filter(Boolean));
+    const incomingIds = new Set(incomingResources.map((resource) => resource?.resource_id).filter(Boolean));
+    const retained = (resources.value[nodeId] ?? []).filter((resource) => (
+      !incomingIds.has(resource?.resource_id) && !incomingTypes.has(resourceCardType(resource))
+    ));
+    resources.value = {
+      ...resources.value,
+      [nodeId]: [...retained, ...incomingResources],
+    };
+=======
     return candidates.find((value) => Array.isArray(value)) ?? [];
   }
 
@@ -486,6 +525,7 @@ function createEduAgent() {
   function markResourceCardsFailed(nodeId, cardTypes, error) {
     const message = error instanceof Error ? error.message : String(error || "Resource generation failed.");
     updateResourceCardStates(nodeId, cardTypes, { status: "failed", error: message });
+>>>>>>> origin/main
   }
 
   function generationCardsFromEvent(data) {
@@ -494,6 +534,36 @@ function createEduAgent() {
       data?.card,
       ...(Array.isArray(data?.resources) ? data.resources : []),
     ];
+<<<<<<< HEAD
+    return candidates.filter((candidate) => candidate && resourceCardType(candidate));
+  }
+
+  function missingResourceCardTypes(nodeResources) {
+    const existingTypes = new Set((nodeResources ?? []).map(resourceCardType).filter(Boolean));
+    return RESOURCE_CARD_TYPES.filter((cardType) => !existingTypes.has(cardType));
+  }
+
+  function normalizeResourceOptions(options = {}) {
+    if (typeof options === "boolean") return { force: options, cardTypes: [] };
+    const values = options?.cardTypes ?? options?.cardType ?? [];
+    const cardTypes = [...new Set((Array.isArray(values) ? values : [values])
+      .map((value) => String(value || "").trim())
+      .filter((value) => RESOURCE_CARD_TYPES.includes(value)))];
+    return { force: Boolean(options?.force), cardTypes };
+  }
+
+  function createEventId(prefix = "event") {
+    const randomPart = typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID().replaceAll("-", "")
+      : Math.random().toString(16).slice(2);
+    return `${prefix}-${Date.now()}-${randomPart}`;
+  }
+
+  function abortResourceGeneration() {
+    resourceGenerationVersion += 1;
+    resourceGenerationController?.abort();
+    resourceGenerationController = null;
+=======
     if (
       data
       && typeof data === "object"
@@ -836,6 +906,7 @@ function createEduAgent() {
 
     inFlightGenerationRequests.set(requestKey, request);
     return request;
+>>>>>>> origin/main
   }
 
   async function fetchCurrentProbe() {
@@ -853,7 +924,11 @@ function createEduAgent() {
   }
 
   function resetLearningState() {
+<<<<<<< HEAD
+    abortResourceGeneration();
+=======
     invalidateRouteEnhancements();
+>>>>>>> origin/main
     currentNode.value = "";
     activePath.value = [];
     mastery.value = {};
@@ -869,9 +944,13 @@ function createEduAgent() {
     probe.value = null;
     probeCollected.value = 0;
     stepLogs.value = [];
+<<<<<<< HEAD
+    quizStartedAt = Date.now();
+=======
     lessonTimer = null;
     contentTimer = null;
     tutorQuestionAttempt = 0;
+>>>>>>> origin/main
   }
 
   function pathIdsFromDto(state) {
@@ -1422,6 +1501,10 @@ function createEduAgent() {
   }
 
   async function initPathAndEnter() {
+<<<<<<< HEAD
+    await createSession({ course_id: courseId.value });
+=======
+>>>>>>> origin/main
     await initSessionPath(sessionId.value);
     await createSession({ course_id: courseId.value });
     const state = await fetchCurrentSession();
@@ -1773,7 +1856,14 @@ function createEduAgent() {
       return;
     }
 
+<<<<<<< HEAD
+    abortResourceGeneration();
+    const loadGeneration = resourceGenerationVersion;
+    currentNode.value = nodeId;
+    isLoadingNode.value = true;
+=======
     const context = createRouteEnhancementContext(nodeId);
+>>>>>>> origin/main
     const nodeLabel = nodeTitles.value[nodeId] || nodeId;
     setInfo(`正在为「${nodeLabel}」生成学习资源...`);
     let delegatedToResourceFlow = false;
@@ -1785,20 +1875,45 @@ function createEduAgent() {
       if (!isCurrentRouteEnhancement(context)) return { nodeId, stale: true };
       hydrateState(state, { preservePathOrder: true });
       currentNode.value = nodeId;
+<<<<<<< HEAD
+      quizStartedAt = Date.now();
+      await refreshNodeResources(nodeId, { force: false, silent });
+=======
       delegatedToResourceFlow = true;
       return runRouteEnhancements(context, { silent });
+>>>>>>> origin/main
     } catch (e) {
       const message = e?.response?.data?.detail || e?.message || "未知错误";
       setInfo(`资源生成失败：${message}`, 10000);
       console.error("loadNode failed:", e);
       return { nodeId, error: e };
     } finally {
+<<<<<<< HEAD
+      if (loadGeneration === resourceGenerationVersion) {
+        isLoadingNode.value = false;
+      }
+=======
       if (!delegatedToResourceFlow) finishRouteEnhancement(context);
+>>>>>>> origin/main
       refreshStatuses();
     }
   }
 
   async function submitQuiz(submission) {
+<<<<<<< HEAD
+    const resourceId = String(submission?.resourceId || "");
+    const answers = Array.isArray(submission?.answers)
+      ? submission.answers.map((answer) => ({
+        question_id: String(answer?.questionId ?? answer?.question_id ?? ""),
+        answer_index: Number(answer?.selectedOptionIndex ?? answer?.answer_index),
+      })).filter((answer) => answer.question_id && Number.isInteger(answer.answer_index))
+      : [];
+    if (!resourceId || !answers.length) {
+      const error = new Error("诊断答题记录不完整，请重新作答。");
+      setInfo(error.message, 8000);
+      submission?.onFailure?.(error);
+      return null;
+=======
     const eventKind = typeof submission?.eventKind === "string" ? submission.eventKind : "completion";
     if (eventKind === "answer_submitted") {
       const resourceId = typeof submission?.resourceId === "string" ? submission.resourceId : "";
@@ -1835,6 +1950,7 @@ function createEduAgent() {
       const error = new Error("Diagnostic answer evidence is incomplete.");
       setInfo(error.message, 6000);
       throw error;
+>>>>>>> origin/main
     }
 
     isLoadingNode.value = true;
@@ -1843,6 +1959,26 @@ function createEduAgent() {
     const completionEventType = submission?.isReview === true ? "review_completed" : "lesson_completed";
 
     try {
+<<<<<<< HEAD
+      const response = await submitSessionLearningEvent(sessionId.value, {
+        event_id: String(submission?.eventId || createEventId("diagnostic")),
+        event_type: submission?.isReview ? "review_completed" : "lesson_completed",
+        user_id: userId.value,
+        course_id: courseId.value,
+        node_id: evaluatedNodeId,
+        resource_id: resourceId,
+        question_id: "",
+        duration_ms: Math.max(0, Math.round(Number(submission?.durationMs) || (Date.now() - quizStartedAt))),
+        attempt_number: Math.max(1, Math.round(Number(submission?.attemptNumber) || 1)),
+        used_hint: Boolean(submission?.usedHint),
+        result: {
+          evidence_type: "diagnostic_quiz",
+          answers,
+        },
+      });
+      const state = await fetchCurrentSession();
+      hydrateState(state);
+=======
       const response = await recordLearningEvent(completionEventType, {
         eventId: submission?.eventId,
         nodeId: evaluatedNodeId,
@@ -1863,6 +1999,7 @@ function createEduAgent() {
         stateRefreshError = error;
         hydrateState(state);
       }
+>>>>>>> origin/main
       currentNode.value = currentNodeFromDto(state) || response.current_node_id || evaluatedNodeId;
 
       const nextNodeId = response.next_node_id || currentNodeFromDto(state) || "";
@@ -1870,6 +2007,12 @@ function createEduAgent() {
       const responseFeedback = feedbackFromDto(response, state);
       const attribution = response.mastery_attribution ?? response.attribution ?? null;
       const verifiedEvidence = response.verified_evidence ?? response.event?.verified_evidence ?? attribution?.evidence ?? {};
+<<<<<<< HEAD
+      lastDiagnostic.value = {
+        eventId: response.event_id || "",
+        score: response.effective_correctness ?? null,
+        questionResults: Array.isArray(verifiedEvidence?.question_results) ? verifiedEvidence.question_results : [],
+=======
       const review = response.review && typeof response.review === "object" ? response.review : null;
       lastDiagnostic.value = {
         eventId: response.event_id || "",
@@ -1883,6 +2026,7 @@ function createEduAgent() {
         requiresRemediation: Boolean(review?.requires_remediation),
         score: finiteNumberOrNull(response.effective_correctness),
         resourceId,
+>>>>>>> origin/main
         evaluatedNodeId: response.evaluated_node_id || attribution?.node_id || evaluatedNodeId,
         evaluatedNodeTitle: nodeTitles.value[response.evaluated_node_id || evaluatedNodeId] || response.evaluated_node_id || evaluatedNodeId,
         masteryBefore: response.mastery_before ?? attribution?.mastery_before ?? previousMastery,
@@ -1906,6 +2050,19 @@ function createEduAgent() {
       } else {
         setInfo("诊断已记录，系统已根据答题证据更新当前节点掌握度。");
       }
+<<<<<<< HEAD
+      submission?.onRecorded?.(lastDiagnostic.value);
+      quizStartedAt = Date.now();
+      if (lastDiagnostic.value.advancedToNextNode && currentNode.value) {
+        await refreshNodeResources(currentNode.value, { force: false, silent: true });
+      }
+      return lastDiagnostic.value;
+    } catch (error) {
+      const message = error?.response?.data?.detail || error?.message || "提交诊断失败。";
+      setInfo(message, 8000);
+      submission?.onFailure?.(error);
+      return null;
+=======
       if (stateRefreshError) setInfo("Diagnostic recorded; session refresh is temporarily unavailable.", 10000);
       return lastDiagnostic.value;
     } catch (error) {
@@ -1913,6 +2070,7 @@ function createEduAgent() {
       lastDiagnostic.value = { resourceId, evaluatedNodeId, failed: true, failureMessage };
       setInfo(failureMessage, 8000);
       throw error;
+>>>>>>> origin/main
     } finally {
       isLoadingNode.value = false;
       refreshStatuses();
@@ -1920,9 +2078,20 @@ function createEduAgent() {
   }
 
   async function refreshNodeResources(nodeId, options = {}) {
+<<<<<<< HEAD
+    if (!nodeId) return { ok: false };
+
+    const { force, cardTypes } = normalizeResourceOptions(options);
+    const silent = Boolean(options?.silent);
+    abortResourceGeneration();
+    const generation = resourceGenerationVersion;
+    const controller = typeof AbortController === "undefined" ? null : new AbortController();
+    resourceGenerationController = controller;
+=======
     if (!nodeId) return { ok: false, error: new Error("Missing learning node.") };
 
     const { force, cardType, cardTypes } = normalizeResourceOptions(options);
+>>>>>>> origin/main
     const nodeLabel = nodeTitles.value[nodeId] || nodeId;
     const requestedCardTypes = cardTypes.length
       ? cardTypes
@@ -1939,6 +2108,70 @@ function createEduAgent() {
     );
 
     try {
+<<<<<<< HEAD
+      const cachedResult = await fetchCurrentNodeResources(nodeId);
+      if (generation !== resourceGenerationVersion || currentNode.value !== nodeId) {
+        return { ok: false, stale: true };
+      }
+      mergeNodeResources(nodeId, resourceListFromResponse(cachedResult));
+
+      const requestedTypes = cardTypes.length ? cardTypes : RESOURCE_CARD_TYPES;
+      const missingTypes = missingResourceCardTypes(resources.value[nodeId] ?? []);
+      const typesToGenerate = force
+        ? requestedTypes
+        : requestedTypes.filter((cardType) => missingTypes.includes(cardType));
+      if (!typesToGenerate.length) {
+        if (!silent) setInfo(`「${nodeLabel}」资源已就绪。`);
+        return { ok: true, status: "already_exists", resources: resources.value[nodeId] ?? [] };
+      }
+
+      const generationResult = await requestResourceGeneration(sessionId.value, nodeId, {
+        cardTypes: typesToGenerate,
+        force,
+        priority: typesToGenerate.includes("concept_map") ? "concept_map" : "card",
+      });
+      mergeNodeResources(nodeId, resourceListFromResponse(generationResult));
+      if (generation !== resourceGenerationVersion || currentNode.value !== nodeId) {
+        return { ok: false, stale: true };
+      }
+
+      let jobId = String(generationResult?.job_id || "");
+      let streamFailure = null;
+      while (jobId && generation === resourceGenerationVersion && currentNode.value === nodeId) {
+        let followUpJobId = "";
+        await streamResourceGeneration(jobId, {
+          signal: controller?.signal,
+          onCardReady(data) {
+            if (generation !== resourceGenerationVersion || currentNode.value !== nodeId) return;
+            mergeNodeResources(nodeId, generationCardsFromEvent(data));
+          },
+          onCardFailed(data) {
+            const message = data?.error || data?.detail || "部分资源生成失败";
+            setInfo(message, 8000);
+          },
+          onCompleted(data) {
+            followUpJobId = String(data?.follow_up_job_id || "");
+          },
+          onFailed(data) {
+            streamFailure = new Error(data?.error || data?.detail || "资源生成任务失败");
+          },
+          onError(error) {
+            streamFailure = error;
+          },
+        });
+        jobId = followUpJobId;
+      }
+
+      if (generation !== resourceGenerationVersion || currentNode.value !== nodeId) {
+        return { ok: false, stale: true };
+      }
+      const finalResult = await fetchCurrentNodeResources(nodeId);
+      mergeNodeResources(nodeId, resourceListFromResponse(finalResult));
+      const finalCards = resources.value[nodeId] ?? [];
+      if (streamFailure && !finalCards.length) throw streamFailure;
+      if (!silent) setInfo(`「${nodeLabel}」已加载 ${finalCards.length} 份学习资源。`);
+      return { ok: true, status: "completed", resources: finalCards };
+=======
       const readResult = await fetchCurrentNodeResources(nodeId);
       if (!isCurrentRouteEnhancement(context)) {
         return { ok: false, stale: true, error: new Error("The learning node changed during synchronization.") };
@@ -1972,13 +2205,22 @@ function createEduAgent() {
       });
       setInfo(`「${nodeLabel}」已提交 ${cardTypesToGenerate.length} 张资源的生成任务。`);
       return { ok: true, result, resources: existingResources, status: result?.status || "queued" };
+>>>>>>> origin/main
     } catch (e) {
       if (e?.name === "AbortError") return { ok: false, stale: true };
       const message = e?.response?.data?.detail || e?.message || "未知错误";
       setInfo(`资源生成失败：${message}`, 10000);
       return { ok: false, error: e };
     } finally {
+<<<<<<< HEAD
+      if (generation === resourceGenerationVersion) {
+        resourceGenerationController = null;
+        isLoadingNode.value = false;
+        refreshStatuses();
+      }
+=======
       refreshStatuses();
+>>>>>>> origin/main
     }
   }
 

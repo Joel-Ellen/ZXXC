@@ -1,27 +1,50 @@
 <template>
   <header class="session-header">
-    <div class="session-header__panel">
-      <div class="session-header__surface">
-        <div class="session-header__brand" aria-hidden="true">
-          <span class="session-header__mark">EA</span>
-          <span class="session-header__brand-copy">
-            <strong>EduAgent</strong>
-            <span>学习工作台</span>
-          </span>
-        </div>
+    <div class="session-header__brand-group">
+      <button type="button" class="session-header__brand focus-ring" aria-label="返回首页" @click="$emit('go-home')">
+        <span class="session-header__mark">EA</span>
+        <span class="session-header__brand-copy">
+          <strong>EduAgent</strong>
+          <small>智能学习工作台</small>
+        </span>
+      </button>
 
-        <div class="session-header__grid" aria-label="当前学习会话">
-          <section class="session-header__group session-header__group--course" aria-label="课程">
-            <p class="session-header__label">课程</p>
-            <CourseSwitcher
-              :active-course="activeCourse"
-              :enrolled-courses="enrolledCourses"
-              @switch-course="$emit('switch-course', $event)"
-              @browse-courses="$emit('browse-courses')"
-            />
-            <p class="session-header__user">{{ userLabel }}</p>
-          </section>
+      <CourseSwitcher
+        class="session-header__course"
+        :active-course="activeCourse"
+        :enrolled-courses="enrolledCourses"
+        @switch-course="$emit('switch-course', $event)"
+        @browse-courses="$emit('browse-courses')"
+      />
+    </div>
 
+<<<<<<< HEAD
+    <nav class="session-header__nav" aria-label="工作台主导航">
+      <button
+        v-for="item in navigation"
+        :key="item.key"
+        type="button"
+        class="session-header__nav-button focus-ring"
+        :class="{ 'is-active': item.active }"
+        :aria-controls="item.targetId"
+        :aria-current="item.active && !item.hasPopup ? 'page' : undefined"
+        :aria-expanded="item.expanded"
+        :aria-haspopup="item.hasPopup ? 'dialog' : undefined"
+        @click="$emit('navigate', item.key)"
+      >
+        {{ item.label }}
+      </button>
+    </nav>
+
+    <div class="session-header__session">
+      <div class="session-header__node">
+        <span>{{ stageLabel }}</span>
+        <strong>{{ nodeTitle || "等待生成学习路径" }}</strong>
+      </div>
+      <div class="session-header__progress" :aria-label="`整体学习进度 ${progressValue}%`">
+        <strong>{{ progressValue }}%</strong>
+        <span>{{ masteredCount }}/{{ pathNodes.length || 0 }} 节点</span>
+=======
           <section class="session-header__group session-header__node" aria-label="当前节点">
             <div class="session-header__line">
               <p class="session-header__label">{{ stageLabel }}</p>
@@ -74,23 +97,45 @@
         <p v-if="infoMessage" class="session-header__notice" role="status">
           {{ infoMessage }}
         </p>
+>>>>>>> origin/main
       </div>
     </div>
 
-    <button
-      type="button"
-      class="session-header__peek focus-ring"
-      aria-label="展开学习状态与导航"
-      title="悬停展开学习状态与导航"
-    >
-      <span class="session-header__peek-line" aria-hidden="true" />
-      <span class="session-header__peek-label">悬停展开学习状态与导航</span>
-    </button>
+    <div class="session-header__tools">
+      <button
+        type="button"
+        class="session-header__icon-button focus-ring"
+        title="显示设置"
+        aria-label="显示设置"
+        @click="$emit('navigate', 'settings')"
+      >
+        <IconSettings :size="18" />
+      </button>
+      <button
+        type="button"
+        class="session-header__icon-button focus-ring"
+        title="重新测评"
+        aria-label="重新测评"
+        @click="$emit('navigate', 'probe')"
+      >
+        <IconQuiz :size="18" />
+      </button>
+      <span class="session-header__user">{{ userLabel }}</span>
+      <button type="button" class="session-header__logout focus-ring" @click="$emit('logout')">
+        退出
+      </button>
+    </div>
+
+    <p v-if="infoMessage" class="session-header__notice" role="status">
+      {{ infoMessage }}
+    </p>
   </header>
 </template>
 
 <script setup>
 import { computed } from "vue";
+import IconQuiz from "../icons/IconQuiz.vue";
+import IconSettings from "../icons/IconSettings.vue";
 import CourseSwitcher from "./CourseSwitcher.vue";
 
 const props = defineProps({
@@ -117,81 +162,20 @@ const emit = defineEmits([
   "navigate",
 ]);
 
-const currentNodeMeta = computed(() =>
-  props.pathNodes.find((node) => node.id === props.currentNode) ?? null,
-);
-
-const nextNode = computed(() => {
-  const currentIndex = props.pathNodes.findIndex((node) => node.id === props.currentNode);
-  if (currentIndex < 0) {
-    return props.pathNodes.find((node) => node.mastery < 0.65) ?? null;
-  }
-
-  return props.pathNodes.slice(currentIndex + 1).find((node) => node.mastery < 0.65) ?? null;
-});
-
-const currentMastery = computed(() =>
-  Math.round((currentNodeMeta.value?.mastery ?? 0) * 100),
-);
-
 const progressValue = computed(() => {
-  const progress = Number.isFinite(props.overallProgress) ? props.overallProgress : 0;
-  return Math.max(0, Math.min(100, Math.round(progress)));
+  const value = Number.isFinite(props.overallProgress) ? props.overallProgress : 0;
+  return Math.max(0, Math.min(100, Math.round(value)));
 });
 
-const userLabel = computed(() =>
-  props.user?.display_name || props.user?.user_id || "未登录",
-);
+const userLabel = computed(() => props.user?.display_name || props.user?.user_id || "学习者");
 
 const stageLabel = computed(() => {
   if (props.bootMode === "probe") return "入学诊断";
   if (props.isLoadingNode) return "资源生成中";
-  if (props.isBusy) return "同步中";
+  if (props.isBusy) return "状态同步中";
   if (!props.pathNodes.length) return "路径待生成";
-  if (currentMastery.value >= 65) return "节点已达标";
-  return "继续学习";
-});
-
-const currentNodeCaption = computed(() => {
-  if (!props.pathNodes.length) return "等待路径";
-
-  const order = currentNodeMeta.value?.order ?? 0;
-  return order ? `${order}/${props.pathNodes.length}` : "当前节点";
-});
-
-const nextStepTitle = computed(() => {
-  if (props.bootMode === "probe") return "完成入学诊断";
-  if (props.isLoadingNode) return "等待资源装配完成";
-  if (!props.pathNodes.length) return "生成学习路径";
-  if (!props.cards.length) return "装配当前节点资源";
-  if (currentMastery.value < 65) return "完成当前节点学习";
-  return nextNode.value ? `切换到 ${nextNode.value.title}` : "进入复盘与串联";
-});
-
-const nextStepDetail = computed(() => {
-  if (props.bootMode === "probe") {
-    return "诊断会决定起点、资源密度和后续节点顺序。";
-  }
-
-  if (props.isLoadingNode) {
-    return "先保持当前节点，等待概念、代码、练习和诊断内容到位。";
-  }
-
-  if (!props.pathNodes.length) {
-    return "路径生成后，工作台会自动定位第一个建议节点。";
-  }
-
-  if (!props.cards.length) {
-    return "当前节点还没有可展开材料，优先触发资源生成。";
-  }
-
-  if (currentMastery.value < 65) {
-    return "建议按概念、代码、练习、诊断的顺序推进。";
-  }
-
-  return nextNode.value
-    ? "当前节点接近达标，可以准备进入下一个薄弱点。"
-    : "主线薄弱点已覆盖，适合做复盘和面试化练习。";
+  if (!props.cards.length) return "资源待装配";
+  return "当前学习节点";
 });
 
 function navigate(key) {
@@ -201,12 +185,10 @@ function navigate(key) {
 
 <style scoped>
 .session-header {
-  position: fixed;
-  top: 0;
-  right: 0;
-  left: 0;
-  height: 0;
+  position: relative;
   z-index: var(--z-sticky);
+<<<<<<< HEAD
+=======
   pointer-events: none;
 }
 
@@ -293,61 +275,68 @@ function navigate(key) {
 }
 
 .session-header__surface {
+>>>>>>> origin/main
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: stretch;
-  gap: 0.5rem;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--space-panel);
-  box-shadow: var(--workspace-shadow-soft);
-  padding: 0.35rem;
+  min-height: 4.75rem;
+  grid-template-columns: auto minmax(26rem, 1fr) auto auto;
+  align-items: center;
+  gap: 1rem;
+  border-bottom: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--space-panel) 96%, transparent);
+  padding: 0.65rem 1rem;
+  backdrop-filter: blur(18px);
+}
+
+.session-header__brand-group,
+.session-header__brand,
+.session-header__tools,
+.session-header__session,
+.session-header__nav {
+  display: flex;
+  align-items: center;
+}
+
+.session-header__brand-group {
+  gap: 0.75rem;
 }
 
 .session-header__brand {
-  display: flex;
-  align-items: center;
-  gap: 0.7rem;
-  grid-column: 1 / -1;
-  min-width: 0;
-  padding: 0.2rem 0.25rem;
+  gap: 0.65rem;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  padding: 0;
+  text-align: left;
 }
 
 .session-header__mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2.5rem;
-  height: 2.5rem;
-  border: 1px solid color-mix(in srgb, var(--color-primary) 22%, var(--border-subtle));
-  border-radius: var(--radius-md);
-  background: var(--color-primary-soft);
-  color: var(--color-primary-dark);
-  font-size: 0.82rem;
+  display: grid;
+  width: 2.6rem;
+  aspect-ratio: 1;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--text-primary);
+  color: var(--space-bg);
+  font-size: 0.8rem;
   font-weight: 900;
+  letter-spacing: 0.08em;
 }
 
 .session-header__brand-copy {
   display: grid;
-  min-width: 0;
-  gap: 0.1rem;
-}
-
-.session-header__brand-copy strong,
-.session-header__brand-copy span {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  gap: 0.08rem;
   white-space: nowrap;
 }
 
 .session-header__brand-copy strong {
-  color: var(--text-primary);
-  font-size: var(--font-size-sm);
-  line-height: 1.15;
+  font-size: 0.92rem;
+  line-height: 1.1;
 }
 
-.session-header__brand-copy span {
+.session-header__brand-copy small {
   color: var(--text-muted);
+<<<<<<< HEAD
+=======
   font-size: 0.72rem;
 }
 
@@ -447,38 +436,129 @@ function navigate(key) {
   color: var(--text-secondary);
   padding: 0.15rem 0.5rem;
   font-family: var(--font-mono);
+>>>>>>> origin/main
   font-size: 0.68rem;
-  font-weight: 700;
 }
 
-.session-header__meter-value {
+.session-header__course {
+  min-width: 9.5rem;
+}
+
+<<<<<<< HEAD
+.session-header__nav {
+  justify-content: center;
+  gap: 0.2rem;
+  white-space: nowrap;
+}
+
+.session-header__nav-button {
+  min-height: 2.45rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  padding: 0.6rem 0.8rem;
+  font-size: 0.78rem;
+  font-weight: 750;
+  transition: background var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard), transform var(--duration-fast) var(--ease-emphasized);
+}
+
+.session-header__nav-button:hover {
+  background: var(--space-elevated);
   color: var(--text-primary);
-  font-family: var(--font-mono);
-  font-size: var(--font-size-sm);
-  font-weight: 800;
 }
 
-.session-header__meter {
-  height: 0.45rem;
+.session-header__nav-button.is-active {
+  background: var(--text-primary);
+  color: var(--space-bg);
+}
+
+.session-header__nav-button:active,
+.session-header__icon-button:active,
+.session-header__logout:active {
+  transform: scale(0.97);
+}
+
+.session-header__session {
+  min-width: 14rem;
+  gap: 0.8rem;
+  border-left: 1px solid var(--border-subtle);
+  padding-left: 1rem;
+}
+
+.session-header__node {
+  display: grid;
+  min-width: 0;
+  gap: 0.14rem;
+}
+
+.session-header__node span,
+.session-header__progress span {
+  color: var(--text-muted);
+  font-size: 0.67rem;
+}
+
+.session-header__node strong {
+  max-width: 9rem;
   overflow: hidden;
-  border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--border-subtle) 72%, transparent);
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.session-header__meter span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--color-primary);
-  transition: width var(--duration-slow) var(--ease-emphasized);
+.session-header__progress {
+  display: grid;
+  flex-shrink: 0;
+  gap: 0.08rem;
+  text-align: right;
+}
+
+.session-header__progress strong {
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
 }
 
 .session-header__tools {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
+  gap: 0.35rem;
 }
 
+.session-header__icon-button,
+.session-header__logout {
+  display: grid;
+  min-height: 2.45rem;
+  place-items: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  transition: border-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard), transform var(--duration-fast) var(--ease-emphasized);
+}
+
+.session-header__icon-button {
+  width: 2.45rem;
+  padding: 0;
+}
+
+.session-header__logout {
+  padding: 0.55rem 0.75rem;
+  font-size: 0.76rem;
+  font-weight: 750;
+}
+
+.session-header__icon-button:hover,
+.session-header__logout:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.session-header__user {
+  max-width: 6rem;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+=======
 .session-header__action {
   min-height: 2.75rem;
   border: 1px solid var(--color-primary);
@@ -499,25 +579,47 @@ function navigate(key) {
 
 .session-header__action--mobile {
   display: none;
+>>>>>>> origin/main
 }
 
 .session-header__notice {
-  margin: 0.45rem 0 0;
-  border: 1px solid color-mix(in srgb, var(--color-primary) 18%, var(--border-subtle));
-  border-radius: var(--radius-md);
-  background: var(--color-primary-soft);
-  color: var(--color-primary-dark);
-  padding: 0.55rem 0.8rem;
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 1rem;
+  max-width: min(28rem, calc(100vw - 2rem));
+  margin: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--space-panel);
+  box-shadow: var(--shadow-md);
+  padding: 0.75rem 1rem;
+  color: var(--text-secondary);
   font-size: 0.78rem;
-  font-weight: 650;
-  line-height: 1.45;
 }
 
-@media (max-width: 1279px) {
-  .session-header__surface {
-    grid-template-columns: minmax(0, 1fr) auto;
+@media (max-width: 1280px) {
+  .session-header {
+    grid-template-columns: auto minmax(22rem, 1fr) auto;
   }
 
+  .session-header__session,
+  .session-header__brand-copy small {
+    display: none;
+  }
+}
+
+@media (max-width: 980px) {
+  .session-header {
+    width: 100%;
+    max-width: 100vw;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.55rem;
+    overflow: hidden;
+  }
+
+<<<<<<< HEAD
+  .session-header__course,
+=======
   .session-header__brand {
     display: none;
   }
@@ -547,11 +649,14 @@ function navigate(key) {
     display: none;
   }
 
+>>>>>>> origin/main
   .session-header__user {
     display: none;
   }
-}
 
+<<<<<<< HEAD
+  .session-header__nav {
+=======
 @media (max-width: 767px) {
   .session-header {
     position: relative;
@@ -615,28 +720,25 @@ function navigate(key) {
 
   .session-header__group--course,
   .session-header__group:nth-child(2) {
+>>>>>>> origin/main
     grid-column: 1 / -1;
-    border-left: 0;
-  }
-
-  .session-header__group:nth-child(3),
-  .session-header__group:nth-child(4) {
-    display: none;
-  }
-
-  .session-header__subtle {
-    display: none;
-  }
-
-  .session-header__title,
-  .session-header__next {
-    white-space: normal;
+    grid-row: 2;
+    justify-content: flex-start;
+    overflow-x: auto;
+    padding-top: 0.15rem;
+    scrollbar-width: none;
   }
 
   .session-header__tools {
-    justify-content: flex-end;
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
   }
 
+<<<<<<< HEAD
+  .session-header__nav::-webkit-scrollbar {
+    display: none;
+=======
   .session-header__action--desktop {
     display: none;
   }
@@ -645,39 +747,30 @@ function navigate(key) {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+>>>>>>> origin/main
   }
 }
 
-@media (min-width: 600px) and (max-width: 1099px) and (max-height: 560px) {
-  .session-header__brand {
+@media (max-width: 520px) {
+  .session-header {
+    padding: max(0.55rem, env(safe-area-inset-top, 0px)) 0.65rem 0.45rem;
+  }
+
+  .session-header__brand-copy,
+  .session-header__logout {
     display: none;
   }
 
-  .session-header__grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+  .session-header__tools {
+    position: absolute;
+    top: max(0.55rem, env(safe-area-inset-top, 0px));
+    right: 0.65rem;
+    display: flex;
   }
 
-  .session-header__group,
-  .session-header__group + .session-header__group,
-  .session-header__group:nth-child(n + 3) {
-    min-height: 4.5rem;
-    border-top: 0;
-    border-left: 1px solid var(--border-subtle);
-    padding: 0.45rem 0.6rem;
-  }
-
-  .session-header__group:first-child {
-    border-left: 0;
-  }
-
-  .session-header__subtle,
-  .session-header__user {
-    display: none;
-  }
-
-  .session-header__title,
-  .session-header__next {
-    font-size: 0.78rem;
+  .session-header__nav-button {
+    min-height: 2.3rem;
+    padding-inline: 0.65rem;
   }
 }
 </style>

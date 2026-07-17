@@ -29,6 +29,9 @@
       @select-node="$emit('select-node', $event)"
       @refresh="$emit('refresh')"
       @generate-card="$emit('generate-card', $event)"
+<<<<<<< HEAD
+      @filter-change="$emit('filter-change', $event)"
+=======
       @content-viewed="$emit('content-viewed', $event)"
       @hint-requested="$emit('hint-requested', $event)"
       @answer-selected="$emit('answer-selected', $event)"
@@ -36,6 +39,7 @@
       @code-submitted="$emit('code-submitted', $event)"
       @open-review="$emit('open-review')"
       @prepare-review-retest="$emit('prepare-review-retest', $event)"
+>>>>>>> origin/main
     />
   </main>
 </template>
@@ -65,6 +69,9 @@ defineProps({
   buildQuiz: { type: Function, required: true },
 });
 
+<<<<<<< HEAD
+defineEmits(["submit-quiz", "select-node", "refresh", "generate-card", "filter-change"]);
+=======
 defineEmits([
   "submit-quiz",
   "select-node",
@@ -78,6 +85,7 @@ defineEmits([
   "open-review",
   "prepare-review-retest",
 ]);
+>>>>>>> origin/main
 
 const paneRef = ref(null);
 const canvasRef = ref(null);

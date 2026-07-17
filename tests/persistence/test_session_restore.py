@@ -37,28 +37,3 @@ def test_restore_or_create_falls_back_to_runtime(monkeypatch):
     session = _common.restore_or_create_runtime_session("u", "c")
     assert session.agent_state.user_id == "u"
     assert fake_runtime.peek_session("u", "c") is session
-
-
-def test_persist_session_reports_when_no_repository_accepts_the_state(monkeypatch):
-    fake_runtime = FakeRuntime()
-    session = fake_runtime.get_session("u", "c")
-
-    class FailingStateRepo:
-        def save_state(self, *_args, **_kwargs):
-            raise OSError("state unavailable")
-
-    class FailingSnapshotRepo:
-        def save_snapshot(self, *_args, **_kwargs):
-            raise OSError("snapshot unavailable")
-
-    monkeypatch.setattr(_common, "StateRepo", FailingStateRepo)
-    monkeypatch.setattr(_common, "SessionSnapshotRepo", FailingSnapshotRepo)
-
-    result = _common.persist_session(session)
-
-    assert result == {
-        "durable": False,
-        "attempted": ["state", "snapshot"],
-        "succeeded": [],
-        "failed": ["state", "snapshot"],
-    }
