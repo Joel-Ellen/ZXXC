@@ -18,6 +18,7 @@
       />
     </div>
 
+<<<<<<< HEAD
     <nav class="session-header__nav" aria-label="工作台主导航">
       <button
         v-for="item in navigation"
@@ -43,6 +44,60 @@
       <div class="session-header__progress" :aria-label="`整体学习进度 ${progressValue}%`">
         <strong>{{ progressValue }}%</strong>
         <span>{{ masteredCount }}/{{ pathNodes.length || 0 }} 节点</span>
+=======
+          <section class="session-header__group session-header__node" aria-label="当前节点">
+            <div class="session-header__line">
+              <p class="session-header__label">{{ stageLabel }}</p>
+              <span class="session-header__pill">{{ currentNodeCaption }}</span>
+            </div>
+            <h1 class="session-header__title" aria-hidden="true">{{ nodeTitle || "等待生成学习路径" }}</h1>
+            <p class="session-header__subtle">{{ activeCourse?.title_cn || "课程工作台" }}</p>
+          </section>
+
+          <section class="session-header__group" aria-label="下一步">
+            <p class="session-header__label">下一步</p>
+            <h2 class="session-header__next">{{ nextStepTitle }}</h2>
+            <p class="session-header__subtle">{{ nextStepDetail }}</p>
+          </section>
+
+          <section class="session-header__group session-header__group--progress session-header__progress" aria-label="学习进度">
+            <div class="session-header__line">
+              <p class="session-header__label">进度</p>
+              <strong class="session-header__meter-value">{{ progressValue }}%</strong>
+            </div>
+            <div class="session-header__meter" aria-hidden="true">
+              <span :style="{ width: `${progressValue}%` }" />
+            </div>
+            <p class="session-header__subtle">
+              {{ masteredCount }}/{{ pathNodes.length || 0 }} 节点达标 · 当前 {{ currentMastery }}%
+            </p>
+          </section>
+        </div>
+
+        <div class="session-header__tools">
+          <button
+            type="button"
+            class="session-header__action session-header__action--desktop session-header__primary focus-ring"
+            :aria-expanded="String(!tutorCollapsed)"
+            aria-controls="workspace-coach-panel"
+            @click="$emit('toggle-tutor')"
+          >
+            {{ tutorCollapsed ? "打开导师" : "收起导师" }}
+          </button>
+          <button
+            type="button"
+            class="session-header__action session-header__action--mobile session-header__mobile-primary focus-ring"
+            aria-controls="workspace-learn-panel"
+            @click="navigate('learn')"
+          >
+            继续学习
+          </button>
+        </div>
+
+        <p v-if="infoMessage" class="session-header__notice" role="status">
+          {{ infoMessage }}
+        </p>
+>>>>>>> origin/main
       </div>
     </div>
 
@@ -97,14 +152,13 @@ const props = defineProps({
   infoMessage: { type: String, default: "" },
   isBusy: { type: Boolean, default: false },
   isLoadingNode: { type: Boolean, default: false },
-  navigation: { type: Array, default: () => [] },
+  tutorCollapsed: { type: Boolean, default: false },
 });
 
-defineEmits([
+const emit = defineEmits([
   "switch-course",
   "browse-courses",
-  "go-home",
-  "logout",
+  "toggle-tutor",
   "navigate",
 ]);
 
@@ -123,12 +177,105 @@ const stageLabel = computed(() => {
   if (!props.cards.length) return "资源待装配";
   return "当前学习节点";
 });
+
+function navigate(key) {
+  emit("navigate", key);
+}
 </script>
 
 <style scoped>
 .session-header {
   position: relative;
   z-index: var(--z-sticky);
+<<<<<<< HEAD
+=======
+  pointer-events: none;
+}
+
+.session-header__panel {
+  position: absolute;
+  top: 3rem;
+  right: 0.75rem;
+  left: 0.75rem;
+  pointer-events: auto;
+  transform: translateY(calc(-100% - 0.5rem));
+  visibility: hidden;
+  transition:
+    transform var(--duration-slow) var(--ease-emphasized),
+    visibility 0s linear var(--duration-slow);
+}
+
+.session-header:hover .session-header__panel,
+.session-header:focus-within .session-header__panel {
+  transform: translateY(0);
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+.session-header__peek {
+  position: absolute;
+  top: 0;
+  right: 0.75rem;
+  left: 0.75rem;
+  display: flex;
+  height: 3rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-primary) 18%, var(--border-subtle));
+  background: color-mix(in srgb, var(--space-panel) 84%, transparent);
+  color: var(--color-primary-dark);
+  backdrop-filter: blur(8px);
+  pointer-events: auto;
+  padding: 0;
+  transition:
+    background var(--duration-fast) var(--ease-standard);
+}
+
+.session-header__peek-line {
+  display: block;
+  width: 2.5rem;
+  height: 0.25rem;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--color-primary) 68%, var(--border-strong));
+  opacity: 1;
+  transition: opacity var(--duration-base) var(--ease-standard);
+}
+
+.session-header__peek-label {
+  font-size: var(--workspace-font-12, 0.75rem);
+  font-weight: 750;
+  line-height: 1;
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity var(--duration-base) var(--ease-standard),
+    transform var(--duration-base) var(--ease-standard);
+}
+
+.session-header__peek:hover,
+.session-header__peek:focus-visible {
+  background: color-mix(in srgb, var(--color-primary-soft) 90%, var(--space-panel));
+}
+
+.session-header:hover .session-header__peek {
+  background: var(--space-panel);
+}
+
+.session-header:hover .session-header__peek-label,
+.session-header:focus-within .session-header__peek-label {
+  opacity: 0;
+  transform: translateY(-0.3rem);
+}
+
+.session-header:hover .session-header__peek-line,
+.session-header:focus-within .session-header__peek-line {
+  opacity: 0;
+}
+
+.session-header__surface {
+>>>>>>> origin/main
   display: grid;
   min-height: 4.75rem;
   grid-template-columns: auto minmax(26rem, 1fr) auto auto;
@@ -188,6 +335,108 @@ const stageLabel = computed(() => {
 
 .session-header__brand-copy small {
   color: var(--text-muted);
+<<<<<<< HEAD
+=======
+  font-size: 0.72rem;
+}
+
+.session-header__grid {
+  display: grid;
+  min-width: 0;
+  grid-template-columns:
+    minmax(12rem, 1.05fr)
+    minmax(12rem, 1fr)
+    minmax(13rem, 1.08fr)
+    minmax(9rem, 0.78fr);
+}
+
+.session-header__group {
+  display: flex;
+  min-width: 0;
+  min-height: 4.25rem;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: 0.35rem 0.75rem;
+}
+
+.session-header__group + .session-header__group {
+  border-left: 1px solid var(--border-subtle);
+}
+
+.session-header__group--course {
+  align-items: flex-start;
+}
+
+.session-header__group--progress {
+  min-width: 9rem;
+}
+
+.session-header__group--course :deep(.course-switcher__trigger) {
+  min-height: 2.75rem;
+  padding-block: 0.3rem;
+}
+
+.session-header__line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 0.65rem;
+}
+
+.session-header__label {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.session-header__title,
+.session-header__next {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: var(--font-size-md);
+  font-weight: 850;
+  letter-spacing: 0;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-header__next {
+  font-size: var(--font-size-sm);
+}
+
+.session-header__subtle,
+.session-header__user {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-header__user {
+  max-width: 100%;
+  padding-left: 0.1rem;
+}
+
+.session-header__pill {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  background: var(--space-elevated);
+  color: var(--text-secondary);
+  padding: 0.15rem 0.5rem;
+  font-family: var(--font-mono);
+>>>>>>> origin/main
   font-size: 0.68rem;
 }
 
@@ -195,6 +444,7 @@ const stageLabel = computed(() => {
   min-width: 9.5rem;
 }
 
+<<<<<<< HEAD
 .session-header__nav {
   justify-content: center;
   gap: 0.2rem;
@@ -308,6 +558,28 @@ const stageLabel = computed(() => {
   font-size: 0.74rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+=======
+.session-header__action {
+  min-height: 2.75rem;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: var(--color-primary-text);
+  padding: 0.55rem 0.75rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.session-header__action:hover {
+  background: var(--color-primary-dark);
+}
+
+.session-header__action--mobile {
+  display: none;
+>>>>>>> origin/main
 }
 
 .session-header__notice {
@@ -345,12 +617,110 @@ const stageLabel = computed(() => {
     overflow: hidden;
   }
 
+<<<<<<< HEAD
   .session-header__course,
+=======
+  .session-header__brand {
+    display: none;
+  }
+
+  .session-header__grid {
+    grid-template-columns: minmax(11rem, 1fr) minmax(12rem, 1fr) minmax(9rem, 0.8fr);
+  }
+
+  .session-header__group:nth-child(3) {
+    display: none;
+  }
+
+  .session-header__group:nth-child(4) {
+    border-left: 1px solid var(--border-subtle);
+  }
+}
+
+@media (min-width: 1280px) {
+  .session-header__panel,
+  .session-header__peek {
+    left: calc(96px + 0.75rem);
+  }
+}
+
+@media (min-width: 1280px) {
+  .session-header__brand {
+    display: none;
+  }
+
+>>>>>>> origin/main
   .session-header__user {
     display: none;
   }
 
+<<<<<<< HEAD
   .session-header__nav {
+=======
+@media (max-width: 767px) {
+  .session-header {
+    position: relative;
+    height: auto;
+    pointer-events: auto;
+    padding: max(0.5rem, env(safe-area-inset-top, 0px)) 0.5rem 0.4rem;
+  }
+
+  .session-header__panel {
+    position: relative;
+    top: auto;
+    right: auto;
+    left: auto;
+    transform: none;
+    visibility: visible;
+  }
+
+  .session-header__peek {
+    display: none;
+  }
+
+  .session-header__surface {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.35rem;
+    padding: 0.4rem;
+  }
+
+  .session-header__brand {
+    display: flex;
+    padding: 0.1rem;
+  }
+
+  .session-header__mark {
+    width: 2.25rem;
+    height: 2.25rem;
+  }
+
+  .session-header__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .session-header__group,
+  .session-header__group + .session-header__group {
+    min-height: auto;
+    border-left: 0;
+    border-top: 1px solid var(--border-subtle);
+    padding: 0.55rem 0.5rem;
+  }
+
+  .session-header__group:nth-child(odd) {
+    border-left: 0;
+  }
+
+  .session-header__group:nth-child(even) {
+    border-left: 1px solid var(--border-subtle);
+  }
+
+  .session-header__group:nth-child(-n + 2) {
+    border-top: 0;
+  }
+
+  .session-header__group--course,
+  .session-header__group:nth-child(2) {
+>>>>>>> origin/main
     grid-column: 1 / -1;
     grid-row: 2;
     justify-content: flex-start;
@@ -365,8 +735,19 @@ const stageLabel = computed(() => {
     justify-self: end;
   }
 
+<<<<<<< HEAD
   .session-header__nav::-webkit-scrollbar {
     display: none;
+=======
+  .session-header__action--desktop {
+    display: none;
+  }
+
+  .session-header__action--mobile {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+>>>>>>> origin/main
   }
 }
 

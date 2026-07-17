@@ -1,5 +1,6 @@
 <template>
   <transition name="drawer-backdrop">
+<<<<<<< HEAD
     <div
       v-if="open"
       class="sidebar-drawer-layer fixed inset-0"
@@ -8,37 +9,53 @@
       <div
         class="absolute inset-0 bg-black/42 backdrop-blur-[3px] transition-opacity lg:bg-[color:rgba(8,14,28,0.16)] lg:backdrop-blur-[1px]"
         aria-hidden="true"
+=======
+    <div v-if="open" class="fixed inset-0 z-40 lg:z-30">
+      <button
+        type="button"
+        class="absolute inset-0 w-full bg-black/42 backdrop-blur-[3px] lg:bg-[color:rgba(8,14,28,0.16)] lg:backdrop-blur-[1px]"
+        aria-label="关闭学习路径"
+>>>>>>> origin/main
         @click="$emit('close')"
       />
 
       <transition name="drawer-panel">
         <aside
-          ref="drawerPanel"
+          v-if="open"
           :id="panelId"
+<<<<<<< HEAD
           class="drawer-surface absolute bottom-4 left-4 right-4 top-24 z-10 flex overflow-hidden rounded-[20px] border border-[color:rgba(255,255,255,0.55)] shadow-[0_28px_80px_rgba(15,23,42,0.24)] lg:bottom-4 lg:left-auto lg:right-4 lg:top-4 lg:w-[428px]"
+=======
+          ref="drawerPanel"
+          class="drawer-surface absolute bottom-4 left-4 right-4 top-24 z-10 flex overflow-hidden rounded-[24px] border border-[color:rgba(255,255,255,0.55)] bg-space-panel shadow-[0_28px_80px_rgba(15,23,42,0.24)] lg:inset-y-4 lg:left-[76px] lg:right-auto lg:top-4 lg:w-[408px] lg:rounded-l-none lg:border-l-0"
+>>>>>>> origin/main
           role="dialog"
           aria-modal="true"
-          :aria-label="panelTitle"
-          :style="panelSurfaceStyle"
+          aria-labelledby="learning-path-title"
           tabindex="-1"
         >
           <div class="drawer-surface__glow pointer-events-none absolute inset-0" />
 
-          <div class="relative flex w-full flex-col">
-            <div class="relative flex items-start gap-4 px-6 pb-5 pt-6">
-              <div class="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-[var(--border-strong)] to-transparent" />
-
-              <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-[16px] bg-gradient-to-br from-primary-soft to-secondary-soft text-primary shadow-card">
-                <component :is="panelIcon" :size="22" />
+          <div class="relative flex min-h-0 w-full flex-col">
+            <header class="relative flex items-start gap-4 border-b border-subtle px-6 pb-5 pt-6">
+              <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-[16px] bg-primary-soft text-primary shadow-card">
+                <IconTree :size="22" />
               </div>
+<<<<<<< HEAD
 
               <div class="min-w-0 flex-1">
                 <p class="text-[11px] font-black uppercase tracking-[0.14em] text-text-muted">{{ panelEyebrow }}</p>
                 <h2 class="gradient-text mt-1.5 text-[28px] font-black tracking-tight">{{ panelTitle }}</h2>
+=======
+              <div class="min-w-0 flex-1 pr-8">
+                <p class="text-[11px] font-black uppercase tracking-[0.14em] text-text-muted">课程路径</p>
+                <h2 id="learning-path-title" class="mt-1.5 text-[28px] font-black tracking-tight text-text-primary">学习节点</h2>
+>>>>>>> origin/main
                 <p class="mt-2 max-w-[34ch] text-sm font-light leading-7 text-text-muted">
-                  {{ panelDescription }}
+                  查看真实掌握状态，并直接跳转到下一步值得投入的节点。
                 </p>
               </div>
+<<<<<<< HEAD
             </div>
 
             <div v-if="activePanel !== 'settings'" class="px-6 pb-4 pt-4">
@@ -46,26 +63,20 @@
                 class="grid grid-cols-3 gap-2 rounded-[20px] border border-subtle bg-card/92 p-1.5 shadow-card"
                 aria-label="工作台抽屉视图切换"
                 role="tablist"
+=======
+              <button
+                ref="closeButton"
+                type="button"
+                class="focus-ring absolute right-4 top-4 rounded-full border border-subtle/70 bg-card/82 p-2 text-text-muted shadow-sm transition hover:bg-card-hover hover:text-text-primary"
+                aria-label="关闭学习路径"
+                @click="$emit('close')"
+>>>>>>> origin/main
               >
-                <button
-                  v-for="panel in panelTabs"
-                  :id="panelTabId(panel.key)"
-                  :key="panel.key"
-                  type="button"
-                  role="tab"
-                  class="focus-ring rounded-[16px] px-3 py-2 text-xs font-semibold tracking-[0.08em] transition-all duration-200"
-                  :class="activePanel === panel.key
-                    ? 'bg-primary-soft text-primary shadow-sm'
-                    : 'text-text-muted hover:bg-card-hover hover:text-text-secondary'"
-                  :aria-controls="panelRegionId(panel.key)"
-                  :aria-selected="String(activePanel === panel.key)"
-                  @click="$emit('switch-panel', panel.key)"
-                >
-                  {{ panel.label }}
-                </button>
-              </nav>
-            </div>
+                <span aria-hidden="true">×</span>
+              </button>
+            </header>
 
+<<<<<<< HEAD
             <div class="aurora-scroll flex-1 overflow-y-auto px-5 pb-6">
               <transition name="drawer-content" mode="out-in">
                 <div :key="activePanel">
@@ -280,11 +291,18 @@
                     </button>
                   </div>
                 </section>
+=======
+            <div class="grid grid-cols-3 border-b border-subtle bg-space-surface/55 px-5 py-4">
+              <div v-for="stat in pathStats" :key="stat.label" class="min-w-0 px-3 first:pl-0 last:pr-0">
+                <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">{{ stat.label }}</p>
+                <p class="mt-1 truncate text-base font-black text-text-primary">{{ stat.value }}</p>
+>>>>>>> origin/main
               </div>
                 </div>
               </transition>
             </div>
 
+<<<<<<< HEAD
             <button
               ref="closeButton"
               type="button"
@@ -297,6 +315,18 @@
                 <path d="M6 6l12 12" />
               </svg>
             </button>
+=======
+            <div class="aurora-scroll min-h-0 flex-1 overflow-y-auto px-5 py-5">
+              <KnowledgeTree
+                :nodes="nodes"
+                :current-node="currentNode"
+                @select="$emit('select-node', $event)"
+              />
+              <p v-if="!nodes.length" class="px-2 py-8 text-center text-sm leading-7 text-text-muted">
+                完成入学诊断后，学习路径会显示在这里。
+              </p>
+            </div>
+>>>>>>> origin/main
           </div>
         </aside>
       </transition>
@@ -305,56 +335,29 @@
 </template>
 
 <script setup>
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import AgentFeedbackPanel from "./AgentFeedbackPanel.vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import KnowledgeTree from "./KnowledgeTree.vue";
-import IconChat from "./icons/IconChat.vue";
-import IconRadar from "./icons/IconRadar.vue";
-import IconSettings from "./icons/IconSettings.vue";
 import IconTree from "./icons/IconTree.vue";
-import { useTheme } from "../composables/useTheme.js";
-
-const RadarCanvas = defineAsyncComponent(() => import("./RadarCanvas.vue"));
-
-const { theme, setTheme } = useTheme();
 
 const props = defineProps({
   open: { type: Boolean, default: false },
-  activePanel: { type: String, default: "tree" },
   panelId: { type: String, default: "workspace-sidebar-drawer" },
   nodes: { type: Array, default: () => [] },
   currentNode: { type: String, default: "" },
-  radarValues: { type: Array, default: () => [] },
-  feedbackItems: { type: Array, default: () => [] },
-  lastDiagnostic: { type: Object, default: null },
-  currentNodeTitle: { type: String, default: "" },
-  highContrast: { type: Boolean, default: false },
-  reduceMotion: { type: Boolean, default: false },
-  fontSize: { type: Number, default: 16 },
 });
 
-const emit = defineEmits([
-  "select-node",
-  "switch-panel",
-  "toggle-contrast",
-  "toggle-motion",
-  "set-font-size",
-  "close",
-]);
-
-let previousBodyOverflow = "";
-let previousFocusedElement = null;
+const emit = defineEmits(["select-node", "close"]);
 
 const drawerPanel = ref(null);
 const closeButton = ref(null);
+let previousBodyOverflow = "";
+let previousFocusedElement = null;
 
-const panelIcons = {
-  tree: IconTree,
-  radar: IconRadar,
-  feedback: IconChat,
-  settings: IconSettings,
-};
+const completedNodes = computed(() => (
+  props.nodes.filter((node) => Number(node?.mastery ?? 0) >= 0.65).length
+));
 
+<<<<<<< HEAD
 const panelTabs = [
   { key: "tree", label: "路径" },
   { key: "feedback", label: "协同" },
@@ -408,25 +411,31 @@ function radarTextClass(value) {
   if (value >= 0.35) return "text-warning";
   return "text-error";
 }
+=======
+const currentNodeMeta = computed(() => (
+  props.nodes.find((node) => node.id === props.currentNode) ?? null
+));
+
+const nextPendingNode = computed(() => (
+  props.nodes.find((node) => node.id !== props.currentNode && Number(node?.mastery ?? 0) < 0.65) ?? null
+));
+>>>>>>> origin/main
 
 const pathStats = computed(() => [
+  { label: "已达标", value: `${completedNodes.value}/${props.nodes.length || 0}` },
   {
-    label: "已达标",
-    value: `${completedNodes.value}/${props.nodes.length || 0}`,
-    detail: "达标节点会自动沉淀到稳定掌握区",
-  },
-  {
-    label: "当前节点",
-    value: currentNodeMeta.value ? `${Math.round((currentNodeMeta.value.mastery ?? 0) * 100)}%` : "--",
-    detail: currentNodeMeta.value ? currentNodeMeta.value.title : "等待选择节点",
+    label: "当前掌握",
+    value: currentNodeMeta.value
+      ? `${Math.round(Number(currentNodeMeta.value.mastery ?? 0) * 100)}%`
+      : "--",
   },
   {
     label: "下一建议",
-    value: nextPendingNode.value ? String(nextPendingNode.value.order).padStart(2, "0") : "END",
-    detail: nextPendingNode.value ? nextPendingNode.value.title : "当前主线路径已完成",
+    value: nextPendingNode.value?.title || "已完成",
   },
 ]);
 
+<<<<<<< HEAD
 const panelIcon = computed(() => panelIcons[props.activePanel] ?? IconSettings);
 const panelTitle = computed(() => titles[props.activePanel] ?? "工作台");
 const panelDescription = computed(() => descriptions[props.activePanel] ?? "学习控制台。");
@@ -437,147 +446,114 @@ const panelSurfaceStyle = computed(() => ({
   backgroundColor: theme.value === "light" ? "#f7f3e8" : "#0b1120",
 }));
 
+=======
+>>>>>>> origin/main
 watch(
   () => props.open,
   async (isOpen) => {
     if (typeof window !== "undefined") {
-      if (isOpen) {
-        window.addEventListener("keydown", handleKeydown);
-      } else {
-        window.removeEventListener("keydown", handleKeydown);
-      }
+      if (isOpen) window.addEventListener("keydown", handleKeydown);
+      else window.removeEventListener("keydown", handleKeydown);
     }
 
-    if (typeof document === "undefined") {
-      return;
-    }
+    if (typeof document === "undefined") return;
 
-    const { body } = document;
     if (isOpen) {
       previousFocusedElement = document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null;
-      previousBodyOverflow = body.style.overflow;
-      body.style.overflow = "hidden";
+      previousBodyOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
       await nextTick();
-      focusInitialElement();
+      closeButton.value?.focus();
       return;
     }
 
-    body.style.overflow = previousBodyOverflow;
+    document.body.style.overflow = previousBodyOverflow;
     restoreFocus();
   },
   { immediate: true },
 );
 
 onBeforeUnmount(() => {
-  if (typeof window !== "undefined") {
-    window.removeEventListener("keydown", handleKeydown);
-  }
-
-  if (typeof document !== "undefined") {
-    document.body.style.overflow = previousBodyOverflow;
-  }
+  if (typeof window !== "undefined") window.removeEventListener("keydown", handleKeydown);
+  if (typeof document !== "undefined") document.body.style.overflow = previousBodyOverflow;
 });
 
 function handleKeydown(event) {
-  if (!props.open) {
-    return;
-  }
-
+  if (!props.open) return;
   if (event.key === "Escape") {
     event.preventDefault();
     emit("close");
     return;
   }
-
-  if (event.key === "Tab") {
-    trapFocus(event);
-  }
-}
-
-function focusInitialElement() {
-  if (closeButton.value instanceof HTMLElement) {
-    closeButton.value.focus();
-    return;
-  }
-
-  if (drawerPanel.value instanceof HTMLElement) {
-    drawerPanel.value.focus();
-  }
+  if (event.key === "Tab") trapFocus(event);
 }
 
 function restoreFocus() {
   if (previousFocusedElement instanceof HTMLElement && previousFocusedElement.isConnected) {
     previousFocusedElement.focus();
   }
-
   previousFocusedElement = null;
 }
 
 function trapFocus(event) {
-  if (!(drawerPanel.value instanceof HTMLElement)) {
-    return;
-  }
+  if (!(drawerPanel.value instanceof HTMLElement)) return;
+  const focusable = Array.from(drawerPanel.value.querySelectorAll(
+    "button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex='-1'])",
+  )).filter((element) => element instanceof HTMLElement);
 
-  const focusableElements = getFocusableElements();
-  if (!focusableElements.length) {
+  if (!focusable.length) {
     event.preventDefault();
     drawerPanel.value.focus();
     return;
   }
 
-  const firstElement = focusableElements[0];
-  const lastElement = focusableElements[focusableElements.length - 1];
-  const activeElement = document.activeElement;
-
-  if (event.shiftKey) {
-    if (activeElement === firstElement || !drawerPanel.value.contains(activeElement)) {
-      event.preventDefault();
-      lastElement.focus();
-    }
-    return;
-  }
-
-  if (activeElement === lastElement || !drawerPanel.value.contains(activeElement)) {
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && (document.activeElement === first || !drawerPanel.value.contains(document.activeElement))) {
     event.preventDefault();
-    firstElement.focus();
+    last.focus();
+  } else if (!event.shiftKey && (document.activeElement === last || !drawerPanel.value.contains(document.activeElement))) {
+    event.preventDefault();
+    first.focus();
   }
-}
-
-function getFocusableElements() {
-  if (!(drawerPanel.value instanceof HTMLElement)) {
-    return [];
-  }
-
-  const selector = [
-    "a[href]",
-    "button:not([disabled])",
-    "input:not([disabled])",
-    "select:not([disabled])",
-    "textarea:not([disabled])",
-    "[tabindex]:not([tabindex='-1'])",
-  ].join(",");
-
-  return Array.from(drawerPanel.value.querySelectorAll(selector)).filter((element) => (
-    element instanceof HTMLElement
-    && !element.hasAttribute("disabled")
-    && element.getAttribute("aria-hidden") !== "true"
-  ));
-}
-
-function panelTabId(panelKey) {
-  return `${props.panelId}-tab-${panelKey}`;
-}
-
-function panelRegionId(panelKey) {
-  return `${props.panelId}-panel-${panelKey}`;
 }
 </script>
 
 <style scoped>
+<<<<<<< HEAD
 .sidebar-drawer-layer {
   z-index: var(--z-modal-backdrop);
+=======
+.drawer-surface {
+  isolation: isolate;
+}
+
+.drawer-surface__glow {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--color-primary-soft) 70%, transparent), transparent 34%);
+}
+
+.drawer-backdrop-enter-active,
+.drawer-backdrop-leave-active {
+  transition: opacity 220ms ease;
+}
+
+.drawer-backdrop-enter-from,
+.drawer-backdrop-leave-to {
+  opacity: 0;
+}
+
+.drawer-panel-enter-active,
+.drawer-panel-leave-active {
+  transition: transform 260ms cubic-bezier(0.16, 1, 0.3, 1), opacity 220ms ease;
+}
+
+.drawer-panel-enter-from,
+.drawer-panel-leave-to {
+  transform: translateX(-24px);
+  opacity: 0;
+>>>>>>> origin/main
 }
 
 @media (max-width: 767px) {
@@ -590,6 +566,7 @@ function panelRegionId(panelKey) {
   }
 }
 
+<<<<<<< HEAD
 .drawer-surface {
   isolation: isolate;
 }
@@ -664,5 +641,14 @@ input[type="range"]::-moz-range-thumb {
   box-shadow: 0 0 12px var(--color-primary-soft);
   cursor: pointer;
   border: none;
+=======
+@media (prefers-reduced-motion: reduce) {
+  .drawer-backdrop-enter-active,
+  .drawer-backdrop-leave-active,
+  .drawer-panel-enter-active,
+  .drawer-panel-leave-active {
+    transition-duration: 0.01ms;
+  }
+>>>>>>> origin/main
 }
 </style>

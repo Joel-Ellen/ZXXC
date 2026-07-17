@@ -26,12 +26,11 @@
         :info-message="infoMessage"
         :is-busy="isBusy"
         :is-loading-node="isLoadingNode"
-        :navigation="workspaceNavItems"
+        :tutor-collapsed="isTutorCollapsed"
         @switch-course="onSwitchCourse"
         @browse-courses="handleBrowseCourses"
-        @go-home="$emit('go-home')"
-        @logout="$emit('logout')"
-        @navigate="handleNav"
+        @toggle-tutor="toggleTutor"
+        @navigate="(key) => $emit('navigate', key)"
       />
     </template>
 
@@ -45,13 +44,18 @@
         :class="{ 'is-active-mobile': effectiveMobilePane === 'learn' }"
         panel-id="workspace-learn-panel"
         :cards="cards"
+        :session-id="sessionId"
         :current-node="currentNode"
         :node-title="nodeTitle"
         :path-nodes="pathNodes"
         :loading="isLoadingNode"
+        :card-states="resourceCardStates"
         :overall-progress="overallProgress"
         :mastered-count="masteredCount"
         :last-diagnostic="lastDiagnostic"
+        :focus-card-type="focusCardType"
+        :review-item-id="reviewItemId"
+        :review-phase="reviewPhase"
         :filter-type="activeResourceCategory"
         :get-card-label="getCardLabel"
         :get-agent-label="getAgentLabel"
@@ -60,7 +64,17 @@
         @select-node="(id) => onSelectNode(id)"
         @refresh="$emit('refresh-resources')"
         @generate-card="(payload) => $emit('generate-card', payload)"
+<<<<<<< HEAD
         @filter-change="onResourceFilterChange"
+=======
+        @content-viewed="(payload) => $emit('content-viewed', payload)"
+        @hint-requested="(payload) => $emit('hint-requested', payload)"
+        @answer-selected="(payload) => $emit('answer-selected', payload)"
+        @code-run="(payload) => $emit('code-run', payload)"
+        @code-submitted="(payload) => $emit('code-submitted', payload)"
+        @open-review="$emit('open-review')"
+        @prepare-review-retest="(payload) => $emit('prepare-review-retest', payload)"
+>>>>>>> origin/main
       />
 
       <button
@@ -81,7 +95,11 @@
         :class="{ 'is-active-mobile': effectiveMobilePane === 'coach' }"
         :aria-hidden="isTutorCollapsed ? 'true' : undefined"
         panel-id="workspace-coach-panel"
+        :feedback-items="agentFeedback"
+        :last-diagnostic="lastDiagnostic"
         :current-node-title="nodeTitle"
+        :current-node="currentNode"
+        :session-id="sessionId"
         :messages="messages"
         :boot-mode="bootMode"
         :probe="probe"
@@ -119,22 +137,10 @@
     <template #drawer>
       <SidebarDrawer
         :open="drawerOpen"
-        :active-panel="sidebarPanel"
         panel-id="workspace-sidebar-drawer"
         :nodes="pathNodes"
         :current-node="currentNode"
-        :radar-values="capabilityRadar"
-        :feedback-items="agentFeedback"
-        :last-diagnostic="lastDiagnostic"
-        :current-node-title="nodeTitle"
-        :high-contrast="highContrast"
-        :reduce-motion="reduceMotion"
-        :font-size="fontSize"
         @select-node="(id) => onSelectNode(id)"
-        @switch-panel="onDrawerPanelSwitch"
-        @toggle-contrast="highContrast = !highContrast"
-        @toggle-motion="reduceMotion = !reduceMotion"
-        @set-font-size="(size) => fontSize = size"
         @close="drawerOpen = false"
       />
     </template>
@@ -183,8 +189,10 @@ const DRAWER_PANEL_ID = "workspace-sidebar-drawer";
 const props = defineProps({
   bootMode: { type: String, default: "loading" },
   user: { type: Object, default: null },
+  sessionId: { type: String, default: "" },
   currentNode: { type: String, default: "" },
   cards: { type: Array, default: () => [] },
+  resourceCardStates: { type: Object, default: () => ({}) },
   pathNodes: { type: Array, default: () => [] },
   nodeTitle: { type: String, default: "" },
   messages: { type: Array, default: () => [] },
@@ -200,6 +208,9 @@ const props = defineProps({
   probeCollected: { type: Number, default: 0 },
   probeTotal: { type: Number, default: 6 },
   lastDiagnostic: { type: Object, default: null },
+  focusCardType: { type: String, default: "" },
+  reviewItemId: { type: String, default: "" },
+  reviewPhase: { type: String, default: "" },
   getCardLabel: { type: Function, required: true },
   getAgentLabel: { type: Function, required: true },
   parseQuiz: { type: Function, required: true },
@@ -219,6 +230,17 @@ const emit = defineEmits([
   "generate-card",
   "restart-probe",
   "browse-courses",
+<<<<<<< HEAD
+=======
+  "content-viewed",
+  "hint-requested",
+  "answer-selected",
+  "code-run",
+  "code-submitted",
+  "open-review",
+  "prepare-review-retest",
+  "navigate",
+>>>>>>> origin/main
 ]);
 
 const WORKSPACE_VIEWS = new Set(["study", "path", "agents", "evidence"]);
@@ -228,8 +250,13 @@ const WORKSPACE_DRAWER_PANELS = {
   evidence: "radar",
 };
 const drawerOpen = ref(false);
+<<<<<<< HEAD
 const sidebarPanel = ref("all");
 const activeResourceCategory = ref("all");
+=======
+const sidebarPanel = ref("concept");
+const activeResourceCategory = ref("all"); // Show real available cards before the learner applies a filter.
+>>>>>>> origin/main
 const learnPanelRef = ref(null);
 const coachPanelRef = ref(null);
 
@@ -245,6 +272,7 @@ const isTutorCollapsed = computed(() => (
   isDesktopViewport.value && tutorCollapsed.value && props.bootMode !== "probe"
 ));
 
+<<<<<<< HEAD
 const workspaceNav = [
   { key: "study", label: "学习工作台" },
   { key: "path", label: "学习路径" },
@@ -252,6 +280,8 @@ const workspaceNav = [
   { key: "evidence", label: "学习成果" },
 ];
 
+=======
+>>>>>>> origin/main
 const dockActions = [
   { key: "study", label: "学习" },
   { key: "coach", label: "辅导" },
@@ -260,6 +290,7 @@ const dockActions = [
   { key: "evidence", label: "成果" },
 ];
 
+<<<<<<< HEAD
 const workspaceNavItems = computed(() =>
   workspaceNav.map((item) => ({
     ...item,
@@ -270,6 +301,8 @@ const workspaceNavItems = computed(() =>
   })),
 );
 
+=======
+>>>>>>> origin/main
 const coachPrompts = computed(() => {
   const nodeLabel = props.nodeTitle || "当前知识点";
   return [
@@ -399,10 +432,6 @@ function openPanel(panelKey) {
   drawerOpen.value = true;
 }
 
-function onDrawerPanelSwitch(panelKey) {
-  openPanel(panelKey);
-}
-
 function onSelectNode(nodeId) {
   emit("select-node", nodeId);
   drawerOpen.value = false;
@@ -415,6 +444,13 @@ function onSwitchCourse(courseId) {
 
 function handleBrowseCourses() {
   emit("browse-courses");
+<<<<<<< HEAD
+=======
+}
+
+function toggleTutor() {
+  void handleNav("coach");
+>>>>>>> origin/main
 }
 
 function handleCoachSend(message) {
@@ -649,6 +685,12 @@ function resolvePaneElement(target) {
 
   return null;
 }
+
+function flushLearningAssets() {
+  return coachPanelRef.value?.flushLearningAssets?.() ?? Promise.resolve();
+}
+
+defineExpose({ flushLearningAssets });
 </script>
 
 <style scoped>
