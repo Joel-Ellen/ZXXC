@@ -1,11 +1,11 @@
 import { computed, ref } from "vue";
+import { storeToRefs } from "pinia";
 import {
   buildSessionId,
   createSession,
   enrollCourse,
   fetchCourses,
   fetchKnowledgeGraph,
-  fetchMyProfile,
   fetchSessionLearningEventHistory,
   fetchSessionProfileProbe,
   fetchSessionResources,
@@ -13,9 +13,6 @@ import {
   fetchUserCourses,
   getCaptcha,
   initSessionPath,
-  login,
-  refreshToken,
-  register,
   requestResourceGeneration,
   resetSession,
   streamResourceGeneration,
@@ -30,6 +27,7 @@ import {
 } from "../services/clientTelemetry";
 import { RESOURCE_GENERATION_ASYNC_ENABLED } from "../services/resourceGenerationConfig";
 import { useLearningAssetsStore } from "../stores/learningAssets";
+import { useAuthStore } from "../stores/auth";
 
 let sharedEduAgent;
 
@@ -145,8 +143,10 @@ const AGENT_CN = {
 
 function createEduAgent() {
   const learningAssets = useLearningAssetsStore();
-  const isLoggedIn = ref(false);
-  const currentUser = ref(null);
+  // Auth state lives in the Pinia auth store; exposed here as refs so the
+  // composable's returned API stays unchanged for the views.
+  const auth = useAuthStore();
+  const { isLoggedIn, currentUser } = storeToRefs(auth);
   const userId = computed(() => currentUser.value?.user_id ?? "demo_user");
 
   const activeCourse = ref(null);
@@ -1333,63 +1333,22 @@ function createEduAgent() {
     }
   }
 
-  async function tryAutoLogin() {
-    const token = window.localStorage.getItem("access_token");
-    if (!token) {
-      return false;
-    }
-
-    try {
-      const user = await fetchMyProfile();
-      currentUser.value = user;
-      isLoggedIn.value = true;
-      return true;
-    } catch {
-      try {
-        await refreshToken();
-        const user = await fetchMyProfile();
-        currentUser.value = user;
-        isLoggedIn.value = true;
-        return true;
-      } catch {
-        window.localStorage.removeItem("access_token");
-        window.localStorage.removeItem("refresh_token");
-        return false;
-      }
-    }
+  // Auth actions delegate to the Pinia auth store (frontend/src/stores/auth.js).
+  function tryAutoLogin() {
+    return auth.tryAutoLogin();
   }
 
-  async function handleLogin(userIdInput, password, captchaToken, captchaAnswer) {
-    const result = await login({
-      user_id: userIdInput,
-      password,
-      captcha_token: captchaToken,
-      captcha_answer: captchaAnswer,
-    });
-    currentUser.value = result.user;
-    isLoggedIn.value = true;
-    return result;
+  function handleLogin(userIdInput, password, captchaToken, captchaAnswer) {
+    return auth.login(userIdInput, password, captchaToken, captchaAnswer);
   }
 
-  async function handleRegister(userIdInput, email, password, captchaToken, captchaAnswer) {
-    const result = await register({
-      user_id: userIdInput,
-      email,
-      password,
-      captcha_token: captchaToken,
-      captcha_answer: captchaAnswer,
-    });
-    currentUser.value = result.user;
-    isLoggedIn.value = true;
-    return result;
+  function handleRegister(userIdInput, email, password, captchaToken, captchaAnswer) {
+    return auth.register(userIdInput, email, password, captchaToken, captchaAnswer);
   }
 
   function handleLogout() {
     routePreparationGeneration += 1;
-    window.localStorage.removeItem("access_token");
-    window.localStorage.removeItem("refresh_token");
-    currentUser.value = null;
-    isLoggedIn.value = false;
+    auth.logout();
     isBusy.value = false;
     bootMode.value = "login";
     bootstrapError.value = "";

@@ -1,5 +1,6 @@
+import { tokenStore } from "./tokenStore";
+
 const CLIENT_EVENT_ENDPOINT = "/api/ops/client-events";
-const ACCESS_TOKEN_KEY = "access_token";
 const LOGIN_READY_MARKER = "eduagent.login_ready_started_at";
 const SESSION_REPORTED_MARKER = "eduagent.client_session_reported";
 const ALLOWED_EVENTS = new Set([
@@ -129,7 +130,7 @@ export function reportClientMetric(event, details = {}) {
   if (!payload || typeof globalThis.fetch !== "function") return Promise.resolve(false);
   let accessToken = "";
   try {
-    accessToken = globalThis.localStorage?.getItem(ACCESS_TOKEN_KEY) || "";
+    accessToken = tokenStore.getAccessToken() || "";
   } catch {
     accessToken = "";
   }
@@ -150,7 +151,7 @@ export function reportClientSessionStarted({
   surface = currentTelemetrySurface(),
 } = {}) {
   try {
-    if (!globalThis.localStorage?.getItem(ACCESS_TOKEN_KEY)) return Promise.resolve(false);
+    if (!tokenStore.getAccessToken()) return Promise.resolve(false);
     if (storage?.getItem(SESSION_REPORTED_MARKER)) return Promise.resolve(false);
     storage?.setItem(SESSION_REPORTED_MARKER, "1");
   } catch {

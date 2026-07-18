@@ -54,6 +54,11 @@ vi.mock("../stores/learningAssets", () => ({
 vi.mock("../services/clientTelemetry", () => telemetryMocks);
 
 import { useEduAgent } from "./useEduAgent";
+import { createPinia, setActivePinia } from "pinia";
+
+// useEduAgent() is called at describe scope below; the auth store needs an
+// active Pinia before that runs.
+setActivePinia(createPinia());
 
 function sessionState(courseId, nodeId) {
   return {

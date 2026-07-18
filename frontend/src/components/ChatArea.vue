@@ -108,7 +108,7 @@
           :class="selectedContext === ctx.value
             ? 'bg-primary-soft text-primary font-medium'
             : 'text-text-muted hover:text-text-secondary'"
-          @click="selectedContext = selectedContext === ctx.value ? 'concept' : ctx.value"
+          @click="selectContext(ctx.value)"
         >
           {{ ctx.label }}
         </button>
@@ -121,12 +121,14 @@
           class="focus-ring w-full rounded-xl border border-subtle bg-card px-4 py-3 font-mono text-sm text-text-primary placeholder:text-text-muted resize-none"
           rows="5"
           placeholder="粘贴代码..."
+          @input="markDraftDirty"
         />
         <div class="flex gap-2">
           <input
             v-model="errorMessage"
             class="focus-ring flex-1 rounded-xl border border-subtle bg-card px-4 py-3 text-sm text-text-primary placeholder:text-text-muted"
             placeholder="报错信息（可选）"
+            @input="markDraftDirty"
           />
           <button
             type="button"
@@ -154,7 +156,7 @@
           :placeholder="inputPlaceholder"
           rows="1"
           @keydown.enter.exact.prevent="submit"
-          @input="autoResize"
+          @input="onDraftInput"
         />
         <button
           type="button"
@@ -170,10 +172,11 @@
 </template>
 
 <script setup>
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import MarkdownContent from "./MarkdownContent.vue";
 import ProbeDeck from "./ProbeDeck.vue";
 import StreamText from "./StreamText.vue";
+import { useLearningAssetsStore } from "../stores/learningAssets";
 
 const props = defineProps({
   messages: { type: Array, default: () => [] },
@@ -183,6 +186,8 @@ const props = defineProps({
   probeTotal: { type: Number, default: 6 },
   isSubmittingProbe: { type: Boolean, default: false },
   busy: { type: Boolean, default: false },
+  sessionId: { type: String, default: "" },
+  nodeId: { type: String, default: "" },
   nodeTitle: { type: String, default: "" },
   suggestions: { type: Array, default: () => [] },
   collapsible: { type: Boolean, default: false },
@@ -193,6 +198,12 @@ const emit = defineEmits(["send", "submit-probe", "collapse"]);
 const draft = ref("");
 const scrollRoot = ref(null);
 const isPinnedToBottom = ref(true);
+const learningAssets = useLearningAssetsStore();
+const restoredDraftKey = ref("");
+const draftDirty = ref(false);
+const restoringDraft = ref(false);
+let draftSaveTimer = null;
+let scrollSaveTimer = null;
 
 // 上下文类型选择器（来自旧 Tutor.vue）
 const contextTypes = [
@@ -205,6 +216,7 @@ const contextTypes = [
 const selectedContext = ref("concept");
 const codeSnippet = ref("");
 const errorMessage = ref("");
+const assetContext = computed(() => createAssetContext(props.sessionId, props.nodeId));
 
 const quickPrompts = computed(() => {
   if (props.suggestions.length) {
@@ -240,7 +252,50 @@ watch(
   () => props.bootMode,
   (mode) => {
     if (mode === "probe") {
-      draft.value = "";
+      persistDraft();
+      resetDraftEditor();
+      draftDirty.value = false;
+    }
+  },
+);
+
+watch(
+  () => [props.sessionId, props.nodeId],
+  ([nextSessionId, nextNodeId], previousScope) => {
+    const nextContext = createAssetContext(nextSessionId, nextNodeId);
+    const previousContext = previousScope
+      ? createAssetContext(previousScope[0], previousScope[1])
+      : null;
+
+    if (previousContext && previousContext.scopeKey !== nextContext.scopeKey) {
+      cancelAssetSaveTimers();
+      persistDraft(previousContext);
+      persistScrollPosition(previousContext);
+    }
+
+    restoredDraftKey.value = "";
+    draftDirty.value = false;
+    resetDraftEditor();
+    restoreDraft(nextContext);
+    void restoreScrollPosition(nextContext);
+  },
+  { immediate: true },
+);
+
+watch(
+  () => [learningAssets.sessionId, learningAssets.hydrated],
+  () => {
+    const context = assetContext.value;
+    restoreDraft(context);
+    void restoreScrollPosition(context);
+  },
+);
+
+watch(
+  [draft, selectedContext, codeSnippet, errorMessage],
+  () => {
+    if (!restoringDraft.value && draftDirty.value) {
+      scheduleDraftSave();
     }
   },
 );
@@ -276,6 +331,22 @@ function autoResize(e) {
   el.style.height = Math.min(el.scrollHeight, 160) + "px";
 }
 
+function onDraftInput(e) {
+  autoResize(e);
+  markDraftDirty();
+}
+
+function markDraftDirty() {
+  if (restoringDraft.value) return;
+  draftDirty.value = true;
+  scheduleDraftSave();
+}
+
+function selectContext(contextType) {
+  markDraftDirty();
+  selectedContext.value = selectedContext.value === contextType ? "concept" : contextType;
+}
+
 function submit() {
   const value = draft.value.trim();
   if (!value) {
@@ -289,13 +360,11 @@ function submit() {
     codeSnippet: selectedContext.value === "code_debug" ? codeSnippet.value : "",
     errorMessage: selectedContext.value === "code_debug" ? errorMessage.value : "",
   });
-  draft.value = "";
+  clearDraft();
+  resetDraftEditor();
+  draftDirty.value = false;
   const el = document.getElementById("chat-input");
   if (el) el.style.height = "auto";
-  if (selectedContext.value === "code_debug") {
-    codeSnippet.value = "";
-    errorMessage.value = "";
-  }
 }
 
 function submitCodeDebug() {
@@ -312,8 +381,9 @@ function submitCodeDebug() {
     codeSnippet: snippet,
     errorMessage: error,
   });
-  codeSnippet.value = "";
-  errorMessage.value = "";
+  clearDraft();
+  resetDraftEditor();
+  draftDirty.value = false;
 }
 
 function sendPrompt(prompt) {
@@ -336,6 +406,7 @@ function handleScroll() {
   }
 
   isPinnedToBottom.value = isNearBottom();
+  scheduleScrollSave();
 }
 
 function shouldAutoScroll() {
@@ -381,4 +452,159 @@ function forwardWheelToMessages(event) {
 
   scrollRoot.value.scrollTop += event.deltaY;
 }
+
+onMounted(() => {
+  const context = assetContext.value;
+  restoreDraft(context);
+  void restoreScrollPosition(context);
+});
+
+onBeforeUnmount(() => {
+  void flushLearningAssets();
+});
+
+function createAssetContext(sessionId, nodeId) {
+  const normalizedSessionId = String(sessionId || "");
+  const normalizedNodeId = String(nodeId || "");
+  const nodeScope = normalizedNodeId || "course";
+  return Object.freeze({
+    sessionId: normalizedSessionId,
+    nodeId: normalizedNodeId,
+    scopeKey: `${normalizedSessionId}:${nodeScope}`,
+    draftKey: `tutor:${nodeScope}`,
+    scrollKey: `chat:${nodeScope}`,
+  });
+}
+
+function canUseAssetContext(context) {
+  return Boolean(
+    context?.sessionId
+    && context.sessionId === String(learningAssets.sessionId || ""),
+  );
+}
+
+function isCurrentAssetContext(context) {
+  return Boolean(context && context.scopeKey === assetContext.value.scopeKey);
+}
+
+function restoreDraft(context = assetContext.value) {
+  const restoreKey = `${context.sessionId}:${context.draftKey}:${learningAssets.hydrated ? "remote" : "cache"}`;
+  if (
+    !canUseAssetContext(context)
+    || !isCurrentAssetContext(context)
+    || draftDirty.value
+    || restoredDraftKey.value === restoreKey
+  ) return;
+
+  const saved = learningAssets.read("drafts", context.draftKey, null);
+  if (!saved || typeof saved !== "object") {
+    restoredDraftKey.value = restoreKey;
+    return;
+  }
+
+  restoringDraft.value = true;
+  draft.value = typeof saved.content === "string" ? saved.content : "";
+  selectedContext.value = typeof saved.context_type === "string" && saved.context_type
+    ? saved.context_type
+    : "concept";
+  codeSnippet.value = typeof saved.code_snippet === "string" ? saved.code_snippet : "";
+  errorMessage.value = typeof saved.error_message === "string" ? saved.error_message : "";
+  restoringDraft.value = false;
+  restoredDraftKey.value = restoreKey;
+}
+
+function resetDraftEditor() {
+  restoringDraft.value = true;
+  draft.value = "";
+  selectedContext.value = "concept";
+  codeSnippet.value = "";
+  errorMessage.value = "";
+  restoringDraft.value = false;
+}
+
+function scheduleDraftSave() {
+  if (draftSaveTimer) window.clearTimeout(draftSaveTimer);
+  const context = assetContext.value;
+  draftSaveTimer = window.setTimeout(() => {
+    draftSaveTimer = null;
+    persistDraft(context);
+  }, 300);
+}
+
+function persistDraft(context = assetContext.value) {
+  if (!canUseAssetContext(context)) return;
+  const hasContent = Boolean(draft.value || codeSnippet.value || errorMessage.value);
+  if (!hasContent) {
+    learningAssets.remove("drafts", context.draftKey);
+    return;
+  }
+
+  learningAssets.write("drafts", context.draftKey, {
+    node_id: context.nodeId,
+    kind: "tutor",
+    content: draft.value,
+    context_type: selectedContext.value,
+    code_snippet: codeSnippet.value,
+    error_message: errorMessage.value,
+  });
+}
+
+function clearDraft(context = assetContext.value) {
+  if (draftSaveTimer) {
+    window.clearTimeout(draftSaveTimer);
+    draftSaveTimer = null;
+  }
+  learningAssets.remove("drafts", context.draftKey);
+}
+
+function scheduleScrollSave() {
+  if (scrollSaveTimer) return;
+  const context = assetContext.value;
+  scrollSaveTimer = window.setTimeout(() => {
+    scrollSaveTimer = null;
+    persistScrollPosition(context);
+  }, 250);
+}
+
+function persistScrollPosition(context = assetContext.value) {
+  if (!(scrollRoot.value instanceof HTMLElement)) return;
+  if (!canUseAssetContext(context)) return;
+  learningAssets.write("scroll_positions", context.scrollKey, {
+    node_id: context.nodeId,
+    top: Math.max(0, Math.round(scrollRoot.value.scrollTop)),
+  });
+}
+
+async function restoreScrollPosition(context = assetContext.value) {
+  await nextTick();
+  if (!(scrollRoot.value instanceof HTMLElement)) return;
+  if (!canUseAssetContext(context) || !isCurrentAssetContext(context)) return;
+  const saved = learningAssets.read("scroll_positions", context.scrollKey, null);
+  const top = Number(saved?.top);
+  if (Number.isFinite(top) && top > 0) {
+    scrollRoot.value.scrollTop = top;
+    isPinnedToBottom.value = isNearBottom();
+  }
+}
+
+function cancelAssetSaveTimers() {
+  if (draftSaveTimer) {
+    window.clearTimeout(draftSaveTimer);
+    draftSaveTimer = null;
+  }
+  if (scrollSaveTimer) {
+    window.clearTimeout(scrollSaveTimer);
+    scrollSaveTimer = null;
+  }
+}
+
+function flushLearningAssets() {
+  cancelAssetSaveTimers();
+  const context = assetContext.value;
+  persistDraft(context);
+  persistScrollPosition(context);
+  return learningAssets.flush();
+}
+
+defineExpose({ flushLearningAssets });
 </script>
