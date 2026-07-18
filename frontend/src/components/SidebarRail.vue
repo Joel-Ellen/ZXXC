@@ -93,7 +93,7 @@
       <div class="relative z-10 mt-auto flex w-[52px] shrink-0 flex-col items-center rounded-xl border border-subtle bg-space-elevated px-1 py-2.5 text-center">
         <span class="text-[8px] font-black uppercase tracking-[0.14em] text-text-muted">节点</span>
         <span class="mt-1.5 text-[22px] font-black leading-none text-text-primary">{{ pathCount }}</span>
-        <span class="mt-1.5 h-1.5 w-1.5 rounded-full bg-success shadow-[0_0_8px_var(--color-success)]" role="status" aria-label="就绪" />
+        <span class="mt-1.5 h-1.5 w-1.5 rounded-full bg-success shadow-[0_0_8px_var(--color-success)]" aria-label="就绪" />
       </div>
     </div>
   </aside>
@@ -108,7 +108,7 @@ import IconExpand from "./icons/IconExpand.vue";
 import IconQuiz from "./icons/IconQuiz.vue";
 import IconTree from "./icons/IconTree.vue";
 
-defineProps({
+const props = defineProps({
   activePanel:  { type: String, default: "concept" },
   drawerOpen:   { type: Boolean, default: false },
   panelId:      { type: String, default: "workspace-sidebar-drawer" },

@@ -1,18 +1,7 @@
 import axios from "axios";
-import { captureApiError } from "./errorMonitoring";
 
 const ACCESS_TOKEN_KEY = "access_token";
 const REFRESH_TOKEN_KEY = "refresh_token";
-const PUBLIC_AUTH_PATHS = new Set([
-  "/auth/login",
-  "/auth/register",
-  "/auth/refresh",
-  "/auth/captcha",
-  "/auth/captcha-json",
-  "/auth/password/forgot",
-  "/auth/password/reset",
-  "/auth/email-verification/verify",
-]);
 
 export function createRequestId() {
   if (typeof window !== "undefined" && window.crypto?.randomUUID) {
@@ -42,11 +31,6 @@ export const tokenStore = {
   },
 };
 
-function isPublicAuthRequest(config) {
-  const url = String(config?.url || "").split("?", 1)[0];
-  return PUBLIC_AUTH_PATHS.has(url);
-}
-
 const apiClient = axios.create({
   baseURL: "/api",
   timeout: 30000,
@@ -69,11 +53,7 @@ apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config ?? {};
-    if (
-      error.response?.status === 401
-      && !originalRequest._retry
-      && !isPublicAuthRequest(originalRequest)
-    ) {
+    if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
 
       try {
@@ -94,17 +74,9 @@ apiClient.interceptors.response.use(
         }
       } catch (refreshError) {
         tokenStore.clear();
-        const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-        window.location.assign(`/login?redirect=${encodeURIComponent(currentPath)}&reason=SECURITY_BREACH_FORCED_OUT`);
+        window.location.assign("/?reason=SECURITY_BREACH_FORCED_OUT");
       }
     }
-
-    const requestHeaders = originalRequest.headers ?? {};
-    captureApiError(error, {
-      requestId: requestHeaders["X-Request-ID"] || requestHeaders["x-request-id"] || "",
-      method: originalRequest.method || "",
-      endpoint: String(originalRequest.url || "").split("?", 1)[0],
-    });
 
     return Promise.reject(error);
   },
