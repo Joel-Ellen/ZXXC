@@ -310,6 +310,27 @@ def evaluate_resource_quality(
             issues.append("diagnostic_blind_verifier_unavailable")
             hard_fail = hard_fail or not is_server_template
 
+        # Detect generic / meta-cognitive distractors.
+        _GENERIC_DISTRACTOR_RE = re.compile(
+            r"只背诵|套用.*模板|忽略.*状态变化|直接套用"
+            r"|以上都不对|以上全对"
+            r"|^与.{0,8}无关[，。]?$"
+            r"|^所有.*都是.{0,10}$|^总是最优$|^仅适用于.{0,10}$"
+            r"|不检查.*条件|猜测结果",
+        )
+        generic_distractor_count = 0
+        total_distractor_count = 0
+        for question in questions:
+            options = question.get("options", [])
+            for idx in range(1, len(options)):
+                total_distractor_count += 1
+                if _GENERIC_DISTRACTOR_RE.search(str(options[idx])):
+                    generic_distractor_count += 1
+        if generic_distractor_count > 0 and total_distractor_count > 0:
+            issues.append("diagnostic_generic_distractors")
+            if generic_distractor_count / total_distractor_count > 0.5:
+                hard_fail = True
+
     factual = (
         sum(factual_scores) / len(factual_scores)
         if factual_scores
@@ -324,6 +345,9 @@ def evaluate_resource_quality(
     ):
         pedagogy = 50.0
         issues.append("exercise_scaffolding_incomplete")
+    if card_type == "diagnostic_quiz" and generic_distractor_count > 0:
+        ratio = generic_distractor_count / max(total_distractor_count, 1)
+        pedagogy = max(0.0, pedagogy - ratio * 50.0)
     personalization = 100.0 if context.mastery_bucket and context.learning_stage else 50.0
     verifiability = 100.0
     if any(

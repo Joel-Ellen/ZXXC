@@ -140,6 +140,16 @@ def _bind_source_ref_ids(payload: dict[str, Any], context: ResourceContext) -> l
     } else _source_ref_ids(context)
 
 
+def _mastery_bucket_label(bucket: str) -> str:
+    """Map internal mastery bucket keys to Chinese display labels."""
+    return {
+        "foundational": "基础",
+        "developing": "发展",
+        "proficient": "熟练",
+        "advanced": "进阶",
+    }.get(bucket, bucket)
+
+
 def _template_blueprint(context: ResourceContext) -> dict[str, Any]:
     if context.blueprint_snapshot:
         return dict(context.blueprint_snapshot)
@@ -166,7 +176,7 @@ def _template_blueprint(context: ResourceContext) -> dict[str, Any]:
         "examples": [f"用一个小规模输入追踪{context.node_title}的状态变化。"],
         "boundaries": ["检查空输入、最小输入和违反前提的输入。"],
         "difficulty_strategy": (
-            f"面向 {context.mastery_bucket} 阶段，先解释约束，再给出可复核例子。"
+            f"面向{_mastery_bucket_label(context.mastery_bucket)}阶段，先解释约束，再给出可复核例子。"
         ),
         "card_roles": {
             "concept_map": "建立定义、机制和边界",
@@ -294,12 +304,12 @@ def _template_payload(context: ResourceContext, card_type: str) -> dict[str, Any
             ],
             "structured_checkpoints": [
                 {
-                    "id": "checkpoint-condition",
+                    "id": "检查点-条件",
                     "prompt": "当前方法成立需要哪些条件？",
                     "expected_signal": "列出输入前提和核心不变量。",
                 },
                 {
-                    "id": "checkpoint-boundary",
+                    "id": "检查点-边界",
                     "prompt": "边界输入是否仍满足这些条件？",
                     "expected_signal": "明确接受、拒绝或单独处理边界。",
                 },
@@ -358,48 +368,133 @@ def _template_payload(context: ResourceContext, card_type: str) -> dict[str, Any
         context,
         evidence_fields=["questions", "after_quiz_guidance"],
     )
-    question_specs = [
-        ("concept", "定义", "哪项描述最符合核心定义？", "定义约束"),
-        ("understanding", "机制", "哪项操作保持核心不变量？", "机制跟踪"),
-        ("application", "应用", "面对一个普通输入应先做什么？", "应用步骤"),
-        ("boundary", "边界", "当前提不成立时应如何处理？", "边界判断"),
-        ("transfer", "迁移", "哪个新场景共享相同约束？", "迁移识别"),
+    blueprint = _template_blueprint(context)
+    terms = [str(t).strip() for t in blueprint.get("terms", []) if str(t).strip()]
+    topic_term = terms[0] if terms else title
+    misconceptions = [
+        str(m).strip()
+        for m in blueprint.get("misconceptions", [])
+        if str(m).strip()
     ]
+    boundaries = [
+        str(b).strip()
+        for b in blueprint.get("boundaries", [])
+        if str(b).strip()
+    ]
+
+    # Each distractor is a plausible but factually incorrect *technical* claim
+    # about the topic — never a piece of meta-cognitive or study-skills advice.
+    _DISTRACTOR_POOL: list[str] = [
+        f"{topic_term}支持在任意位置插入或删除元素。",
+        f"{topic_term}的操作规则与队列完全相同。",
+        f"对空{topic_term}执行删除操作会静默返回0。",
+        f"{topic_term}的核心不变量在所有输入下都自动成立。",
+        f"{topic_term}的效率与具体实现方式无关，总是O(1)。",
+        f"所有涉及{topic_term}的问题都可用同一种算法模板解决。",
+        f"{topic_term}的边界情况不需要单独处理。",
+        f"只要输入合法，{topic_term}就不会产生任何错误。",
+    ]
+
+    def _pick_distractors(correct_answer: str, *, offset: int = 0, count: int = 3) -> list[str]:
+        picked: list[str] = []
+        pool_size = len(_DISTRACTOR_POOL)
+        start = offset % pool_size
+        for i in range(pool_size):
+            d = _DISTRACTOR_POOL[(start + i) % pool_size]
+            if d != correct_answer and d not in picked:
+                picked.append(d)
+            if len(picked) >= count:
+                break
+        # If the pool is exhausted (very unlikely), fill with structural variants.
+        fallback_idx = 0
+        while len(picked) < count:
+            fallback_idx += 1
+            fb = f"将{topic_term}的核心规则错误地套用到不相关的场景（模板回退#{fallback_idx}）。"
+            if fb not in picked and fb != correct_answer:
+                picked.append(fb)
+        return picked
+
+    # Chinese display labels for schema-level enum values.
+    _LEVEL_LABEL: dict[str, str] = {
+        "concept": "概念",
+        "understanding": "理解",
+        "application": "应用",
+        "boundary": "边界",
+        "transfer": "迁移",
+    }
+    _LEVEL_SKILL_TAG: dict[str, str] = {
+        "concept": f"{topic_term}概念",
+        "understanding": f"{topic_term}机制",
+        "application": f"{topic_term}应用",
+        "boundary": f"{topic_term}边界",
+        "transfer": f"{topic_term}迁移",
+    }
+
+    levels = [
+        (
+            "concept",
+            "哪项描述最符合{topic}的核心定义？",
+            f"准确描述{topic_term}的核心定义、成立条件与适用边界。",
+        ),
+        (
+            "understanding",
+            "在{topic}中，哪项操作能正确保持其核心不变量？",
+            f"正确维持{topic_term}不变量的操作序列或状态转移。",
+        ),
+        (
+            "application",
+            "面对一个需要{topic}的典型输入，应首先做什么？",
+            f"先检查{topic_term}的输入前提与适用条件，再按约束执行操作。",
+        ),
+        (
+            "boundary",
+            "在{topic}中，当前提条件不成立时应如何处理？",
+            f"显式判断{topic_term}的前提是否成立，不成立则拒绝操作或采用单独的处理路径。",
+        ),
+        (
+            "transfer",
+            "以下哪个新场景与{topic}共享相同的核心约束？",
+            f"准确识别出与{topic_term}共享相同结构约束或不变量的新问题场景。",
+        ),
+    ]
+
+    questions_payload: list[dict[str, Any]] = []
+    for q_idx, (level, prompt_template, correct_answer) in enumerate(levels):
+        prompt_text = prompt_template.format(topic=topic_term)
+        question_distractors = _pick_distractors(correct_answer, offset=q_idx * 3)
+        label = _LEVEL_LABEL.get(level, level)
+        skill = _LEVEL_SKILL_TAG.get(level, level)
+        questions_payload.append({
+            "id": f"{context.node_id}-{label}-v1",
+            "level": level,
+            "prompt": prompt_text,
+            "options": [correct_answer] + question_distractors,
+            "answer_index": 0,
+            "explanation": f"正确选项直接关联{topic_term}的{label}维度，需根据课程证据中的定义和约束来判断。",
+            "skill_tag": skill,
+            "error_tags": [f"{label}误解"],
+            "distractor_error_tags": {
+                "1": f"{label}干扰项一",
+                "2": f"{label}干扰项二",
+                "3": f"{label}干扰项三",
+            },
+            "difficulty": (
+                "easy"
+                if level == "concept"
+                else "hard"
+                if level in {"boundary", "transfer"}
+                else "medium"
+            ),
+        })
+
     return {
         **common,
         "render_type": "diagnostic_quiz",
-        "questions": [
-            {
-                "id": f"{context.node_id}-{level}-v1",
-                "level": level,
-                "prompt": f"关于{title}的{label}，{prompt}",
-                "options": [
-                    correct,
-                    "只背诵术语，不检查输入条件",
-                    "直接套用任意模板",
-                    "忽略状态变化并猜测结果",
-                ],
-                "answer_index": 0,
-                "explanation": f"正确选项要求根据证据判断{label}。",
-                "skill_tag": level,
-                "error_tags": [f"{level}_misconception"],
-                "distractor_error_tags": {
-                    "1": "memorization_without_conditions",
-                    "2": "template_overuse",
-                    "3": "state_tracking_missing",
-                },
-                "difficulty": (
-                    "easy"
-                    if level == "concept"
-                    else "hard"
-                    if level in {"boundary", "transfer"}
-                    else "medium"
-                ),
-            }
-            for level, label, prompt, correct in question_specs
-        ],
+        "questions": questions_payload,
         "pass_threshold": 0.65,
-        "after_quiz_guidance": "重新作答前，先复习概念图，并完整跟踪一个边界用例。",
+        "after_quiz_guidance": (
+            f"重新作答前，请先回顾{topic_term}的概念图，并完整跟踪一个边界用例。"
+        ),
     }
 
 
@@ -537,7 +632,7 @@ class ResourceGenerator:
         card_type: str,
         *,
         max_tokens: int | None = None,
-        timeout_sec: float | None = 18.0,
+        timeout_sec: float | None = 22.0,
     ) -> GeneratedResourcePayload:
         started = time.monotonic()
         try:

@@ -18,11 +18,6 @@ _OPTIONAL_PROVIDER_EXPORTS = {
 }
 
 _EXPORT_MODULES = {
-    "LLMClient": "._legacy_client",
-    "LLMConfig": "._legacy_client",
-    "Provider": "._legacy_client",
-    "create_llm_client": "._legacy_client",
-    "create_llm_client_from_env": "._legacy_client",
     "LLMClientV2": ".client_v2",
     "create_llm_client_v2": ".client_v2",
     "create_llm_client_v2_from_env": ".client_v2",

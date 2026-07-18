@@ -216,9 +216,10 @@ def _build_resource_prompt(
 
 输出要求：
 1. 只返回合法 JSON。
-2. 内容要实用、教学化、面向学习场景。
-3. 不要省略关键字段；字段无内容时用空数组或空字符串。
-4. 例子、任务和解释要围绕主题，不要模板化空话。
+2. 所有输出内容必须使用中文——包括字段值、标签和标识符。仅代码片段和 API 名称可保留原文。
+3. 内容要实用、教学化、面向学习场景。
+4. 不要省略关键字段；字段无内容时用空数组或空字符串。
+5. 例子、任务和解释要围绕主题，不要模板化空话。
 """
 
 
@@ -264,18 +265,18 @@ def _build_resource_quiz(**kwargs: Any) -> str:
     )
     return base + """
 
-请严格返回 JSON：
+请严格返回 JSON（所有字段值使用中文）：
 {
   "title": "",
   "questions": [
     {
       "id": 1,
-      "type": "choice",
+      "type": "选择题",
       "question": "",
       "options": [],
       "answer": "",
       "explanation": "",
-      "difficulty": "",
+      "difficulty": "简单",
       "points": 0
     }
   ],
@@ -547,6 +548,7 @@ PROMPT_REGISTRY: Dict[str, PromptDefinition] = {
         key="resource_generation.quiz",
         system_prompt="""你是教学测验设计专家。
 你生成的题目要考理解、迁移和诊断，不要只考死记硬背。
+所有输出内容必须使用中文——包括题目、选项、解析、标签等全部字段。
 输出必须是稳定 JSON。""",
         user_prompt_builder=_build_resource_quiz,
     ),

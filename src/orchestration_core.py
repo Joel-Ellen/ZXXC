@@ -89,8 +89,8 @@ class EduAgentGraph:
     使用方式:
         >>> orchestrator = EduAgentGraph()
         >>> # 注入真实 LLM
-        >>> from src.llm import create_llm_client_from_env
-        >>> llm = create_llm_client_from_env()
+        >>> from src.llm import create_llm_client_v2_from_env
+        >>> llm = create_llm_client_v2_from_env()
         >>> orchestrator.inject_llm(llm)
         >>> orchestrator.build()
         >>> result = orchestrator.run(initial_state)
@@ -117,14 +117,14 @@ class EduAgentGraph:
     def inject_llm(self, llm_client: Any) -> "EduAgentGraph":
         """注入真实大模型客户端，替换所有 Agent Node 中的 Mock 实现。
 
-        注入的接口方法（LLMClient 需实现）:
+        注入的接口方法（LLMClientV2 需实现）:
           - generate_content(node_id, card_type, difficulty) -> str
           - generate_academic_explanation(query, reference_chunks) -> str
           - generate_mermaid_graph(query, text_explanation) -> str
           - compute_nli_entailment(text, ground_truth) -> float
 
         Args:
-            llm_client: LLMClient 实例。
+            llm_client: LLMClientV2 实例。
 
         Returns:
             self（支持链式调用）。

@@ -215,10 +215,21 @@
                 <a v-if="videoUrl(card)" :href="videoUrl(card)" target="_blank" rel="noreferrer" class="inline-block mt-10 text-xs font-medium text-primary hover:underline">打开视频链接 &rarr;</a>
               </article>
               <article v-else-if="resourceType(card) === 'diagnostic_quiz'" class="text-sm leading-7 text-text-secondary">
-                <p v-if="quizGuidance(card)" class="text-text-muted">{{ quizGuidance(card) }}</p>
-                <div v-for="question in quizQuestions" :key="question.id" class="mt-10"><p class="font-medium text-text-primary">{{ question.prompt }}</p><p v-if="question.skillTag || question.difficulty" class="mt-1 text-xs text-text-muted">{{ [question.skillTag, question.difficulty].filter(Boolean).join(" · ") }}</p><div class="mt-4 space-y-2"><button v-for="(option, optionIndex) in question.options" :key="`${question.id}-${optionIndex}`" type="button" class="focus-ring w-full rounded-lg border px-4 py-2.5 text-left text-sm transition-colors" :class="answerClass(question.id, optionIndex)" @click="setAnswer(question.id, optionIndex)">{{ option }}</button></div><div v-if="submittedScore !== null && question.explanation" class="mt-4 text-xs text-text-muted">{{ question.explanation }}</div></div>
-                <div class="mt-10 flex flex-wrap items-center justify-between gap-3"><p class="text-xs text-text-muted">{{ diagnosticStatusText }}</p><button type="button" class="focus-ring btn-capsule" :disabled="!allAnswered || loading" @click="submitQuizScore">提交诊断</button></div>
-                <p v-if="quizAfterGuidance(card) && submittedScore !== null" class="mt-8">{{ quizAfterGuidance(card) }}</p>
+                <template v-if="quizUnavailable">
+                  <p class="text-text-muted">诊断测验题目暂未生成，请刷新或重新生成该资源。</p>
+                  <button
+                    v-if="currentNode"
+                    type="button"
+                    class="focus-ring mt-6 rounded-lg border border-subtle px-4 py-2 text-xs text-text-muted hover:text-text-primary hover:border-primary/30 transition-colors"
+                    @click="$emit('generate-card', { nodeId: currentNode, cardType: 'diagnostic_quiz' })"
+                  >重新生成</button>
+                </template>
+                <template v-else>
+                  <p v-if="quizGuidance(card)" class="text-text-muted">{{ quizGuidance(card) }}</p>
+                  <div v-for="question in quizQuestions" :key="question.id" class="mt-10"><p class="font-medium text-text-primary">{{ question.prompt }}</p><p v-if="question.skillTag || question.difficulty" class="mt-1 text-xs text-text-muted">{{ [question.skillTag, question.difficulty].filter(Boolean).join(" · ") }}</p><div class="mt-4 space-y-2"><button v-for="(option, optionIndex) in question.options" :key="`${question.id}-${optionIndex}`" type="button" class="focus-ring w-full rounded-lg border px-4 py-2.5 text-left text-sm transition-colors" :class="answerClass(question.id, optionIndex)" @click="setAnswer(question.id, optionIndex)">{{ option }}</button></div><div v-if="submittedScore !== null && question.explanation" class="mt-4 text-xs text-text-muted">{{ question.explanation }}</div></div>
+                  <div class="mt-10 flex flex-wrap items-center justify-between gap-3"><p class="text-xs text-text-muted">{{ diagnosticStatusText }}</p><button type="button" class="focus-ring btn-capsule" :disabled="!allAnswered || loading" @click="submitQuizScore">提交诊断</button></div>
+                  <p v-if="quizAfterGuidance(card) && submittedScore !== null" class="mt-8">{{ quizAfterGuidance(card) }}</p>
+                </template>
               </article>
               <MarkdownContent v-else :content="bodyMarkdown(card)" />
             </template>
@@ -456,7 +467,7 @@ const quizQuestions = computed(() => {
       answerIndex: question.answer_index ?? question.answerIndex ?? 0,
       explanation: question.explanation || "",
       skillTag: question.skill_tag || "",
-      difficulty: question.difficulty || "",
+      difficulty: difficultyLabel(question.difficulty),
     }));
   }
 
@@ -472,6 +483,9 @@ const quizQuestions = computed(() => {
 });
 const allAnswered = computed(
   () => quizQuestions.value.length > 0 && quizQuestions.value.every((question) => answers.value[question.id] !== undefined),
+);
+const quizUnavailable = computed(
+  () => quizQuestions.value.length === 0 && (structuredPayload(quizCard.value)?.questions == null || structuredPayload(quizCard.value)?.questions?.length === 0),
 );
 
 const currentNodeMeta = computed(() =>
@@ -710,6 +724,11 @@ function videoWatchFocus(card) {
 
 function videoReviewQuestions(card) {
   return Array.isArray(cardMetadata(card).review_questions) ? cardMetadata(card).review_questions : [];
+}
+
+function difficultyLabel(value) {
+  const map = { easy: "简单", medium: "中等", hard: "困难" };
+  return map[value] || value || "";
 }
 
 function quizGuidance(card) {

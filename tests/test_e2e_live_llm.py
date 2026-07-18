@@ -8,7 +8,7 @@ EduAgent 全链路端到端集成测试（真实 LLM 版本）
 逐个验证各 Agent Node 的 LLM 调用通路和完整的 LangGraph 编排流程。
 
 测试覆盖：
-  1. LLMClient 基础连通性（DashScope Qwen）
+  1. LLMClientV2 基础连通性（DashScope Qwen）
   2. ContentMesh: 5 种资源类型的内容生成
   3. TutorAgent: 三轨多模态答疑（文字+图解）
   4. Validator: NLI 蕴含度评分
@@ -31,12 +31,9 @@ import pytest
 # 确保项目根在 sys.path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from src.llm.client import (
-    LLMClient,
-    LLMConfig,
-    Provider,
-    create_llm_client_from_env,
-    create_llm_client,
+from src.llm.client_v2 import (
+    LLMClientV2,
+    create_llm_client_v2_from_env,
 )
 from src.state.agent_state import (
     AgentState,
@@ -75,8 +72,8 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.fixture
-def client() -> LLMClient:
-    return create_llm_client_from_env()
+def client() -> LLMClientV2:
+    return create_llm_client_v2_from_env()
 
 
 # ============================================================================
@@ -99,13 +96,13 @@ def check(label: str, ok: bool, detail: str = "") -> None:
 # Test 1: LLM 连通性
 # ============================================================================
 
-def test_llm_connectivity(client: LLMClient) -> bool:
+def test_llm_connectivity(client: LLMClientV2) -> bool:
     sep("Test 1: LLM 基础连通性 (DashScope Qwen)")
 
     try:
-        resp = client.chat([
+        resp = client.chat_sync([
             {"role": "user", "content": "请用一句话介绍数据结构中的二叉树。"}
-        ])
+        ]).get("content", "")
         ok = len(resp) > 20 and "Error" not in resp
         check("Qwen Chat API 连通", ok, f"response_len={len(resp)}")
         if ok:
@@ -120,7 +117,7 @@ def test_llm_connectivity(client: LLMClient) -> bool:
 # Test 2: ContentMesh 资源生成
 # ============================================================================
 
-def test_content_mesh_generation(client: LLMClient) -> bool:
+def test_content_mesh_generation(client: LLMClientV2) -> bool:
     sep("Test 2: ContentMesh 5 种资源类型生成")
 
     card_types = [
@@ -162,7 +159,7 @@ def test_content_mesh_generation(client: LLMClient) -> bool:
 # Test 3: TutorAgent 答疑
 # ============================================================================
 
-def test_tutor_agent(client: LLMClient) -> bool:
+def test_tutor_agent(client: LLMClientV2) -> bool:
     sep("Test 3: TutorAgent 三轨多模态答疑")
 
     all_ok = True
@@ -239,7 +236,7 @@ def test_tutor_agent(client: LLMClient) -> bool:
 # Test 4: Validator NLI 蕴含度
 # ============================================================================
 
-def test_validator_nli(client: LLMClient) -> bool:
+def test_validator_nli(client: LLMClientV2) -> bool:
     sep("Test 4: Validator NLI 蕴含度评分")
 
     all_ok = True
@@ -345,7 +342,7 @@ def test_assessment() -> bool:
 # Test 6: LangGraph 全链路编排
 # ============================================================================
 
-def test_langgraph_full_pipeline(client: LLMClient) -> bool:
+def test_langgraph_full_pipeline(client: LLMClientV2) -> bool:
     sep("Test 6: LangGraph 全链路编排 (真实 LLM)")
 
     orchestrator = EduAgentGraph()
@@ -408,7 +405,7 @@ def test_langgraph_full_pipeline(client: LLMClient) -> bool:
 # Test 7: LLM 性能基准
 # ============================================================================
 
-def test_llm_performance(client: LLMClient) -> bool:
+def test_llm_performance(client: LLMClientV2) -> bool:
     sep("Test 7: LLM 性能基准")
 
     all_ok = True
@@ -424,7 +421,9 @@ def test_llm_performance(client: LLMClient) -> bool:
     for name, prompt, max_ok_ms in test_cases:
         try:
             t0 = time.perf_counter()
-            resp = client.chat([{"role": "user", "content": prompt}], max_tokens=200)
+            resp = client.chat_sync(
+                [{"role": "user", "content": prompt}], max_tokens=200
+            ).get("content", "")
             elapsed = (time.perf_counter() - t0) * 1000
             latencies.append(elapsed)
             ok = "Error" not in resp and len(resp) > 10
@@ -455,9 +454,9 @@ def main() -> int:
 
     # ---- 初始化 LLM ----
     try:
-        client = create_llm_client_from_env()
-        print(f"\n  LLM Provider: {client.config.provider.value}")
-        print(f"  Model: {client.config.dashscope_model}")
+        client = create_llm_client_v2_from_env()
+        print(f"\n  LLM Provider: {client.provider}")
+        print(f"  Model: {client.config.get('model')}")
     except RuntimeError as e:
         print(f"\n  [FATAL] {e}")
         return 1
