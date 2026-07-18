@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -342,6 +343,27 @@ def _validate_semantics(
                         "Every diagnostic distractor must map to an error tag.",
                         f"questions.{index}.distractor_error_tags",
                     ))
+            # Detect generic / meta-cognitive distractors that are not
+            # topic-specific technical claims.
+            _GENERIC_DISTRACTOR_RE = re.compile(
+                r"只背诵|套用.*模板|忽略.*状态变化|直接套用"
+                r"|以上都不对|以上全对"
+                r"|^与.{0,8}无关[，。]?$"
+                r"|^所有.*都是.{0,10}$|^总是最优$|^仅适用于.{0,10}$"
+                r"|不检查.*条件|猜测结果",
+            )
+            for q_idx, question in enumerate(questions):
+                if not isinstance(question, dict):
+                    continue
+                for o_idx, option in enumerate(question.get("options", []) or []):
+                    option_str = str(option).strip()
+                    if _GENERIC_DISTRACTOR_RE.search(option_str):
+                        issues.append(ValidationIssue(
+                            "quiz_distractor_generic",
+                            f"Option at questions.{q_idx}.options[{o_idx}] appears "
+                            f"generic or meta-cognitive: '{option_str[:80]}'",
+                            f"questions.{q_idx}.options.{o_idx}",
+                        ))
     return issues
 
 

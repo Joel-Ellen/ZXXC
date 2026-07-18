@@ -10,7 +10,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from "vue";
+import { onMounted, ref, watch } from "vue";
 import { useTheme } from "../composables/useTheme.js";
 import { hasRichMarkdownContent, renderPlainTextHtml } from "../utils/markdownPreview.js";
 
@@ -85,6 +85,10 @@ watch(
 );
 
 watch(theme, () => {
+  renderMermaid();
+});
+
+onMounted(() => {
   renderMermaid();
 });
 </script>

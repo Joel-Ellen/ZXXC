@@ -2099,36 +2099,12 @@ function createEduAgent() {
     return AGENT_CN[type] || "文档智能体";
   }
 
-  function parseQuiz(content = "") {
-    const lines = content
-      .split(/[\n。；;]/)
-      .map((line) => line.trim())
-      .filter((line) => line.length > 12);
-
-    return [
-      {
-        id: "q1",
-        prompt: "根据当前资源，选择最贴合核心概念的一项。",
-        options: [
-          lines[0] || "继续阅读后作答",
-          "与时间复杂度无关",
-          "仅适用于图算法",
-          "以上都不对",
-        ],
-        answer: 0,
-      },
-      {
-        id: "q2",
-        prompt: "以下哪项描述与资源内容一致？",
-        options: [
-          lines[1] || lines[0] || "继续阅读",
-          "二分查找总是最优",
-          "所有算法都是 O(1)",
-          "以上都不对",
-        ],
-        answer: 0,
-      },
-    ];
+  function parseQuiz(_content = "") {
+    // Do not fabricate quiz questions from unstructured markdown text.
+    // The structured_payload.questions path (from server-generated or
+    // template-fallback payloads) is the sole source of quiz data.
+    // When structured_payload is absent, the UI shows a retry prompt.
+    return [];
   }
 
   return {
