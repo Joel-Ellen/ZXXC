@@ -233,6 +233,52 @@
               </article>
               <MarkdownContent v-else :content="bodyMarkdown(card)" />
             </template>
+            <!-- 诊断结果悬浮窗 -->
+            <Teleport to="body">
+              <Transition name="result-overlay">
+                <div v-if="showQuizOverlay" class="quiz-result-overlay" @click.self="dismissQuizOverlay" @keydown.escape="dismissQuizOverlay">
+                  <div class="quiz-result-card" role="dialog" aria-label="诊断结果">
+                    <button type="button" class="quiz-result-close" @click="dismissQuizOverlay" aria-label="关闭">&times;</button>
+                    <h3 class="quiz-result-title">诊断结果</h3>
+                    <!-- 正确率 -->
+                    <div class="quiz-result-score">
+                      <svg class="quiz-result-ring" viewBox="0 0 100 100">
+                        <circle class="ring-bg" cx="50" cy="50" r="42" fill="none" stroke="var(--border-subtle, #e0e0e0)" stroke-width="8"/>
+                        <circle class="ring-fill" cx="50" cy="50" r="42" fill="none" stroke="var(--color-primary, #2563eb)" stroke-width="8" stroke-linecap="round" :stroke-dasharray="264" :stroke-dashoffset="264 - 264 * quizOverlayScore"/>
+                        <text x="50" y="46" text-anchor="middle" class="ring-percent">{{ Math.round(quizOverlayScore * 100) }}%</text>
+                        <text x="50" y="62" text-anchor="middle" class="ring-label">正确率</text>
+                      </svg>
+                    </div>
+                    <!-- 掌握度变化 -->
+                    <div v-if="quizOverlayMasteryBefore !== null" class="quiz-result-mastery">
+                      <div class="mastery-item">
+                        <span class="mastery-label">诊断前</span>
+                        <span class="mastery-value">{{ Math.round((quizOverlayMasteryBefore ?? 0) * 100) }}%</span>
+                      </div>
+                      <span class="mastery-arrow">&rarr;</span>
+                      <div class="mastery-item" :class="{ 'mastery-up': (quizOverlayMasteryAfter ?? 0) > (quizOverlayMasteryBefore ?? 0) }">
+                        <span class="mastery-label">诊断后</span>
+                        <span class="mastery-value">{{ Math.round((quizOverlayMasteryAfter ?? 0) * 100) }}%</span>
+                      </div>
+                      <span v-if="quizOverlayMasteryDelta !== 0" class="mastery-delta" :class="quizOverlayMasteryDelta > 0 ? 'mastery-up' : 'mastery-down'">
+                        {{ quizOverlayMasteryDelta > 0 ? '+' : '' }}{{ Math.round(quizOverlayMasteryDelta * 100) }}%
+                      </span>
+                    </div>
+                    <!-- 逐题结果 -->
+                    <ul v-if="quizOverlayQuestionResults.length" class="quiz-result-questions">
+                      <li v-for="(qr, idx) in quizOverlayQuestionResults" :key="idx" class="quiz-result-question" :class="{ correct: qr.correct, incorrect: !qr.correct }">
+                        <span class="q-icon">{{ qr.correct ? '✓' : '✗' }}</span>
+                        <span class="q-prompt">{{ qr.prompt }}</span>
+                      </li>
+                    </ul>
+                    <!-- 推进状态 -->
+                    <p v-if="quizOverlayAdvanced" class="quiz-result-advanced">已推进到下一节点</p>
+                    <p v-else-if="submittedScore !== null" class="quiz-result-stay">继续巩固当前节点</p>
+                    <button type="button" class="quiz-result-btn" @click="dismissQuizOverlay">继续学习</button>
+                  </div>
+                </div>
+              </Transition>
+            </Teleport>
           </div>
           <div v-else class="rounded-xl border border-dashed border-subtle/30 p-8 flex flex-col items-center justify-center gap-3">
             <span class="text-3xl opacity-60" aria-hidden="true">{{ slot.icon }}</span>
@@ -291,6 +337,7 @@ const dragId = ref("");
 const focusMode = ref(false);
 const answers = ref({});
 const submittedScore = ref(null);
+const showQuizOverlay = ref(false);
 const quizAttemptNumber = ref(1);
 const quizStartedAt = ref(Date.now());
 const quizEventId = ref("");
@@ -556,6 +603,58 @@ const diagnosticStatusText = computed(() => {
   }
 
   return "请先回答所有题目，再提交诊断得分。";
+});
+
+// ── 诊断结果悬浮窗 ────────────────────────────────────────────────
+const quizOverlayScore = computed(() => {
+  const diag = props.lastDiagnostic;
+  if (diag && typeof diag.score === "number") return diag.score;
+  return submittedScore.value ?? 0;
+});
+
+const quizOverlayMasteryBefore = computed(() => {
+  const diag = props.lastDiagnostic;
+  if (diag && typeof diag.masteryBefore === "number") return diag.masteryBefore;
+  return null;
+});
+
+const quizOverlayMasteryAfter = computed(() => {
+  const diag = props.lastDiagnostic;
+  if (diag && typeof diag.masteryAfter === "number") return diag.masteryAfter;
+  return null;
+});
+
+const quizOverlayMasteryDelta = computed(() => {
+  if (quizOverlayMasteryBefore.value === null || quizOverlayMasteryAfter.value === null) return 0;
+  return quizOverlayMasteryAfter.value - quizOverlayMasteryBefore.value;
+});
+
+const quizOverlayAdvanced = computed(() => {
+  return props.lastDiagnostic?.advancedToNextNode === true;
+});
+
+const quizOverlayQuestionResults = computed(() => {
+  const diag = props.lastDiagnostic;
+  if (diag && Array.isArray(diag.questionResults) && diag.questionResults.length) {
+    return diag.questionResults.map((qr) => ({
+      prompt: qr.prompt || qr.question_text || qr.question_id || "",
+      correct: qr.correct === true || qr.is_correct === true,
+    }));
+  }
+  // Fallback: compute from local answers
+  return quizQuestions.value.map((q) => ({
+    prompt: q.prompt,
+    correct: answers.value[q.id] === q.answerIndex,
+  }));
+});
+
+function dismissQuizOverlay() {
+  showQuizOverlay.value = false;
+}
+
+// Show overlay when score is submitted
+watch(submittedScore, (val) => {
+  if (val !== null) showQuizOverlay.value = true;
 });
 
 function resourceType(card) {
@@ -1272,4 +1371,113 @@ function forwardWheelToContent(event) {
   from { opacity: 0; transform: translateY(14px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* ── 诊断结果悬浮窗 ──────────────────────────────────────────────── */
+.quiz-result-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.quiz-result-card {
+  position: relative;
+  width: min(420px, 92vw);
+  max-height: 88vh;
+  overflow-y: auto;
+  background: var(--bg-card, #fff);
+  border-radius: 20px;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.22), 0 0 0 1px var(--border-subtle, rgba(0,0,0,0.06));
+  padding: 32px 28px 24px;
+  text-align: center;
+}
+.quiz-result-close {
+  position: absolute;
+  top: 12px; right: 16px;
+  background: none; border: none;
+  font-size: 24px; color: var(--text-muted, #999);
+  cursor: pointer; line-height: 1;
+}
+.quiz-result-close:hover { color: var(--text-primary, #333); }
+.quiz-result-title {
+  font-size: 18px; font-weight: 700;
+  color: var(--text-primary, #222);
+  margin-bottom: 16px;
+}
+.quiz-result-score {
+  display: flex; justify-content: center;
+  margin-bottom: 18px;
+}
+.quiz-result-ring { width: 140px; height: 140px; }
+.ring-bg { opacity: 0.12; }
+.ring-fill {
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+  transition: stroke-dashoffset 0.7s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.ring-percent { font-size: 28px; font-weight: 800; fill: var(--text-primary, #222); }
+.ring-label { font-size: 12px; fill: var(--text-muted, #999); }
+
+.quiz-result-mastery {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  margin-bottom: 20px; flex-wrap: wrap;
+}
+.mastery-item {
+  text-align: center;
+}
+.mastery-label { font-size: 11px; color: var(--text-muted, #999); display: block; }
+.mastery-value { font-size: 18px; font-weight: 700; color: var(--text-primary, #333); }
+.mastery-arrow { font-size: 18px; color: var(--text-muted, #999); }
+.mastery-delta {
+  font-size: 13px; font-weight: 700; padding: 2px 10px; border-radius: 10px;
+}
+.mastery-up   { color: #16a34a; background: #f0fdf4; }
+.mastery-down { color: #dc2626; background: #fef2f2; }
+
+.quiz-result-questions {
+  list-style: none; padding: 0; margin: 0 0 16px;
+  text-align: left; max-height: 200px; overflow-y: auto;
+}
+.quiz-result-question {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 8px 10px; border-radius: 10px; margin-bottom: 4px;
+  font-size: 13px; line-height: 1.5;
+}
+.quiz-result-question.correct   { background: #f0fdf4; color: #15803d; }
+.quiz-result-question.incorrect { background: #fef2f2; color: #b91c1c; }
+.q-icon { font-size: 15px; font-weight: 700; flex-shrink: 0; margin-top: 1px; }
+.q-prompt { word-break: break-word; }
+
+.quiz-result-advanced {
+  color: #16a34a; font-weight: 700; font-size: 14px; margin-bottom: 12px;
+}
+.quiz-result-stay {
+  color: var(--text-muted, #999); font-size: 13px; margin-bottom: 12px;
+}
+.quiz-result-btn {
+  display: inline-block; padding: 10px 36px;
+  border: none; border-radius: 12px;
+  background: var(--color-primary, #2563eb); color: #fff;
+  font-size: 14px; font-weight: 600; cursor: pointer;
+  transition: opacity 0.2s;
+}
+.quiz-result-btn:hover { opacity: 0.88; }
+
+/* overlay transition */
+.result-overlay-enter-active,
+.result-overlay-leave-active {
+  transition: opacity 0.25s ease;
+}
+.result-overlay-enter-active .quiz-result-card,
+.result-overlay-leave-active .quiz-result-card {
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.result-overlay-enter-from,
+.result-overlay-leave-to { opacity: 0; }
+.result-overlay-enter-from .quiz-result-card { transform: scale(0.94) translateY(12px); }
+.result-overlay-leave-to .quiz-result-card   { transform: scale(0.94) translateY(12px); }
 </style>
