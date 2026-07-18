@@ -1,5 +1,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { streamResourceGeneration } from "./eduAgentApi";
+
+const authMocks = vi.hoisted(() => ({
+  accessToken: "expired-access-token",
+  refreshStoredTokens: vi.fn(async () => "renewed-access-token"),
+}));
+
+vi.mock("./apiClient", () => ({
+  default: {},
+  createRequestId: () => "request-id",
+  refreshStoredTokens: authMocks.refreshStoredTokens,
+  tokenStore: {
+    getAccessToken: () => authMocks.accessToken,
+    getRefreshToken: () => "refresh-token",
+  },
+}));
+
+import { streamResourceGeneration, streamSessionTutor } from "./eduAgentApi";
 
 function sseResponse(events) {
   const encoder = new TextEncoder();
@@ -14,6 +30,8 @@ function sseResponse(events) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  authMocks.accessToken = "expired-access-token";
+  authMocks.refreshStoredTokens.mockClear();
 });
 
 describe("resource generation SSE transport", () => {
@@ -45,5 +63,35 @@ describe("resource generation SSE transport", () => {
       }),
       expect.objectContaining({ event: "card_ready", id: "18" }),
     );
+  });
+});
+
+describe("Tutor SSE authentication", () => {
+  it("refreshes an expired access token and retries the stream once", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 401, body: null })
+      .mockResolvedValueOnce(sseResponse([
+        "event: token",
+        'data: {"token":"已恢复。"}',
+        "",
+        "event: done",
+        'data: {"status":"ok"}',
+        "",
+      ].join("\n")));
+    vi.stubGlobal("fetch", fetchMock);
+    const tokenHandler = vi.fn();
+    const doneHandler = vi.fn();
+
+    await streamSessionTutor("admin:data_structures", { question: "111" }, {
+      onToken: tokenHandler,
+      onDone: doneHandler,
+    });
+
+    expect(authMocks.refreshStoredTokens).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer expired-access-token");
+    expect(fetchMock.mock.calls[1][1].headers.Authorization).toBe("Bearer renewed-access-token");
+    expect(tokenHandler).toHaveBeenCalledWith("已恢复。");
+    expect(doneHandler).toHaveBeenCalledWith({ status: "ok" });
   });
 });

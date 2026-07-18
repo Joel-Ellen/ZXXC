@@ -31,6 +31,32 @@ export const tokenStore = {
   },
 };
 
+let refreshPromise = null;
+
+export function refreshStoredTokens() {
+  if (refreshPromise) return refreshPromise;
+
+  refreshPromise = (async () => {
+    const refreshToken = tokenStore.getRefreshToken();
+    const response = await axios.post(
+      "/api/auth/refresh",
+      refreshToken ? { refresh_token: refreshToken } : {},
+      { withCredentials: true, timeout: 30000 },
+    );
+    const accessToken = response.data.access_token;
+    if (!accessToken) throw new Error("登录状态已失效，请重新登录。");
+    tokenStore.setTokens({
+      accessToken,
+      refreshToken: response.data.refresh_token,
+    });
+    return accessToken;
+  })().finally(() => {
+    refreshPromise = null;
+  });
+
+  return refreshPromise;
+}
+
 const apiClient = axios.create({
   baseURL: "/api",
   timeout: 30000,
@@ -57,21 +83,10 @@ apiClient.interceptors.response.use(
       originalRequest._retry = true;
 
       try {
-        const refreshToken = tokenStore.getRefreshToken();
-        const res = await axios.post(
-          "/api/auth/refresh",
-          refreshToken ? { refresh_token: refreshToken } : {},
-          { withCredentials: true, timeout: 30000 },
-        );
-
-        if (res.status === 200) {
-          const accessToken = res.data.access_token;
-          const nextRefreshToken = res.data.refresh_token;
-          tokenStore.setTokens({ accessToken, refreshToken: nextRefreshToken });
-          originalRequest.headers = originalRequest.headers ?? {};
-          originalRequest.headers.Authorization = `Bearer ${accessToken}`;
-          return apiClient(originalRequest);
-        }
+        const accessToken = await refreshStoredTokens();
+        originalRequest.headers = originalRequest.headers ?? {};
+        originalRequest.headers.Authorization = `Bearer ${accessToken}`;
+        return apiClient(originalRequest);
       } catch (refreshError) {
         tokenStore.clear();
         window.location.assign("/?reason=SECURITY_BREACH_FORCED_OUT");

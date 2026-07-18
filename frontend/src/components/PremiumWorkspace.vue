@@ -57,6 +57,7 @@
         :get-agent-label="getAgentLabel"
         :build-quiz="parseQuiz"
         @submit-quiz="(score) => $emit('submit-quiz', score)"
+        @quiz-next="onQuizNext"
         @select-node="(id) => onSelectNode(id)"
         @refresh="$emit('refresh-resources')"
         @generate-card="(payload) => $emit('generate-card', payload)"
@@ -407,6 +408,15 @@ function onSelectNode(nodeId) {
   emit("select-node", nodeId);
   drawerOpen.value = false;
   mobilePane.value = "learn";
+}
+
+function onQuizNext(payload) {
+  const nodeId = typeof payload === "string" ? payload : payload?.nodeId;
+  if (!nodeId) return;
+
+  activeResourceCategory.value = "all";
+  sidebarPanel.value = "all";
+  onSelectNode(nodeId);
 }
 
 function onSwitchCourse(courseId) {

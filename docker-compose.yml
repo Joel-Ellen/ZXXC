@@ -27,6 +27,8 @@ services:
         VITE_SENTRY_ENVIRONMENT: ${VITE_SENTRY_ENVIRONMENT:-production}
         VITE_SENTRY_RELEASE: ${VITE_SENTRY_RELEASE:-}
         VITE_SENTRY_TRACES_SAMPLE_RATE: ${VITE_SENTRY_TRACES_SAMPLE_RATE:-0.05}
+    env_file:
+      - ./frontend/.env
     container_name: edu-agent-app
     restart: unless-stopped
     init: true
@@ -60,12 +62,12 @@ services:
       - EDUAGENT_ENABLE_LEGACY_RESOURCE_GENERATION=${EDUAGENT_ENABLE_LEGACY_RESOURCE_GENERATION:-false}
       - EDUAGENT_ENABLE_PUBLIC_METRICS=false
       # ── LLM API Keys ──
-      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
       - SPARK_API_KEY=${SPARK_API_KEY:-}
       - SPARK_APP_ID=${SPARK_APP_ID:-}
       - SPARK_API_SECRET=${SPARK_API_SECRET:-}
       - EDUAGENT_LLM_FALLBACKS=${EDUAGENT_LLM_FALLBACKS:-}
-      - EDUAGENT_RESOURCE_LLM_TIMEOUT_SEC=${EDUAGENT_RESOURCE_LLM_TIMEOUT_SEC:-18}
+      - EDUAGENT_TUTOR_TIMEOUT_SEC=${EDUAGENT_TUTOR_TIMEOUT_SEC:-30}
+      - EDUAGENT_TUTOR_MAX_TOKENS=${EDUAGENT_TUTOR_MAX_TOKENS:-1200}
       - EDUAGENT_RESOURCE_LLM_TOTAL_TIMEOUT_SEC=${EDUAGENT_RESOURCE_LLM_TOTAL_TIMEOUT_SEC:-20}
       - EDUAGENT_RESOURCE_LLM_RETRIES=${EDUAGENT_RESOURCE_LLM_RETRIES:-1}
       - EDUAGENT_RESOURCE_LLM_PARALLELISM=${EDUAGENT_RESOURCE_LLM_PARALLELISM:-3}
@@ -119,6 +121,8 @@ services:
     image: ${EDUAGENT_IMAGE:-eduagent-local:dev}
     build:
       context: .
+    env_file:
+      - ./frontend/.env
     restart: unless-stopped
     init: true
     command: ["python", "-m", "src.resource_worker"]
@@ -130,11 +134,35 @@ services:
       - ALL
     tmpfs:
       - /tmp:rw,nosuid,nodev,noexec,size=256m,mode=1777
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
     environment:
       - APP_ENV=staging
       - DATABASE_URL=postgresql://eduagent:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/eduagent
       - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379/0
       - ES_HOSTS=http://elasticsearch:9200
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=${NEO4J_USER:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:?NEO4J_PASSWORD is required}
+      - LLM_PROVIDER=${LLM_PROVIDER:-dashscope}
+      - DASHSCOPE_MODEL=${DASHSCOPE_MODEL:-qwen-plus}
+      - SPARK_API_KEY=${SPARK_API_KEY:-}
+      - SPARK_APP_ID=${SPARK_APP_ID:-}
+      - SPARK_API_SECRET=${SPARK_API_SECRET:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - DEEPSEEK_API_URL=${DEEPSEEK_API_URL:-https://api.deepseek.com/v1}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_API_URL=${OPENAI_API_URL:-https://api.openai.com/v1}
+      - EDUAGENT_LLM_FALLBACKS=${EDUAGENT_LLM_FALLBACKS:-deepseek,openai}
+      - EDUAGENT_RESOURCE_DOMESTIC_PROVIDERS=${EDUAGENT_RESOURCE_DOMESTIC_PROVIDERS:-dashscope,deepseek,spark}
+      - EDUAGENT_RESOURCE_LLM_TOTAL_TIMEOUT_SEC=${EDUAGENT_RESOURCE_LLM_TOTAL_TIMEOUT_SEC:-20}
+      - EDUAGENT_RESOURCE_LLM_RETRIES=${EDUAGENT_RESOURCE_LLM_RETRIES:-1}
+      - EDUAGENT_RESOURCE_LLM_PARALLELISM=${EDUAGENT_RESOURCE_LLM_PARALLELISM:-3}
+      - HF_ENDPOINT=${HF_ENDPOINT:-https://hf-mirror.com}
       - EDUAGENT_RESOURCE_IN_PROCESS_WORKERS=false
       - EDUAGENT_RESOURCE_WORKER_STAGE_SLOTS=8
       - EDUAGENT_RESOURCE_WORKER_HEARTBEAT_SECONDS=15

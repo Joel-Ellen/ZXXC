@@ -161,6 +161,51 @@ describe("ResourceCanvas quiz interaction", () => {
 
     wrapper.unmount();
   });
+
+  it("keeps quiz results open until returning or choosing the next chapter", async () => {
+    const wrapper = mount(ResourceCanvas, {
+      props: {
+        cards: [quizCard("N01")],
+        currentNode: "N01", nodeTitle: "Node 01",
+        pathNodes: [
+          { id: "N01", title: "Node 01", mastery: 0.4 },
+          { id: "N02", title: "Node 02", mastery: 0 },
+        ],
+        filterType: "quiz", loading: false,
+        getCardLabel: () => "Diagnostic", getAgentLabel: () => "Evaluator",
+        buildQuiz: () => [],
+      },
+    });
+    await settleUi();
+
+    await findButton(wrapper, "N01 option A").trigger("click");
+    await findButton(wrapper, "提交诊断").trigger("click");
+    await settleUi();
+
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    const firstSubmission = wrapper.emitted("submit-quiz")[0][0];
+    firstSubmission.onRecorded();
+    await settleUi();
+
+    expect(document.body.querySelector('[role="dialog"]')?.textContent).toContain("诊断结果");
+    document.body.querySelector(".quiz-result-btn--secondary").click();
+    await settleUi();
+
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    expect(findButton(wrapper, "提交诊断").attributes("disabled")).toBeUndefined();
+
+    await findButton(wrapper, "提交诊断").trigger("click");
+    wrapper.emitted("submit-quiz")[1][0].onRecorded();
+    await settleUi();
+    const nextButton = [...document.body.querySelectorAll("button")]
+      .find((button) => button.textContent === "下一章");
+    nextButton.click();
+    await settleUi();
+
+    expect(wrapper.emitted("quiz-next")).toEqual([[{ nodeId: "N02" }]]);
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    wrapper.unmount();
+  });
 });
 
 // ── Card rendering ────────────────────────────────────────────────

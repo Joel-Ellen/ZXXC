@@ -233,52 +233,6 @@
               </article>
               <MarkdownContent v-else :content="bodyMarkdown(card)" />
             </template>
-            <!-- 诊断结果悬浮窗 -->
-            <Teleport to="body">
-              <Transition name="result-overlay">
-                <div v-if="showQuizOverlay" class="quiz-result-overlay" @click.self="dismissQuizOverlay" @keydown.escape="dismissQuizOverlay">
-                  <div class="quiz-result-card" role="dialog" aria-label="诊断结果">
-                    <button type="button" class="quiz-result-close" @click="dismissQuizOverlay" aria-label="关闭">&times;</button>
-                    <h3 class="quiz-result-title">诊断结果</h3>
-                    <!-- 正确率 -->
-                    <div class="quiz-result-score">
-                      <svg class="quiz-result-ring" viewBox="0 0 100 100">
-                        <circle class="ring-bg" cx="50" cy="50" r="42" fill="none" stroke="var(--border-subtle, #e0e0e0)" stroke-width="8"/>
-                        <circle class="ring-fill" cx="50" cy="50" r="42" fill="none" stroke="var(--color-primary, #2563eb)" stroke-width="8" stroke-linecap="round" :stroke-dasharray="264" :stroke-dashoffset="264 - 264 * quizOverlayScore"/>
-                        <text x="50" y="46" text-anchor="middle" class="ring-percent">{{ Math.round(quizOverlayScore * 100) }}%</text>
-                        <text x="50" y="62" text-anchor="middle" class="ring-label">正确率</text>
-                      </svg>
-                    </div>
-                    <!-- 掌握度变化 -->
-                    <div v-if="quizOverlayMasteryBefore !== null" class="quiz-result-mastery">
-                      <div class="mastery-item">
-                        <span class="mastery-label">诊断前</span>
-                        <span class="mastery-value">{{ Math.round((quizOverlayMasteryBefore ?? 0) * 100) }}%</span>
-                      </div>
-                      <span class="mastery-arrow">&rarr;</span>
-                      <div class="mastery-item" :class="{ 'mastery-up': (quizOverlayMasteryAfter ?? 0) > (quizOverlayMasteryBefore ?? 0) }">
-                        <span class="mastery-label">诊断后</span>
-                        <span class="mastery-value">{{ Math.round((quizOverlayMasteryAfter ?? 0) * 100) }}%</span>
-                      </div>
-                      <span v-if="quizOverlayMasteryDelta !== 0" class="mastery-delta" :class="quizOverlayMasteryDelta > 0 ? 'mastery-up' : 'mastery-down'">
-                        {{ quizOverlayMasteryDelta > 0 ? '+' : '' }}{{ Math.round(quizOverlayMasteryDelta * 100) }}%
-                      </span>
-                    </div>
-                    <!-- 逐题结果 -->
-                    <ul v-if="quizOverlayQuestionResults.length" class="quiz-result-questions">
-                      <li v-for="(qr, idx) in quizOverlayQuestionResults" :key="idx" class="quiz-result-question" :class="{ correct: qr.correct, incorrect: !qr.correct }">
-                        <span class="q-icon">{{ qr.correct ? '✓' : '✗' }}</span>
-                        <span class="q-prompt">{{ qr.prompt }}</span>
-                      </li>
-                    </ul>
-                    <!-- 推进状态 -->
-                    <p v-if="quizOverlayAdvanced" class="quiz-result-advanced">已推进到下一节点</p>
-                    <p v-else-if="submittedScore !== null" class="quiz-result-stay">继续巩固当前节点</p>
-                    <button type="button" class="quiz-result-btn" @click="dismissQuizOverlay">继续学习</button>
-                  </div>
-                </div>
-              </Transition>
-            </Teleport>
           </div>
           <div v-else class="rounded-xl border border-dashed border-subtle/30 p-8 flex flex-col items-center justify-center gap-3">
             <span class="text-3xl opacity-60" aria-hidden="true">{{ slot.icon }}</span>
@@ -304,6 +258,51 @@
         </button>
       </div>
     </footer>
+
+    <!-- Keep the result dialog outside resource-card loops so node data refreshes cannot unmount it. -->
+    <Teleport to="body">
+      <Transition name="result-overlay">
+        <div v-if="showQuizOverlay" class="quiz-result-overlay">
+          <div class="quiz-result-card" role="dialog" aria-modal="true" aria-labelledby="quiz-result-title">
+            <h3 id="quiz-result-title" class="quiz-result-title">诊断结果</h3>
+            <div class="quiz-result-score">
+              <svg class="quiz-result-ring" viewBox="0 0 100 100" aria-label="测验正确率">
+                <circle class="ring-bg" cx="50" cy="50" r="42" fill="none" stroke="var(--border-subtle, #e0e0e0)" stroke-width="8"/>
+                <circle class="ring-fill" cx="50" cy="50" r="42" fill="none" stroke="var(--color-primary, #2563eb)" stroke-width="8" stroke-linecap="round" :stroke-dasharray="264" :stroke-dashoffset="264 - 264 * quizOverlayScore"/>
+                <text x="50" y="46" text-anchor="middle" class="ring-percent">{{ Math.round(quizOverlayScore * 100) }}%</text>
+                <text x="50" y="62" text-anchor="middle" class="ring-label">正确率</text>
+              </svg>
+            </div>
+            <div v-if="quizOverlayMasteryBefore !== null" class="quiz-result-mastery">
+              <div class="mastery-item">
+                <span class="mastery-label">诊断前</span>
+                <span class="mastery-value">{{ Math.round((quizOverlayMasteryBefore ?? 0) * 100) }}%</span>
+              </div>
+              <span class="mastery-arrow">&rarr;</span>
+              <div class="mastery-item" :class="{ 'mastery-up': (quizOverlayMasteryAfter ?? 0) > (quizOverlayMasteryBefore ?? 0) }">
+                <span class="mastery-label">诊断后</span>
+                <span class="mastery-value">{{ Math.round((quizOverlayMasteryAfter ?? 0) * 100) }}%</span>
+              </div>
+              <span v-if="quizOverlayMasteryDelta !== 0" class="mastery-delta" :class="quizOverlayMasteryDelta > 0 ? 'mastery-up' : 'mastery-down'">
+                {{ quizOverlayMasteryDelta > 0 ? '+' : '' }}{{ Math.round(quizOverlayMasteryDelta * 100) }}%
+              </span>
+            </div>
+            <ul v-if="quizOverlayQuestionResults.length" class="quiz-result-questions">
+              <li v-for="(qr, idx) in quizOverlayQuestionResults" :key="idx" class="quiz-result-question" :class="{ correct: qr.correct, incorrect: !qr.correct }">
+                <span class="q-icon">{{ qr.correct ? '✓' : '✗' }}</span>
+                <span class="q-prompt">{{ qr.prompt }}</span>
+              </li>
+            </ul>
+            <p v-if="quizNextNode" class="quiz-result-advanced">已完成本章，可继续学习「{{ quizNextNode.title }}」</p>
+            <p v-else class="quiz-result-stay">已完成当前课程的全部章节</p>
+            <div class="quiz-result-actions">
+              <button type="button" class="quiz-result-btn quiz-result-btn--secondary" @click="dismissQuizOverlay">返回</button>
+              <button type="button" class="quiz-result-btn" :disabled="!quizNextNode" @click="goToNextQuizNode">下一章</button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </section>
 </template>
 
@@ -328,7 +327,7 @@ const props = defineProps({
   buildQuiz: { type: Function, required: true },
 });
 
-const emit = defineEmits(["submit-quiz", "select-node", "refresh", "generate-card", "filter-change"]);
+const emit = defineEmits(["submit-quiz", "quiz-next", "select-node", "refresh", "generate-card", "filter-change"]);
 
 const orderedIds = ref([]);
 const minimizedIds = ref([]);
@@ -629,8 +628,20 @@ const quizOverlayMasteryDelta = computed(() => {
   return quizOverlayMasteryAfter.value - quizOverlayMasteryBefore.value;
 });
 
-const quizOverlayAdvanced = computed(() => {
-  return props.lastDiagnostic?.advancedToNextNode === true;
+const quizNextNode = computed(() => {
+  const evaluatedNodeId = props.lastDiagnostic?.evaluatedNodeId || props.currentNode;
+  const explicitNextNodeId = props.lastDiagnostic?.nextNodeId;
+
+  if (explicitNextNodeId && explicitNextNodeId !== evaluatedNodeId) {
+    const node = props.pathNodes.find((item) => item.id === explicitNextNodeId);
+    return node || {
+      id: explicitNextNodeId,
+      title: props.lastDiagnostic?.nextNodeTitle || explicitNextNodeId,
+    };
+  }
+
+  const currentIndex = props.pathNodes.findIndex((node) => node.id === evaluatedNodeId);
+  return currentIndex >= 0 ? (props.pathNodes[currentIndex + 1] || null) : null;
 });
 
 const quizOverlayQuestionResults = computed(() => {
@@ -652,10 +663,11 @@ function dismissQuizOverlay() {
   showQuizOverlay.value = false;
 }
 
-// Show overlay when score is submitted
-watch(submittedScore, (val) => {
-  if (val !== null) showQuizOverlay.value = true;
-});
+function goToNextQuizNode() {
+  if (!quizNextNode.value) return;
+  showQuizOverlay.value = false;
+  emit("quiz-next", { nodeId: quizNextNode.value.id });
+}
 
 function resourceType(card) {
   return card?.resource_type || card?.card_type || card?.type || "";
@@ -1090,9 +1102,11 @@ function submitQuizScore() {
     onRecorded() {
       quizAttemptNumber.value += 1;
       quizEventId.value = "";
+      showQuizOverlay.value = true;
     },
     onFailure() {
       submittedScore.value = null;
+      showQuizOverlay.value = false;
     },
   });
 }
@@ -1395,14 +1409,6 @@ function forwardWheelToContent(event) {
   padding: 32px 28px 24px;
   text-align: center;
 }
-.quiz-result-close {
-  position: absolute;
-  top: 12px; right: 16px;
-  background: none; border: none;
-  font-size: 24px; color: var(--text-muted, #999);
-  cursor: pointer; line-height: 1;
-}
-.quiz-result-close:hover { color: var(--text-primary, #333); }
 .quiz-result-title {
   font-size: 18px; font-weight: 700;
   color: var(--text-primary, #222);
@@ -1458,14 +1464,28 @@ function forwardWheelToContent(event) {
 .quiz-result-stay {
   color: var(--text-muted, #999); font-size: 13px; margin-bottom: 12px;
 }
+.quiz-result-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
 .quiz-result-btn {
-  display: inline-block; padding: 10px 36px;
+  width: 100%; padding: 10px 18px;
   border: none; border-radius: 12px;
   background: var(--color-primary, #2563eb); color: #fff;
   font-size: 14px; font-weight: 600; cursor: pointer;
   transition: opacity 0.2s;
 }
 .quiz-result-btn:hover { opacity: 0.88; }
+.quiz-result-btn--secondary {
+  border: 1px solid var(--border-subtle, #e0e0e0);
+  background: transparent;
+  color: var(--text-primary, #222);
+}
+.quiz-result-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
 
 /* overlay transition */
 .result-overlay-enter-active,

@@ -20,6 +20,7 @@
       :get-agent-label="getAgentLabel"
       :build-quiz="buildQuiz"
       @submit-quiz="$emit('submit-quiz', $event)"
+      @quiz-next="$emit('quiz-next', $event)"
       @select-node="$emit('select-node', $event)"
       @refresh="$emit('refresh')"
       @generate-card="$emit('generate-card', $event)"
@@ -48,7 +49,7 @@ defineProps({
   buildQuiz: { type: Function, required: true },
 });
 
-defineEmits(["submit-quiz", "select-node", "refresh", "generate-card", "filter-change"]);
+defineEmits(["submit-quiz", "quiz-next", "select-node", "refresh", "generate-card", "filter-change"]);
 
 const paneRef = ref(null);
 

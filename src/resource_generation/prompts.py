@@ -15,12 +15,12 @@ TOKEN_BUDGETS: dict[str, int] = {
     # 5-7 道完整题目，最小载荷已接近 1000 token，预算过低会导致输出被
     # 截断并静默回退到模板。
     "concept_map": 2400,
-    "code_snippet": 1200,
+    "code_snippet": 2400,
     "interactive_exercise": 1100,
     "video_summary": 700,
     "diagnostic_quiz": 3500,
     "supporting_bundle": 5000,
-    "code_media_bundle": 1900,
+    "code_media_bundle": 3600,
     "practice_diagnostic_bundle": 4600,
 }
 

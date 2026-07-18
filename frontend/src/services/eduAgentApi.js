@@ -1,4 +1,4 @@
-import apiClient, { createRequestId, tokenStore } from "./apiClient";
+import apiClient, { createRequestId, refreshStoredTokens, tokenStore } from "./apiClient";
 import { normalizeLearningEvent } from "../contracts/learning";
 import { normalizeTutorRequest } from "../contracts/tutor";
 import { createRefreshRecoveryReporter } from "./clientTelemetry";
@@ -246,10 +246,7 @@ export async function resetSession(userId, courseId = "data_structures") {
  */
 // Shared transport for session tutor streaming.
 async function streamSsePost(url, payload, { onToken, onDone, onReset, onError, signal } = {}) {
-  const token = tokenStore.getAccessToken();
-  let response;
-  try {
-    response = await fetch(url, {
+  const request = (token) => fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -261,13 +258,33 @@ async function streamSsePost(url, payload, { onToken, onDone, onReset, onError, 
       credentials: "include",
       signal,
     });
+
+  let response;
+  try {
+    response = await request(tokenStore.getAccessToken());
+    if (response.status === 401 && !signal?.aborted) {
+      try {
+        const accessToken = await refreshStoredTokens();
+        response = await request(accessToken);
+      } catch {
+        const authError = new Error("登录状态已失效，请重新登录。");
+        authError.status = 401;
+        throw authError;
+      }
+    }
   } catch (err) {
-    onError?.(err);
+    const error = err instanceof Error ? err : new Error("辅导连接失败，请重试。");
+    if (/401|登录状态|refresh/i.test(error.message)) error.status = 401;
+    onError?.(error);
     return;
   }
 
   if (!response.ok || !response.body) {
-    onError?.(new Error(`SSE 请求失败：HTTP ${response.status}`));
+    const error = new Error(response.status === 401
+      ? "登录状态已失效，请重新登录。"
+      : `SSE 请求失败：HTTP ${response.status}`);
+    error.status = response.status;
+    onError?.(error);
     return;
   }
 

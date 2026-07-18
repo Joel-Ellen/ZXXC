@@ -24,6 +24,7 @@ import {
   submitSessionProfileInput,
   switchCourse,
 } from "../services/eduAgentApi";
+import { useLearningAssetsStore } from "../stores/learningAssets";
 
 const CARD_CN = {
   concept_map: "概念导图",
@@ -49,7 +50,11 @@ const RESOURCE_CARD_TYPES = [
   "diagnostic_quiz",
 ];
 
+const TUTOR_STREAM_IDLE_TIMEOUT_MS = 45_000;
+const TUTOR_STREAM_MAX_DURATION_MS = 120_000;
+
 export function useEduAgent() {
+  const learningAssets = useLearningAssetsStore();
   const isLoggedIn = ref(false);
   const currentUser = ref(null);
   const userId = computed(() => currentUser.value?.user_id ?? "demo_user");
@@ -113,6 +118,90 @@ export function useEduAgent() {
       }
       return createSession({ course_id: courseId.value });
     }
+  }
+
+  function tutorHistoryEntries() {
+    return Array.isArray(learningAssets.tutorHistory)
+      ? learningAssets.tutorHistory
+      : [];
+  }
+
+  function upsertTutorFeedback({ question = "", response = "", contextType = "concept", mermaidSource = "" } = {}) {
+    if (!response) return;
+
+    const tutorFeedback = {
+      agent: "Tutor",
+      stage: "AI 问答智能体",
+      status: "success",
+      headline: "本轮问答辅导已完成",
+      summary: `已围绕「${currentNodeTitle.value}」完成针对性讲解，回答内容已同步到当前会话。`,
+      details_md: response,
+      structured_data: {
+        query: question,
+        context_type: contextType,
+      },
+      artifacts: {
+        mermaid_src: mermaidSource,
+      },
+    };
+
+    agentFeedback.value = [
+      tutorFeedback,
+      ...agentFeedback.value.filter((item) => String(item?.agent || "").toLowerCase() !== "tutor"),
+    ];
+  }
+
+  function syncTutorFeedbackFromHistory(history) {
+    let assistantIndex = -1;
+    for (let index = history.length - 1; index >= 0; index -= 1) {
+      if (history[index]?.role === "assistant" && history[index]?.content) {
+        assistantIndex = index;
+        break;
+      }
+    }
+    if (assistantIndex < 0) return;
+
+    const assistant = history[assistantIndex];
+    let question = null;
+    for (let index = assistantIndex - 1; index >= 0; index -= 1) {
+      const candidate = history[index];
+      if (candidate?.role !== "user") continue;
+      if (!assistant.exchange_id || !candidate.exchange_id || candidate.exchange_id === assistant.exchange_id) {
+        question = candidate;
+        break;
+      }
+    }
+
+    upsertTutorFeedback({
+      question: String(question?.content || ""),
+      response: String(assistant.content),
+      contextType: assistant.context_type || question?.context_type || "concept",
+      mermaidSource: assistant.mermaid_source || "",
+    });
+  }
+
+  function restoreTutorHistory({ preserveCurrentIfEmpty = false } = {}) {
+    const history = tutorHistoryEntries();
+    const restored = history
+      .filter((entry) => entry && (entry.role === "user" || entry.role === "assistant") && entry.content)
+      .map((entry, index) => ({
+        id: String(entry.key || entry.id || `restored-${index}`),
+        role: entry.role,
+        content: String(entry.content),
+        mermaidSource: typeof entry.mermaid_source === "string" ? entry.mermaid_source : "",
+        isStreaming: false,
+        streamStatus: "complete",
+        createdAt: entry.created_at || "",
+      }));
+
+    if (!restored.length && preserveCurrentIfEmpty && messages.value.length) return;
+    messages.value = restored;
+    syncTutorFeedbackFromHistory(history);
+  }
+
+  async function hydrateLearningAssets(options = {}) {
+    await learningAssets.hydrate(sessionId.value);
+    restoreTutorHistory(options);
   }
 
   async function advanceCurrentSession(payload) {
@@ -431,6 +520,7 @@ export function useEduAgent() {
     currentUser.value = null;
     isLoggedIn.value = false;
     bootMode.value = "login";
+    learningAssets.reset();
     resetLearningState();
   }
 
@@ -463,6 +553,7 @@ export function useEduAgent() {
     await initSessionPath(sessionId.value);
     const state = await fetchCurrentSession();
     hydrateState(state);
+    await hydrateLearningAssets();
     currentNode.value = activePath.value.find((id) => (mastery.value[id] ?? 0) < 0.65) || activePath.value[0] || "";
     bootMode.value = "ready";
     refreshStatuses();
@@ -516,6 +607,7 @@ export function useEduAgent() {
 
       const state = await fetchCurrentSession();
       hydrateState(state);
+      await hydrateLearningAssets();
 
       if (activePath.value.length) {
         bootMode.value = "ready";
@@ -547,6 +639,8 @@ export function useEduAgent() {
       const result = await enrollCourse(courseIdInput);
       activeCourse.value = result.course;
       await loadUserCourses();
+      learningAssets.reset();
+      resetLearningState();
 
       const probeState = await fetchCurrentProbe();
       if (probeState.phase === "complete") {
@@ -576,6 +670,7 @@ export function useEduAgent() {
 
       const state = await fetchCurrentSession();
       hydrateState(state);
+      await hydrateLearningAssets();
       if (activePath.value.length) {
         bootMode.value = "ready";
         refreshStatuses();
@@ -605,6 +700,7 @@ export function useEduAgent() {
     bootMode.value = "loading";
     try {
       await resetSession(userId.value, courseId.value);
+      learningAssets.reset();
       resetLearningState();
       const probeState = await fetchCurrentProbe();
       probe.value = probeState.probe;
@@ -675,6 +771,9 @@ export function useEduAgent() {
     isLoadingNode.value = true;
     const evaluatedNodeId = currentNode.value;
     const previousMastery = mastery.value[evaluatedNodeId] ?? 0;
+    const evaluatedNodeResources = Array.isArray(resources.value[evaluatedNodeId])
+      ? [...resources.value[evaluatedNodeId]]
+      : [];
 
     try {
       const response = await submitSessionLearningEvent(sessionId.value, {
@@ -694,8 +793,21 @@ export function useEduAgent() {
         },
       });
       const state = await fetchCurrentSession();
-      hydrateState(state);
-      currentNode.value = currentNodeFromDto(state) || response.current_node_id || evaluatedNodeId;
+      hydrateState(state, { preservePathOrder: true });
+      // 提交后服务端可能已指向下一章；返回答题页前保留本章节点和资源。
+      if (evaluatedNodeResources.length) {
+        resources.value = {
+          ...resources.value,
+          [evaluatedNodeId]: evaluatedNodeResources,
+        };
+      }
+      try {
+        const cachedResources = await fetchCurrentNodeResources(evaluatedNodeId);
+        mergeNodeResources(evaluatedNodeId, resourceListFromResponse(cachedResources));
+      } catch {
+        // 已保留内存快照；缓存读取失败不应影响测验结果提交。
+      }
+      currentNode.value = evaluatedNodeId;
 
       const nextNodeId = response.next_node_id || currentNodeFromDto(state) || "";
       const responseLogs = logsFromDto(response, state);
@@ -723,15 +835,12 @@ export function useEduAgent() {
       }
 
       if (lastDiagnostic.value.advancedToNextNode) {
-        setInfo(`诊断通过，已推进到「${lastDiagnostic.value.nextNodeTitle || "下一节点"}」。`);
+        setInfo(`诊断通过，可以前往「${lastDiagnostic.value.nextNodeTitle || "下一节点"}」。`);
       } else {
         setInfo("诊断已记录，系统已根据答题证据更新当前节点掌握度。");
       }
       submission?.onRecorded?.(lastDiagnostic.value);
       quizStartedAt = Date.now();
-      if (lastDiagnostic.value.advancedToNextNode && currentNode.value) {
-        await refreshNodeResources(currentNode.value, { force: false, silent: true });
-      }
       return lastDiagnostic.value;
     } catch (error) {
       const message = error?.response?.data?.detail || error?.message || "提交诊断失败。";
@@ -855,7 +964,14 @@ export function useEduAgent() {
     messages.value = [
       ...messages.value,
       userMsg,
-      { id: assistantMsgId, role: "assistant", content: "", mermaidSource: "", isStreaming: true },
+      {
+        id: assistantMsgId,
+        role: "assistant",
+        content: "",
+        mermaidSource: "",
+        isStreaming: true,
+        streamStatus: "streaming",
+      },
     ];
 
     // Helper: patch the assistant message by id (avoids stale closure on assistantMsg object)
@@ -868,27 +984,106 @@ export function useEduAgent() {
     };
 
     let accumulated = "";
-
-    await streamSessionTutor(
-      sessionId.value,
-      { question: query.trim() },
-      {
-        onToken(token) {
-          accumulated += token;
-          patch({ content: accumulated });
-        },
-        onDone() {
-          patch({ isStreaming: false });
-          refreshStatuses();
-        },
-        onError() {
-          patch({
-            content: accumulated || "辅导服务暂时不可用。",
-            isStreaming: false,
-          });
-        },
+    let streamFailure = null;
+    let streamCompleted = false;
+    let transportClosed = false;
+    let idleTimeoutId = null;
+    let maxDurationTimeoutId = null;
+    let rejectStreamFailure;
+    const abortController = new AbortController();
+    const streamFailurePromise = new Promise((_, reject) => {
+      rejectStreamFailure = reject;
+    });
+    const stopStreamTimers = () => {
+      if (idleTimeoutId !== null) clearTimeout(idleTimeoutId);
+      if (maxDurationTimeoutId !== null) clearTimeout(maxDurationTimeoutId);
+      idleTimeoutId = null;
+      maxDurationTimeoutId = null;
+    };
+    const onStreamError = (error) => {
+      if (transportClosed || streamCompleted || streamFailure) return;
+      streamFailure = error instanceof Error ? error : new Error("辅导服务暂时不可用。");
+      patch({
+        content: accumulated || (streamFailure.status === 401
+          ? "登录状态已失效，请重新登录。"
+          : "发送失败，请重试。"),
+        isStreaming: false,
+        streamStatus: "error",
+        streamError: streamFailure.message,
+      });
+      abortController.abort(streamFailure);
+      rejectStreamFailure(streamFailure);
+    };
+    const armIdleTimeout = () => {
+      if (idleTimeoutId !== null) clearTimeout(idleTimeoutId);
+      idleTimeoutId = setTimeout(() => {
+        const error = new Error("辅导响应超时，请重试。");
+        error.name = "TimeoutError";
+        onStreamError(error);
+      }, TUTOR_STREAM_IDLE_TIMEOUT_MS);
+    };
+    const streamHandlers = {
+      signal: abortController.signal,
+      onToken(token) {
+        if (transportClosed || streamCompleted || streamFailure) return;
+        armIdleTimeout();
+        accumulated += token;
+        patch({ content: accumulated });
       },
-    );
+      onReset() {
+        if (transportClosed || streamCompleted || streamFailure) return;
+        armIdleTimeout();
+        accumulated = "";
+        patch({ content: "" });
+      },
+      onDone() {
+        if (transportClosed || streamCompleted || streamFailure) return;
+        streamCompleted = true;
+        patch({ isStreaming: false, streamStatus: "complete", streamError: "" });
+        upsertTutorFeedback({
+          question: displayQuery,
+          response: accumulated,
+          contextType,
+        });
+        refreshStatuses();
+        abortController.abort();
+      },
+      onError: onStreamError,
+    };
+
+    armIdleTimeout();
+    maxDurationTimeoutId = setTimeout(() => {
+      const error = new Error("辅导响应时间过长，请重试。");
+      error.name = "TimeoutError";
+      onStreamError(error);
+    }, TUTOR_STREAM_MAX_DURATION_MS);
+
+    try {
+      const transportPromise = Promise.resolve().then(() => streamSessionTutor(
+        sessionId.value,
+        {
+          question: query.trim(),
+          context_type: contextType,
+          code_snippet: codeSnippet,
+          error_message: errorMessage,
+        },
+        streamHandlers,
+      ));
+      await Promise.race([transportPromise, streamFailurePromise]);
+      if (!streamCompleted && !streamFailure) {
+        streamHandlers.onError(new Error("辅导连接意外结束，请重试。"));
+      }
+    } catch (error) {
+      streamHandlers.onError(error);
+    } finally {
+      stopStreamTimers();
+      transportClosed = true;
+      abortController.abort();
+    }
+
+    if (streamFailure) throw streamFailure;
+    await hydrateLearningAssets({ preserveCurrentIfEmpty: true });
+    return { status: "ok" };
   }
 
   function getCardLabel(type) {

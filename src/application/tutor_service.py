@@ -43,7 +43,11 @@ def _read_float_env(name: str, default: float) -> float:
 
 
 def _tutor_timeout_sec() -> float:
-    return _read_float_env("EDUAGENT_TUTOR_TIMEOUT_SEC", 12.0)
+    return _read_float_env("EDUAGENT_TUTOR_TIMEOUT_SEC", 30.0)
+
+
+def _tutor_max_tokens() -> int:
+    return _read_int_env("EDUAGENT_TUTOR_MAX_TOKENS", 1200)
 
 
 _TUTOR_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
@@ -61,32 +65,35 @@ _TUTOR_STREAM_USER_CAPACITY = KeyedConcurrencyLimiter(1)
 
 
 def _fallback_tutor_response(request: TutorRequest, node_id: str = "") -> Dict[str, object]:
-    title = get_node_title(node_id, node_id or "current node")
+    title = get_node_title(node_id, node_id or "当前知识点")
     text_explanation = (
         f"## {title}\n\n"
-        "The live tutor is taking longer than expected, so here is a focused fallback: "
-        f"break the question down, identify the key concept, and connect it to the current node. "
-        f"For your question, start by writing one example input, one expected output, and the rule that links them."
+        "智能辅导本次响应超时，先给你一个可继续推进的分析框架：\n\n"
+        f"- **你的问题**：{request.question}\n"
+        "- **先明确核心概念**：用一句话写出它解决什么问题，以及成立所需的关键条件。\n"
+        "- **再构造具体例子**：给出一个输入、预期输出，并逐步说明两者之间的规则。\n"
+        "- **最后检查边界情况**：尝试空输入、最小规模和容易混淆的反例。\n\n"
+        "你可以继续追问其中任意一步，辅导智能体会结合当前知识点展开说明。"
     )
     if request.context_type == "code_debug":
-        code_block = request.code_snippet or "(No code snippet was provided.)"
-        error_block = request.error_message or "(No runtime error message was provided.)"
+        code_block = request.code_snippet or "（未提供代码片段）"
+        error_block = request.error_message or "（未提供报错信息）"
         text_explanation = (
-            f"## {title}: debugging fallback\n\n"
-            f"Question: {request.question}\n\n"
-            "### Code under review\n"
+            f"## {title}：代码调试\n\n"
+            f"**你的问题**：{request.question}\n\n"
+            "### 待检查代码\n"
             f"```\n{code_block}\n```\n\n"
-            "### Reported error\n"
+            "### 报错信息\n"
             f"{error_block}\n\n"
-            "Trace the error from the smallest reproducible input and check the values immediately before the failing operation."
+            "智能辅导本次响应超时。请先用最小可复现输入运行代码，并检查报错位置之前各变量的实际值、类型和边界条件。"
         )
     return {
         "text_explanation": text_explanation,
         "mermaid_src": (
             "graph TD\n"
-            '    Q["Question"] --> C["Key concept"]\n'
-            '    C --> E["Example"]\n'
-            '    E --> R["Reasoning rule"]'
+            '    Q["问题"] --> C["核心概念"]\n'
+            '    C --> E["具体例子"]\n'
+            '    E --> R["推理规则"]'
         ),
         "video_hydration": None,
         "query": request.question,
@@ -98,7 +105,7 @@ def _fallback_tutor_response(request: TutorRequest, node_id: str = "") -> Dict[s
 def _blocked_tutor_payload(validation) -> Dict[str, object]:
     return {
         "tutor_response": {
-            "text_explanation": "Tutor question was blocked by validation.",
+            "text_explanation": "该问题未通过安全校验，请调整表述后重试。",
             "blocked": True,
             "validation": validation.to_contract_validation(),
         },
@@ -347,11 +354,11 @@ def _run_tutor_unlimited(
                 agent="Tutor",
                 stage="tutor_question",
                 status="success" if output_validation.passed else "error",
-                headline="Tutor response updated" if output_validation.passed else "Tutor response blocked",
+                headline="辅导回答已更新" if output_validation.passed else "辅导回答已拦截",
                 summary=(
-                    "The tutor answer passed validation."
+                    "辅导回答已通过内容校验。"
                     if output_validation.passed
-                    else "The raw tutor answer was blocked by validation."
+                    else "原始辅导回答未通过内容校验。"
                 ),
                 details_md=(state.tutor_response or {}).get("text_explanation", ""),
                 structured_data={
@@ -478,7 +485,7 @@ async def _stream_tutor_unlimited(
                 request.question,
                 tutor_request=request,
             ).get("tutor_response", {}) or {}
-            text = fallback.get("text_explanation", "") or "Tutor is temporarily unavailable."
+            text = fallback.get("text_explanation", "") or "辅导服务暂时不可用，请稍后重试。"
             for chunk in [text[i:i + 80] for i in range(0, len(text), 80)]:
                 yield {"event": "token", "data": json.dumps({"token": chunk}, ensure_ascii=False)}
                 await asyncio.sleep(0.02)
@@ -490,7 +497,7 @@ async def _stream_tutor_unlimited(
             stream_fallback = False
             try:
                 async with asyncio.timeout(_tutor_timeout_sec()):
-                    async for token in llm.chat_stream(messages):
+                    async for token in llm.chat_stream(messages, max_tokens=_tutor_max_tokens()):
                         if not token:
                             continue
                         if token.strip().startswith("[Stream error:"):
@@ -523,16 +530,14 @@ async def _stream_tutor_unlimited(
                             }
             except Exception as exc:
                 incr_metric("llm.timeout_total", operation="tutor_stream")
-                incr_metric("llm.fallback_total", operation="tutor_stream", fallback="run_tutor")
+                incr_metric("llm.fallback_total", operation="tutor_stream", fallback="local_template")
                 log_event("tutor.stream.fallback", level="warning", error=str(exc))
-                fallback = run_tutor(
-                    user_id,
-                    course_id,
-                    request.question,
-                    tutor_request=request,
-                    persist_history=False,
-                ).get("tutor_response", {}) or {}
-                text = fallback.get("text_explanation", "") or "Tutor is temporarily unavailable."
+                session = get_session(user_id, course_id)
+                fallback = _fallback_tutor_response(
+                    request,
+                    session.agent_state.current_node_id,
+                )
+                text = fallback.get("text_explanation", "") or "辅导服务暂时不可用，请稍后重试。"
                 full_text = [text]
                 stream_fallback = True
                 if emitted_text:

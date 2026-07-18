@@ -62,6 +62,9 @@ package-lock.json
 # Deploy packages
 *.tar.gz
 
+# Local data exports and backups
+backups/
+
 # Office temp files
 ~$*
 *~$*

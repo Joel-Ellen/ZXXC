@@ -4,6 +4,14 @@ const serviceMocks = vi.hoisted(() => ({
   streamSessionTutor: vi.fn(),
   submitSessionLearningEvent: vi.fn(async () => ({})),
 }));
+const assetMocks = vi.hoisted(() => ({
+  tutorHistory: [],
+  hydrate: vi.fn(async () => undefined),
+  read: vi.fn(() => null),
+  write: vi.fn(),
+  remove: vi.fn(),
+  reset: vi.fn(),
+}));
 
 vi.mock("../services/eduAgentApi", () => ({
   buildSessionId: (userId, courseId) => `${userId}:${courseId}`,
@@ -31,13 +39,7 @@ vi.mock("../services/eduAgentApi", () => ({
 }));
 
 vi.mock("../stores/learningAssets", () => ({
-  useLearningAssetsStore: () => ({
-    tutorHistory: [],
-    hydrate: vi.fn(async () => undefined),
-    read: vi.fn(() => null),
-    write: vi.fn(),
-    remove: vi.fn(),
-  }),
+  useLearningAssetsStore: () => assetMocks,
 }));
 
 import { useEduAgent } from "./useEduAgent";
@@ -52,8 +54,11 @@ describe("Tutor stream transport hardening", () => {
 
   beforeEach(() => {
     agent.messages.value = [];
+    agent.agentFeedback.value = [];
     serviceMocks.streamSessionTutor.mockReset();
     serviceMocks.submitSessionLearningEvent.mockClear();
+    assetMocks.tutorHistory = [];
+    assetMocks.hydrate.mockReset().mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -93,5 +98,49 @@ describe("Tutor stream transport hardening", () => {
     expect(assistant.isStreaming).toBe(false);
     expect(assistant.streamStatus).toBe("error");
     expect(serviceMocks.streamSessionTutor.mock.calls[0][2].signal.aborted).toBe(true);
+  });
+
+  it("restores persisted tutor history and exposes the latest answer in agent collaboration", async () => {
+    serviceMocks.streamSessionTutor.mockImplementationOnce(async (sessionId, payload, handlers) => {
+      handlers.onToken("二叉树由节点和边组成。");
+      assetMocks.tutorHistory = [
+        {
+          key: "tutor-1-user",
+          exchange_id: "tutor-1",
+          sequence: 0,
+          role: "user",
+          content: "解释二叉树",
+          context_type: "concept",
+        },
+        {
+          key: "tutor-1-assistant",
+          exchange_id: "tutor-1",
+          sequence: 1,
+          role: "assistant",
+          content: "二叉树由节点和边组成。",
+          context_type: "concept",
+        },
+      ];
+      handlers.onDone({ reference_count: 0 });
+    });
+
+    await expect(agent.sendTutorMessage("解释二叉树", "concept")).resolves.toEqual({ status: "ok" });
+
+    expect(assetMocks.hydrate).toHaveBeenCalledWith("demo_user:data_structures");
+    expect(agent.messages.value).toEqual([
+      expect.objectContaining({ role: "user", content: "解释二叉树", isStreaming: false }),
+      expect.objectContaining({ role: "assistant", content: "二叉树由节点和边组成。", isStreaming: false }),
+    ]);
+    expect(agent.agentFeedback.value[0]).toMatchObject({
+      agent: "Tutor",
+      stage: "AI 问答智能体",
+      status: "success",
+      details_md: "二叉树由节点和边组成。",
+    });
+    expect(serviceMocks.streamSessionTutor).toHaveBeenCalledWith(
+      "demo_user:data_structures",
+      expect.objectContaining({ question: "解释二叉树", context_type: "concept" }),
+      expect.any(Object),
+    );
   });
 });
