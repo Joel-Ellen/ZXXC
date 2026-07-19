@@ -6,6 +6,7 @@ import pytest
 
 from src.adapters.state_to_domain import resource_contract_from_card
 from src.resource_generation import CARD_TYPES, ResourceContext, ResourceGenerator, TEMPLATE_NOTICE, payload_model_for, validate_resource_payload
+from src.resource_generation.prompts import build_supporting_bundle_messages
 from src.state.agent_state import ResourceCard
 from src.validation.language import is_chinese_learning_content
 
@@ -44,6 +45,50 @@ def test_local_templates_validate_against_all_shared_card_schemas(
     assert validation.valid, validation.issues
     assert generated.source == "template"
     assert generated.body_markdown.startswith(TEMPLATE_NOTICE)
+
+
+def test_question_bank_prompt_is_isolated_from_interactive_exercise(
+    generation_context: ResourceContext,
+) -> None:
+    context = replace(
+        generation_context,
+        question_bank_status="matched",
+        question_bank_candidates=[{
+            "id": "bank-secret-boundary",
+            "text": "队列在空队列边界下如何处理出队？",
+        }],
+    )
+
+    class CapturingLlm:
+        provider = "test"
+        model = "capture"
+
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        def chat_sync(self, messages, **_kwargs):
+            self.prompts.append(messages[1]["content"])
+            return {"content": "{}"}
+
+    llm = CapturingLlm()
+    generated = ResourceGenerator().generate_bundle(
+        llm,
+        context,
+        ["interactive_exercise", "diagnostic_quiz"],
+    )
+
+    assert set(generated) == {"interactive_exercise", "diagnostic_quiz"}
+    assert len(llm.prompts) == 2
+    assert sum("bank-secret-boundary" in prompt for prompt in llm.prompts) == 1
+    exercise_prompt = next(
+        prompt for prompt in llm.prompts if "bank-secret-boundary" not in prompt
+    )
+    assert '"question_bank"' not in exercise_prompt
+    with pytest.raises(ValueError, match="diagnostic_quiz_prompt_must_be_isolated"):
+        build_supporting_bundle_messages(
+            context,
+            ["interactive_exercise", "diagnostic_quiz"],
+        )
 
 
 @pytest.mark.parametrize("card_type", CARD_TYPES)
@@ -115,7 +160,14 @@ def test_resource_contract_redacts_server_owned_answer_indexes(monkeypatch: pyte
         resource_id="quiz-1",
         node_id="N01",
         card_type="diagnostic_quiz",
-        content="## Queue quiz",
+        content=(
+            "## Queue quiz\n\n"
+            "```json\n"
+            '{"answer_index":0,"distractor_error_tags":{"1":"wrong"},'
+            '"explanation":"FIFO removes the earliest item",'
+            '"source_answer_label":"A"}\n'
+            "```"
+        ),
         metadata={
             "questions": [
                 {
@@ -124,6 +176,11 @@ def test_resource_contract_redacts_server_owned_answer_indexes(monkeypatch: pyte
                     "options": ["FIFO", "LIFO", "random", "sorted"],
                     "answer_index": 0,
                     "explanation": "FIFO removes the earliest item.",
+                    "distractor_error_tags": {
+                        "1": "混淆先进先出与后进先出",
+                        "2": "误认为访问顺序随机",
+                        "3": "误认为队列自动排序",
+                    },
                 }
             ],
             "nested_answer_data": {
@@ -138,8 +195,14 @@ def test_resource_contract_redacts_server_owned_answer_indexes(monkeypatch: pyte
 
     assert card.metadata["questions"][0]["answer_index"] == 0
     assert "answer_index" not in public_question
+    assert "distractor_error_tags" not in public_question
+    assert "explanation" not in public_question
     assert "correct_answer" not in contract.structured_payload["nested_answer_data"]
     assert "answerIndex" not in contract.structured_payload["nested_answer_data"]
+    assert "answer_index" not in contract.body_markdown
+    assert "distractor_error_tags" not in contract.body_markdown
+    assert "FIFO removes the earliest item" not in contract.body_markdown
+    assert "source_answer_label" not in contract.body_markdown
 
 
 def test_legacy_resource_read_gets_a_complete_provenance_contract(monkeypatch: pytest.MonkeyPatch) -> None:

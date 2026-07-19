@@ -76,7 +76,7 @@
       :active-course="activeCourse"
       :enrolled-courses="enrolledCourses"
       @select-node="loadNode"
-      @submit-quiz="submitQuiz"
+      @submit-quiz="submitWorkspaceQuiz"
       @send-tutor="onSendTutorMessage"
       @submit-probe="submitProbe"
       @logout="handleLogout"
@@ -186,6 +186,26 @@ async function onSendTutorMessage(payload) {
   } else {
     await sendTutorMessage(payload.text, payload.contextType, payload.codeSnippet, payload.errorMessage);
   }
+}
+
+async function submitWorkspaceQuiz(submission) {
+  let result;
+  try {
+    result = await submitQuiz(submission);
+  } catch (error) {
+    try {
+      submission?.onFailure?.(error);
+    } catch (callbackError) {
+      console.error("quiz onFailure callback failed:", callbackError);
+    }
+    return null;
+  }
+  try {
+    submission?.onRecorded?.(result);
+  } catch (callbackError) {
+    console.error("quiz onRecorded callback failed:", callbackError);
+  }
+  return result;
 }
 
 function onSwitchCourse(courseId) {

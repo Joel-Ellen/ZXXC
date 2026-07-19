@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from src.application import resource_service
 from src.application import _common
+from src.api_models.learning_event import LearningEventRequest
 from src.database.resource_generation_repo import (
     MemoryResourceGenerationRepo,
     ResourceGenerationRepo,
     _MemoryGenerationStore,
 )
 from src.state.agent_state import ResourceCard
+from src.orchestration_core import _verify_quiz_completion
 from tests.helpers import FakeValidationPipeline, disable_persistence, install_fake_runtime
 
 
@@ -63,6 +65,81 @@ def test_get_resources_serves_a_validated_generic_cache_without_creating_a_sessi
     assert result["resources"][0]["generation"]["cache_hit"] is True
     assert result["resources"][0]["generation"]["cache_scope"] == "course_base"
     assert result["resources"][0]["personalization_basis"]["cognitive_style"] == "textual"
+
+
+def test_cached_quiz_is_restored_by_generation_before_it_can_be_graded(monkeypatch) -> None:
+    runtime = install_fake_runtime(monkeypatch)
+    disable_persistence(monkeypatch)
+    monkeypatch.setattr(
+        resource_service,
+        "get_validation_pipeline",
+        lambda: FakeValidationPipeline(),
+    )
+    repo = MemoryResourceGenerationRepo(store=_MemoryGenerationStore())
+
+    source = resource_service.request_generation(
+        "cache-quiz-source",
+        "course1",
+        "N01",
+        card_types=["diagnostic_quiz"],
+        submit=False,
+        repo=repo,
+    )
+    resource_service.run_generation_job(source["job_id"], repo=repo)
+
+    cold_read = resource_service.get_node_resources(
+        "cache-quiz-reader",
+        "course1",
+        "N01",
+        card_types=["diagnostic_quiz"],
+        repo=repo,
+    )
+
+    assert runtime.peek_session("cache-quiz-reader", "course1") is None
+    assert cold_read["resources"] == []
+    assert cold_read["missing_card_types"] == ["diagnostic_quiz"]
+
+    restore = resource_service.request_generation(
+        "cache-quiz-reader",
+        "course1",
+        "N01",
+        card_types=["diagnostic_quiz"],
+        submit=False,
+        repo=repo,
+    )
+    resource_service.run_generation_job(restore["job_id"], repo=repo)
+    state = runtime.get_session("cache-quiz-reader", "course1").agent_state
+    card = next(
+        card
+        for card in state.generated_resources["N01"]
+        if card.card_type == "diagnostic_quiz"
+    )
+    questions = card.metadata["structured_payload"]["questions"]
+    event = LearningEventRequest.model_validate({
+        "event_type": "lesson_completed",
+        "node_id": "N01",
+        "resource_id": card.resource_id,
+        "result": {
+            "evidence_type": "diagnostic_quiz",
+            "answers": [
+                {
+                    "question_id": question["id"],
+                    "answer_index": question["answer_index"],
+                }
+                for question in questions
+            ],
+        },
+    })
+
+    accepted, score, reason, _evidence = _verify_quiz_completion(
+        state,
+        "N01",
+        event,
+    )
+
+    assert accepted is True
+    assert score == 1.0
+    assert reason == "verified_diagnostic_quiz"
 
 
 def test_personalized_generation_never_populates_the_course_base_cache(monkeypatch) -> None:

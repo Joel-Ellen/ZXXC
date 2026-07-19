@@ -106,6 +106,15 @@ def resource_contract_from_card(card: ResourceCard) -> ResourceContract:
                 "personalization_basis", "cache_basis", "created_at", "generated_at",
             }
         })
+    body_markdown = card.content
+    if card.card_type == "diagnostic_quiz":
+        # Existing persisted cards may predate structured generation and can
+        # contain raw provider Markdown. Re-render from the already-redacted
+        # public payload so answer keys cannot survive through body_markdown.
+        body_markdown = _diagnostic_public_markdown(
+            structured_payload,
+            generation_payload,
+        )
     personalization_basis = {"cognitive_style": card.cognitive_style}
     if isinstance(metadata.get("personalization_basis"), dict):
         personalization_basis.update(metadata["personalization_basis"])
@@ -143,7 +152,7 @@ def resource_contract_from_card(card: ResourceCard) -> ResourceContract:
         node_id=card.node_id,
         resource_type=card.card_type,
         title=str(title),
-        body_markdown=card.content,
+        body_markdown=body_markdown,
         structured_payload=structured_payload,
         artifacts=artifacts,
         difficulty=card.difficulty,
@@ -169,20 +178,85 @@ _ANSWER_KEY_FIELDS = {
     "correctIndex",
     "selected_option_index",
     "selectedOptionIndex",
+    "distractor_error_tags",
+    "distractorErrorTags",
+    "source_answer_label",
+    "sourceAnswerLabel",
+}
+
+_PRE_SUBMISSION_QUESTION_FIELDS = {
+    "explanation",
+    "answer_explanation",
+    "answerExplanation",
 }
 
 
 def _redact_answer_keys(value: Any) -> Any:
     """Keep grading keys in server state while removing them from API contracts."""
     if isinstance(value, dict):
+        is_graded_question = (
+            isinstance(value.get("options"), list)
+            and ("prompt" in value or "question" in value)
+        )
         return {
             key: _redact_answer_keys(item)
             for key, item in value.items()
             if key not in _ANSWER_KEY_FIELDS
+            and not (is_graded_question and key in _PRE_SUBMISSION_QUESTION_FIELDS)
         }
     if isinstance(value, list):
         return [_redact_answer_keys(item) for item in value]
     return value
+
+
+def _diagnostic_public_markdown(
+    structured_payload: Dict[str, Any],
+    generation: Dict[str, Any],
+) -> str:
+    from src.resource_generation import TEMPLATE_NOTICE
+    from src.resource_generation.prompts import render_markdown
+
+    body_markdown = render_markdown("diagnostic_quiz", structured_payload)
+    if generation.get("source") == "template":
+        body_markdown = TEMPLATE_NOTICE + body_markdown
+    return body_markdown
+
+
+def public_resource_contract_dict(
+    value: Any,
+    *,
+    resource_type: str = "",
+) -> Dict[str, Any]:
+    """Redact a persisted public-contract snapshot, including legacy bodies."""
+    safe = _redact_answer_keys(value)
+    if not isinstance(safe, dict):
+        return {}
+    normalized_type = str(
+        resource_type
+        or safe.get("resource_type")
+        or safe.get("card_type")
+        or ""
+    )
+    if normalized_type != "diagnostic_quiz":
+        return safe
+    metadata = safe.get("metadata") if isinstance(safe.get("metadata"), dict) else {}
+    structured_payload = safe.get("structured_payload")
+    if not isinstance(structured_payload, dict):
+        structured_payload = metadata.get("structured_payload")
+    if not isinstance(structured_payload, dict):
+        structured_payload = metadata
+    generation = safe.get("generation")
+    if not isinstance(generation, dict):
+        generation = metadata.get("generation")
+    if not isinstance(generation, dict):
+        generation = {}
+    safe["structured_payload"] = structured_payload
+    safe["body_markdown"] = _diagnostic_public_markdown(
+        structured_payload,
+        generation,
+    )
+    safe.pop("content", None)
+    return safe
 
 
 def learning_resource_from_card(card: ResourceCard) -> LearningResource:

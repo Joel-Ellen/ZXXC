@@ -11,6 +11,7 @@ from src.application import resource_service
 from src.orchestration_core import run_official_learning_step
 from src.resource_generation import TEMPLATE_NOTICE
 from tests.helpers import FakeValidationPipeline, disable_persistence, install_fake_runtime
+from src.infrastructure.path_planner import KnowledgeNode
 
 
 def test_resource_service_generates_only_requested_card_type(monkeypatch) -> None:
@@ -85,6 +86,64 @@ def test_resource_service_rejects_unknown_card_type(monkeypatch) -> None:
     )
 
     assert result["status_code"] == 400
+
+
+def test_resource_service_rejects_node_outside_server_course_catalog(monkeypatch) -> None:
+    runtime = install_fake_runtime(monkeypatch)
+    disable_persistence(monkeypatch)
+
+    class Catalog:
+        @staticmethod
+        def get_local_graph(course_id):
+            return ([KnowledgeNode(node_id="N01", course_id=course_id, title="节点一")], [])
+
+        @staticmethod
+        def get_node_title(node_id):
+            return node_id
+
+    runtime.kg = Catalog()
+
+    result = resource_service.request_generation(
+        "invalid-node-user",
+        "course1",
+        "N99",
+        card_types=["diagnostic_quiz"],
+        submit=False,
+    )
+
+    assert result["status_code"] == 404
+    assert result["node_id"] == "N99"
+
+
+def test_resource_service_rejects_node_resolved_from_another_course(monkeypatch) -> None:
+    runtime = install_fake_runtime(monkeypatch)
+    disable_persistence(monkeypatch)
+
+    class CrossCourseCatalog:
+        @staticmethod
+        def get_node_by_id(node_id, course_id):
+            return KnowledgeNode(
+                node_id=node_id,
+                course_id="course2",
+                title="其他课程节点",
+            )
+
+        @staticmethod
+        def get_node_title(node_id):
+            return node_id
+
+    runtime.kg = CrossCourseCatalog()
+
+    result = resource_service.request_generation(
+        "cross-course-node-user",
+        "course1",
+        "N01",
+        card_types=["diagnostic_quiz"],
+        submit=False,
+    )
+
+    assert result["status_code"] == 404
+    assert result["node_id"] == "N01"
 
 
 def test_template_only_resource_response_is_explicitly_labelled(monkeypatch) -> None:
@@ -313,6 +372,7 @@ def test_forced_quiz_refresh_allows_one_new_scored_completion(monkeypatch) -> No
     first_card = state.generated_resources["N01"][0]
     first = run_official_learning_step(session, behavior=completion_payload(first_card), runtime=runtime)
     assert first.mastery_updated is True
+    assert resource_service.drain_generation_workers(timeout_seconds=15.0)
 
     resource_service.generate_current_node_resources(
         "resource-retry-user",

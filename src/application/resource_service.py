@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import concurrent.futures
-import json
 import hashlib
+import hmac
 import inspect
+import json
 import os
 import re
+import secrets
 import threading
 import time
 import uuid
@@ -18,7 +20,10 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, Iterator, Optional
 
 from src.adapters.domain_to_response import resource_response
-from src.adapters.state_to_domain import resource_contract_from_card
+from src.adapters.state_to_domain import (
+    public_resource_contract_dict,
+    resource_contract_from_card,
+)
 from src.database.resource_generation_repo import (
     ResourceAdmissionError,
     ResourceGenerationRepo,
@@ -78,6 +83,34 @@ from ._common import (
 # 与生成器共用同一段模板回退提示，保证 startswith 前缀判断不会漂移。
 _TEMPLATE_FALLBACK_NOTICE = TEMPLATE_NOTICE
 _COURSE_BASE_CACHE_POLICY = "generic-context-v1"
+_QUIZ_SHUFFLE_EPHEMERAL_KEY = secrets.token_bytes(32)
+
+
+def _server_option_index(
+    *,
+    node_id: str,
+    revision: int,
+    item_index: int,
+    item_id: str,
+) -> int:
+    configured_key = str(
+        os.environ.get("EDUAGENT_QUIZ_SHUFFLE_SECRET") or ""
+    ).encode("utf-8")
+    shuffle_key = (
+        configured_key
+        if len(configured_key) >= 32
+        else _QUIZ_SHUFFLE_EPHEMERAL_KEY
+    )
+    message = "|".join((
+        str(node_id),
+        str(revision),
+        str(item_index),
+        str(item_id),
+    )).encode("utf-8")
+    return int.from_bytes(
+        hmac.new(shuffle_key, message, hashlib.sha256).digest()[:8],
+        "big",
+    ) % 4
 
 _KNOWN_SEMANTIC_KEYWORDS: Dict[tuple[str, str], tuple[str, ...]] = {
     ("data_structures", "N01"): (
@@ -107,10 +140,12 @@ def _canonical_node_binding(runtime: Any, course_id: str, node_id: str) -> Dict[
     """Resolve the node identity from the server catalog, never model output."""
     kg = getattr(runtime, "kg", None)
     canonical_node = None
+    catalog_checked = False
     get_local_graph = getattr(kg, "get_local_graph", None)
     if callable(get_local_graph):
         try:
             nodes, _ = get_local_graph(course_id)
+            catalog_checked = True
             canonical_node = next(
                 (node for node in nodes if str(getattr(node, "node_id", "")) == node_id),
                 None,
@@ -118,18 +153,30 @@ def _canonical_node_binding(runtime: Any, course_id: str, node_id: str) -> Dict[
         except Exception:
             canonical_node = None
 
-    if canonical_node is None:
+    # A successful course-graph lookup is authoritative, including when the
+    # requested node is absent. Falling back to a global node lookup in that
+    # case could bind a same-named node from another course.
+    if canonical_node is None and not catalog_checked:
         get_node_by_id = getattr(kg, "get_node_by_id", None)
         if callable(get_node_by_id):
             try:
                 canonical_node = get_node_by_id(node_id, course_id)
+                catalog_checked = True
             except TypeError:
-                canonical_node = get_node_by_id(node_id)
+                try:
+                    canonical_node = get_node_by_id(node_id)
+                    catalog_checked = True
+                except Exception:
+                    canonical_node = None
             except Exception:
                 canonical_node = None
 
     title = str(getattr(canonical_node, "title", "") or "").strip()
     canonical_course_id = str(getattr(canonical_node, "course_id", "") or course_id).strip()
+    belongs_to_course = (
+        canonical_node is not None
+        and canonical_course_id == str(course_id).strip()
+    )
     if not title:
         get_title = getattr(kg, "get_node_title", None)
         if callable(get_title):
@@ -152,6 +199,8 @@ def _canonical_node_binding(runtime: Any, course_id: str, node_id: str) -> Dict[
         "node_id": node_id,
         "title": title,
         "keywords": keywords,
+        "catalog_checked": catalog_checked,
+        "exists": belongs_to_course,
     }
 
 
@@ -296,12 +345,18 @@ def _diagnostic_quiz_metadata(
             f"{title} 只适用于唯一固定模板",
             "只要记住术语就可以忽略条件与边界",
         ]
-        correct_index = (sum(ord(char) for char in node_id) + index) % 4
+        question_id = f"{node_id}-q{index}"
+        correct_index = _server_option_index(
+            node_id=node_id,
+            revision=revision,
+            item_index=index,
+            item_id=question_id,
+        )
         options = list(distractors)
         options.insert(correct_index, correct_option)
         questions.append(
             {
-                "id": f"{node_id}-q{index}",
+                "id": question_id,
                 "prompt": f"关于 {title}，下列哪项最符合当前学习材料的 {suffix}？",
                 "options": options,
                 "answer_index": correct_index,
@@ -341,7 +396,13 @@ def _interactive_exercise_metadata(
         "直接套用固定模板，并忽略不符合预期的边界输入",
         "先查看答案，再把结论原样复述为自己的推导",
     ]
-    correct_index = (sum(ord(char) for char in node_id) + revision) % 4
+    question_id = f"{node_id}-targeted-practice-q1-v{revision}"
+    correct_index = _server_option_index(
+        node_id=node_id,
+        revision=revision,
+        item_index=1,
+        item_id=question_id,
+    )
     options = list(distractors)
     options.insert(correct_index, correct_option)
     return {
@@ -353,7 +414,7 @@ def _interactive_exercise_metadata(
         "practice_revision": revision,
         "questions": [
             {
-                "id": f"{node_id}-targeted-practice-q1-v{revision}",
+                "id": question_id,
                 "prompt": f"完成 {title} 的定向练习时，哪种做法能形成可复测的解题依据？",
                 "options": options,
                 "answer_index": correct_index,
@@ -1409,6 +1470,12 @@ def get_node_resources(
             context = _cache_read_context(user_id, course_id, target_node, state, locale=locale)
             repository = repo or get_resource_generation_repo()
             for requested_type in missing_types:
+                if requested_type == "diagnostic_quiz":
+                    # A quiz can only be graded from its server-owned copy in
+                    # session state. A read-only cache hit has no such binding;
+                    # leave it missing so the generation POST restores and
+                    # persists the full card before it is shown.
+                    continue
                 cached = _read_cached_card_for_get(
                     repository,
                     context,
@@ -1447,6 +1514,31 @@ def get_generation_job(
     return job
 
 
+def _public_generation_events(
+    events: Iterable[Dict[str, Any]],
+) -> list[Dict[str, Any]]:
+    public_events: list[Dict[str, Any]] = []
+    for raw_event in events:
+        event = dict(raw_event) if isinstance(raw_event, dict) else {}
+        if event.get("event_type") == "card_ready":
+            payload = event.get("payload")
+            payload = dict(payload) if isinstance(payload, dict) else {}
+            card = payload.get("card")
+            if isinstance(card, dict):
+                payload["card"] = public_resource_contract_dict(
+                    card,
+                    resource_type=str(
+                        payload.get("card_type")
+                        or card.get("resource_type")
+                        or card.get("card_type")
+                        or ""
+                    ),
+                )
+            event["payload"] = payload
+        public_events.append(event)
+    return public_events
+
+
 def list_generation_events(
     job_id: str,
     *,
@@ -1466,7 +1558,7 @@ def list_generation_events(
         limit=limit,
     )
     if events:
-        return events
+        return _public_generation_events(events)
     if wake_wait_seconds is None:
         try:
             wake_wait_seconds = float(
@@ -1487,10 +1579,12 @@ def list_generation_events(
     )
     # Redis is only a hint. Always replay the authoritative PostgreSQL ledger,
     # including after timeout or notifier failure.
-    return repository.list_events(
-        str(job_id),
-        after_event_id=after_event_id,
-        limit=limit,
+    return _public_generation_events(
+        repository.list_events(
+            str(job_id),
+            after_event_id=after_event_id,
+            limit=limit,
+        )
     )
 
 
@@ -1710,7 +1804,7 @@ def request_generation(
 
     runtime = get_runtime()
     context_started = time.perf_counter()
-    _binding, context = _generation_context(
+    binding, context = _generation_context(
         runtime,
         state,
         course_id,
@@ -1718,6 +1812,12 @@ def request_generation(
         locale,
         allow_remote_retrieval=False,
     )
+    if binding.get("catalog_checked") and not binding.get("exists"):
+        return {
+            "error": "学习节点不存在或不属于当前课程。",
+            "status_code": 404,
+            "node_id": target_node,
+        }
     observe_metric("resource.generation.context_ms", round((time.perf_counter() - context_started) * 1000, 3))
     existing_cards = [
         card
@@ -2192,7 +2292,6 @@ def _generate_phase(
 def _quiz_payload_with_stable_answers(payload: Dict[str, Any], node_id: str, revision: int) -> Dict[str, Any]:
     result = dict(payload)
     questions = []
-    seed = sum(ord(char) for char in node_id) + revision
     for index, value in enumerate(result.get("questions", []), start=1):
         question = dict(value) if isinstance(value, dict) else value
         if not isinstance(question, dict):
@@ -2204,11 +2303,32 @@ def _quiz_payload_with_stable_answers(payload: Dict[str, Any], node_id: str, rev
         except (TypeError, ValueError):
             original = 0
         if len(options) == 4 and 0 <= original < 4:
-            desired = (seed + index) % 4
-            correct = options.pop(original)
-            options.insert(desired, correct)
-            question["options"] = options
+            desired = _server_option_index(
+                node_id=node_id,
+                revision=revision,
+                item_index=index,
+                item_id=str(question.get("id") or ""),
+            )
+            old_order = [option_index for option_index in range(4) if option_index != original]
+            old_order.insert(desired, original)
+            old_to_new = {
+                old_index: new_index
+                for new_index, old_index in enumerate(old_order)
+            }
+            question["options"] = [options[old_index] for old_index in old_order]
             question["answer_index"] = desired
+            raw_tags = question.get("distractor_error_tags")
+            if isinstance(raw_tags, dict):
+                remapped_tags: Dict[str, Any] = {}
+                for raw_index, tag in raw_tags.items():
+                    try:
+                        old_index = int(raw_index)
+                    except (TypeError, ValueError):
+                        continue
+                    if old_index == original or old_index not in old_to_new:
+                        continue
+                    remapped_tags[str(old_to_new[old_index])] = tag
+                question["distractor_error_tags"] = remapped_tags
         questions.append(question)
     result["questions"] = questions
     return result
@@ -2229,10 +2349,13 @@ def _resource_card_from_generated(
     if card_type == "diagnostic_quiz":
         payload = _quiz_payload_with_stable_answers(payload, context.node_id, quiz_revision)
     # Older extension runtimes can still return Markdown without the shared
-    # structured payload. Preserve it long enough for the local semantic gate
-    # to reject a wrong-topic response; modern runtime paths always render
-    # from the validated payload below.
-    if generated.fallback_reason == "legacy_unstructured_output":
+    # structured payload. Non-graded cards preserve it for the semantic gate;
+    # quizzes always render from the server-owned structured fallback so raw
+    # provider text can never carry answer keys into the public body.
+    if (
+        generated.fallback_reason == "legacy_unstructured_output"
+        and card_type != "diagnostic_quiz"
+    ):
         body_markdown = generated.body_markdown
     else:
         body_markdown = render_markdown(card_type, payload)
@@ -2270,10 +2393,29 @@ def _resource_card_from_generated(
             "cognitive_style": context.cognitive_style,
         },
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "question_bank": {
+            "status": context.question_bank_status,
+            "collection_version": context.question_bank_version,
+            "quiz_revision": context.question_bank_revision,
+            "candidate_ids": [
+                str(candidate.get("id") or "")
+                for candidate in context.question_bank_candidates
+                if isinstance(candidate, dict) and str(candidate.get("id") or "")
+            ],
+            "issue": context.question_bank_issue,
+        },
     }
     if card_type == "diagnostic_quiz":
         metadata["quiz_revision"] = quiz_revision
         metadata["questions"] = payload.get("questions", [])
+        metadata["question_set_digest"] = hashlib.sha256(
+            json.dumps(
+                payload.get("questions", []),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
     elif card_type == "interactive_exercise":
         if not context.content_version.startswith("resource-v4"):
             metadata.update(_interactive_exercise_metadata(context.node_id, str(binding["title"])))
@@ -2288,8 +2430,14 @@ def _resource_card_from_generated(
             "starter_code": practice["starter_code"],
         })
     resource_id = f"{context.node_id}_{card_type}_supp"
-    if card_type == "diagnostic_quiz" and quiz_revision > 1:
-        resource_id = f"{resource_id}_r{quiz_revision}"
+    if card_type == "diagnostic_quiz":
+        if context.question_bank_version:
+            bank_tag = hashlib.sha256(
+                context.question_bank_version.encode("utf-8")
+            ).hexdigest()[:10]
+            resource_id = f"{resource_id}_qb{bank_tag}"
+        if quiz_revision > 1:
+            resource_id = f"{resource_id}_r{quiz_revision}"
     return ResourceCard(
         resource_id=resource_id,
         node_id=context.node_id,
@@ -2613,6 +2761,22 @@ def _run_claimed_generation_job(
                 locale,
                 content_version=str(job.get("pipeline_version") or ""),
             )
+            expected_knowledge_version = str(
+                job.get("knowledge_index_version") or ""
+            )
+            if (
+                expected_knowledge_version
+                and context.knowledge_index_version != expected_knowledge_version
+            ):
+                return require_lease(repository.mark_failed(
+                    str(job_id),
+                    {
+                        "code": "knowledge_index_version_changed",
+                        "expected": expected_knowledge_version,
+                        "actual": context.knowledge_index_version,
+                    },
+                    owner_id=lease_owner,
+                ))
             observe_metric("resource.generation.context_ms", round((time.perf_counter() - context_started) * 1000, 3))
             requested = [card_type for card_type in job.get("card_types", []) if card_type in CARD_TYPES]
             force = bool(job.get("force"))
@@ -2893,18 +3057,11 @@ def _run_claimed_generation_job(
         if supporting:
             transition_pipeline("supporting")
             model_started = time.perf_counter()
-            supporting_call_cost = (
-                2
-                if {
-                    "code_snippet",
-                    "video_summary",
-                }.intersection(supporting)
-                and {
-                    "interactive_exercise",
-                    "diagnostic_quiz",
-                }.intersection(supporting)
-                else 1
-            )
+            supporting_call_cost = sum((
+                bool({"code_snippet", "video_summary"}.intersection(supporting)),
+                "interactive_exercise" in supporting,
+                "diagnostic_quiz" in supporting,
+            ))
             if external_generation_allowed(supporting_call_cost):
                 generated_cards = _generate_phase(runtime, context, supporting)
                 generation_calls_used += supporting_call_cost

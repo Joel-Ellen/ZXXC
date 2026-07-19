@@ -41,7 +41,12 @@ def test_verified_completion_enqueues_missing_resources_without_sync_generation(
             metadata={
                 "structured_payload": {
                     "questions": [
-                        {"id": "N01-q1", "answer_index": 1},
+                        {
+                            "id": "N01-q1",
+                            "prompt": "哪项描述符合当前节点？",
+                            "options": ["选项 A", "选项 B", "选项 C", "选项 D"],
+                            "answer_index": 1,
+                        },
                     ]
                 }
             },

@@ -295,7 +295,53 @@ def evaluate_resource_quality(
             blind = (diagnostic_verifier or DiagnosticBlindVerifierClient()).verify(
                 questions
             )
-            if float(blind.get("agreement") or 0.0) < 0.98:
+            blind_answers = blind.get("answers") if isinstance(blind, dict) else None
+            blind_by_id: dict[str, int] = {}
+            if isinstance(blind_answers, list):
+                for answer in blind_answers:
+                    if not isinstance(answer, dict):
+                        continue
+                    question_id = str(answer.get("id") or answer.get("question_id") or "").strip()
+                    selected_index = answer.get(
+                        "selected_index",
+                        answer.get("answer_index"),
+                    )
+                    if (
+                        not question_id
+                        or isinstance(selected_index, bool)
+                        or not isinstance(selected_index, int)
+                    ):
+                        continue
+                    blind_by_id[question_id] = selected_index
+            expected_by_id = {
+                str(question.get("id") or ""): question.get("answer_index")
+                for question in questions
+            }
+            protocol_supported = (
+                isinstance(blind_answers, list)
+                and str(blind.get("protocol_version") or "")
+                == "diagnostic-blind-v2"
+            )
+            answers_match = (
+                protocol_supported
+                and len(blind_answers) == len(expected_by_id)
+                and set(blind_by_id) == set(expected_by_id)
+                and all(
+                    blind_by_id[question_id] == expected_index
+                    for question_id, expected_index in expected_by_id.items()
+                )
+            )
+            if not protocol_supported:
+                issues.append("diagnostic_blind_verifier_protocol_unsupported")
+                is_server_template = (
+                    payload.get("quality_profile", {}).get("generation_source")
+                    == "template"
+                )
+                hard_fail = hard_fail or not is_server_template
+            elif (
+                float(blind.get("agreement") or 0.0) < 0.98
+                or not answers_match
+            ):
                 issues.append("diagnostic_answer_inconsistent")
                 hard_fail = True
         except ServiceUnavailable:
@@ -318,10 +364,32 @@ def evaluate_resource_quality(
         total_distractor_count = 0
         for question in questions:
             options = question.get("options", [])
-            for idx in range(1, len(options)):
+            answer_index = question.get("answer_index")
+            for idx in range(len(options)):
+                if idx == answer_index:
+                    continue
                 total_distractor_count += 1
                 if _GENERIC_DISTRACTOR_RE.search(str(options[idx])):
                     generic_distractor_count += 1
+        known_bank_ids = {
+            str(candidate.get("id") or "")
+            for candidate in context.question_bank_candidates
+            if isinstance(candidate, dict) and str(candidate.get("id") or "")
+        }
+        cited_bank_ids = {
+            str(source_id)
+            for question in questions
+            for source_id in question.get("source_question_ids", [])
+            if isinstance(question, dict) and str(source_id)
+        }
+        if cited_bank_ids - known_bank_ids:
+            issues.append("diagnostic_question_bank_source_unknown")
+            hard_fail = True
+        elif known_bank_ids and not cited_bank_ids:
+            # The quiz remains valid when every raw candidate is unsuitable,
+            # but provenance records that generation did not use the supplied
+            # bank material so operators can monitor coverage.
+            issues.append("diagnostic_question_bank_unused")
         if generic_distractor_count > 0 and total_distractor_count > 0:
             issues.append("diagnostic_generic_distractors")
             if generic_distractor_count / total_distractor_count > 0.5:
@@ -351,6 +419,7 @@ def evaluate_resource_quality(
         for code in (
             "sandbox_unavailable",
             "diagnostic_blind_verifier_unavailable",
+            "diagnostic_blind_verifier_protocol_unsupported",
             "critical_nli_unavailable",
         )
     ):
@@ -376,8 +445,10 @@ def evaluate_resource_quality(
     )
     if hard_fail or score < 75:
         gate_status = "failed"
-    elif context.evidence_status == "degraded" or any(
-        code.endswith("_unavailable") for code in issues
+    elif (
+        context.evidence_status == "degraded"
+        or "diagnostic_blind_verifier_protocol_unsupported" in issues
+        or any(code.endswith("_unavailable") for code in issues)
     ):
         gate_status = "degraded"
     elif score < 85:

@@ -261,6 +261,7 @@ class DiagnosticBlindVerifierClient(_JsonServiceClient):
         return self.post(
             "/v1/blind-answer",
             {
+                "protocol_version": "diagnostic-blind-v2",
                 "questions": [
                     {
                         "id": item.get("id"),
@@ -268,7 +269,18 @@ class DiagnosticBlindVerifierClient(_JsonServiceClient):
                         "options": item.get("options"),
                     }
                     for item in questions
-                ]
+                ],
+                "response_schema": {
+                    "protocol_version": "diagnostic-blind-v2",
+                    "agreement": "number",
+                    "answers": [
+                        {
+                            "id": "string",
+                            "selected_index": "integer",
+                            "confidence": "number",
+                        }
+                    ],
+                },
             },
         )
 

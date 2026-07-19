@@ -12,6 +12,8 @@ These lock down behaviors that were implemented but only exercised indirectly:
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from src.application import resource_service
 from src.database.resource_generation_repo import (
     MemoryResourceGenerationRepo,
@@ -133,6 +135,43 @@ def test_duplicate_request_merges_into_the_existing_job(monkeypatch) -> None:
     assert second["job_id"] == first["job_id"]
     # The duplicate attached to the in-flight job; no second row was created.
     assert list(repo._store.jobs.keys()) == [first["job_id"]]
+
+
+def test_worker_rejects_a_job_when_the_knowledge_version_changes(monkeypatch) -> None:
+    runtime = install_fake_runtime(monkeypatch)
+    disable_persistence(monkeypatch)
+    monkeypatch.setattr(
+        resource_service,
+        "get_validation_pipeline",
+        lambda: FakeValidationPipeline(),
+    )
+    repo = _fresh_repo()
+    session = runtime.get_session("version-race-user", "course1")
+    session.agent_state.current_node_id = "N01"
+    queued = resource_service.request_generation(
+        "version-race-user",
+        "course1",
+        "N01",
+        card_types=["concept_map"],
+        submit=False,
+        repo=repo,
+    )
+    original_context = resource_service._generation_context
+
+    def changed_context(*args, **kwargs):
+        binding, context = original_context(*args, **kwargs)
+        return binding, replace(
+            context,
+            knowledge_index_version=f"{context.knowledge_index_version}-changed",
+        )
+
+    monkeypatch.setattr(resource_service, "_generation_context", changed_context)
+
+    result = resource_service.run_generation_job(queued["job_id"], repo=repo)
+
+    assert result["status"] == "failed"
+    assert result["error"]["code"] == "knowledge_index_version_changed"
+    assert session.agent_state.generated_resources.get("N01", []) == []
 
 
 # --- R3: independent per-card persistence and failure isolation ---------------

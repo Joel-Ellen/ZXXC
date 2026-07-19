@@ -725,15 +725,16 @@ class ResourceGenerator:
             ],
             [
                 card_type
-                for card_type in ("interactive_exercise", "diagnostic_quiz")
+                for card_type in ("interactive_exercise",)
                 if card_type in requested
             ],
+            ["diagnostic_quiz"] if "diagnostic_quiz" in requested else [],
         ]
         groups = [group for group in groups if group]
         if len(groups) > 1:
             outputs: dict[str, GeneratedResourcePayload] = {}
             with concurrent.futures.ThreadPoolExecutor(
-                max_workers=2,
+                max_workers=min(3, len(groups)),
                 thread_name_prefix="resource-v4-supporting",
             ) as pool:
                 futures = {
@@ -745,7 +746,9 @@ class ResourceGenerator:
                         max_tokens=(
                             TOKEN_BUDGETS["code_media_bundle"]
                             if "code_snippet" in group
-                            else TOKEN_BUDGETS["practice_diagnostic_bundle"]
+                            else TOKEN_BUDGETS["diagnostic_quiz"]
+                            if "diagnostic_quiz" in group
+                            else TOKEN_BUDGETS["interactive_exercise"]
                         ),
                         timeout_sec=timeout_sec,
                     )
@@ -762,11 +765,22 @@ class ResourceGenerator:
                                 "supporting_subpackage_failed",
                             )
             return outputs
+        if max_tokens is None:
+            if requested == ["diagnostic_quiz"]:
+                max_tokens = TOKEN_BUDGETS["diagnostic_quiz"]
+            elif requested == ["interactive_exercise"]:
+                max_tokens = TOKEN_BUDGETS["interactive_exercise"]
+            elif requested == ["code_snippet"]:
+                max_tokens = TOKEN_BUDGETS["code_snippet"]
+            elif requested == ["video_summary"]:
+                max_tokens = TOKEN_BUDGETS["video_summary"]
+            else:
+                max_tokens = TOKEN_BUDGETS["supporting_bundle"]
         return self._generate_bundle_once(
             llm,
             context,
             requested,
-            max_tokens=max_tokens or TOKEN_BUDGETS["supporting_bundle"],
+            max_tokens=max_tokens,
             timeout_sec=timeout_sec,
         )
 

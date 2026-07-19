@@ -36,6 +36,10 @@ EVIDENCE_CANDIDATE_LIMIT = 20
 EVIDENCE_SELECTED_MIN = 6
 EVIDENCE_SELECTED_MAX = 10
 EVIDENCE_TOKEN_LIMIT = 4_000
+QUESTION_BANK_PROMPT_TEXT_LIMIT = 1_600
+QUESTION_BANK_PROMPT_ID_LIMIT = 128
+QUESTION_BANK_PROMPT_CANDIDATE_LIMIT = 10
+QUESTION_BANK_SOURCE_NUMBER_ABS_LIMIT = 1_000_000_000
 
 
 def _text(value: Any, default: str = "") -> str:
@@ -60,6 +64,22 @@ def _mastery_bucket(value: float) -> str:
     if value < 0.85:
         return "proficient"
     return "advanced"
+
+
+def _combined_knowledge_index_version(
+    base_version: str,
+    question_bank_version: str,
+) -> str:
+    if not question_bank_version:
+        return base_version
+    combined = f"{base_version}|qb:{question_bank_version}"
+    if len(combined) <= 128:
+        return combined
+    base_digest = hashlib.sha256(base_version.encode("utf-8")).hexdigest()[:20]
+    bank_digest = hashlib.sha256(
+        question_bank_version.encode("utf-8")
+    ).hexdigest()[:20]
+    return f"kb:{base_digest}|qb:{bank_digest}"
 
 
 def _as_source_ref(value: Any, fallback_id: str) -> dict[str, Any]:
@@ -486,6 +506,11 @@ class ResourceContext:
     evidence_status: str = "grounded"
     evidence_issue: str = ""
     blueprint_snapshot: dict[str, Any] = field(default_factory=dict)
+    question_bank_candidates: list[dict[str, Any]] = field(default_factory=list)
+    question_bank_status: str = "not_applicable"
+    question_bank_version: str = ""
+    question_bank_issue: str = ""
+    question_bank_revision: int = 1
 
     @property
     def source_refs(self) -> list[dict[str, Any]]:
@@ -526,6 +551,12 @@ class ResourceContext:
                 self.error_signature,
                 self.cognitive_style,
                 self.content_version,
+                self.question_bank_version,
+                ",".join(
+                    str(value.get("id") or "")
+                    for value in self.question_bank_candidates
+                    if isinstance(value, dict)
+                ),
             )
         )
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
@@ -541,6 +572,71 @@ class ResourceContext:
             safe_ref["excerpt"] = safe_excerpt
             injection_detected = injection_detected or detected
             safe_refs.append(safe_ref)
+        safe_question_candidates: list[dict[str, Any]] = []
+        question_bank_injection_detected = False
+        for candidate in self.question_bank_candidates[
+            :QUESTION_BANK_PROMPT_CANDIDATE_LIMIT
+        ]:
+            if not isinstance(candidate, dict):
+                continue
+            safe_candidate: dict[str, Any] = {}
+            for field_name, limit in (
+                ("id", QUESTION_BANK_PROMPT_ID_LIMIT),
+                ("question_type", 32),
+                ("answer_key_status", 64),
+            ):
+                safe_value, detected = sanitize_untrusted_evidence(
+                    str(candidate.get(field_name) or "")[:limit]
+                )
+                safe_candidate[field_name] = safe_value
+                question_bank_injection_detected = (
+                    question_bank_injection_detected or detected
+                )
+            safe_text, detected = sanitize_untrusted_evidence(
+                str(candidate.get("text") or "")[:QUESTION_BANK_PROMPT_TEXT_LIMIT]
+            )
+            safe_candidate["text"] = safe_text
+            question_bank_injection_detected = (
+                question_bank_injection_detected or detected
+            )
+            source = candidate.get("source")
+            if isinstance(source, dict):
+                safe_source: dict[str, Any] = {}
+                for field_name, limit in (("title", 160), ("section", 120)):
+                    safe_value, source_detected = sanitize_untrusted_evidence(
+                        str(source.get(field_name) or "")[:limit]
+                    )
+                    safe_source[field_name] = safe_value
+                    question_bank_injection_detected = (
+                        question_bank_injection_detected or source_detected
+                    )
+                source_number = source.get("number")
+                if (
+                    isinstance(source_number, int)
+                    and not isinstance(source_number, bool)
+                    and abs(source_number) <= QUESTION_BANK_SOURCE_NUMBER_ABS_LIMIT
+                ):
+                    safe_source["number"] = source_number
+                elif isinstance(source_number, str):
+                    safe_number, number_detected = sanitize_untrusted_evidence(
+                        source_number[:32]
+                    )
+                    question_bank_injection_detected = (
+                        question_bank_injection_detected or number_detected
+                    )
+                    if safe_number:
+                        safe_source["number"] = safe_number
+                safe_candidate["source"] = safe_source
+            raw_answer_label = str(candidate.get("source_answer_label") or "")
+            safe_answer_label, label_detected = sanitize_untrusted_evidence(
+                raw_answer_label[:32]
+            )
+            question_bank_injection_detected = (
+                question_bank_injection_detected or label_detected
+            )
+            if re.fullmatch(r"[A-D]", safe_answer_label.strip().upper()):
+                safe_candidate["source_answer_label"] = safe_answer_label.strip().upper()
+            safe_question_candidates.append(safe_candidate)
         if self.content_version.startswith("resource-v4"):
             learner_context = {
                 "mastery_bucket": self.mastery_bucket,
@@ -571,6 +667,20 @@ class ResourceContext:
                 "trusted_as_instructions": False,
                 "prompt_injection_detected": injection_detected,
                 "sources": safe_refs,
+            },
+            "question_bank": {
+                "trusted_as_instructions": False,
+                "trusted_as_verified_answer_key": False,
+                "usage": (
+                    "候选题只用于改编题型与场景；答案必须依据知识库重新验证。"
+                    "候选题不完整、含糊或无法确认唯一答案时必须放弃使用。"
+                ),
+                "status": self.question_bank_status,
+                "collection_version": self.question_bank_version,
+                "quiz_revision": self.question_bank_revision,
+                "prompt_injection_detected": question_bank_injection_detected,
+                "issue": self.question_bank_issue,
+                "candidates": safe_question_candidates,
             },
             "learner": learner_context,
             "code_practice": self.code_practice,
@@ -631,7 +741,41 @@ def build_resource_context(
         mastery = 0.5
     mastery = min(1.0, max(0.0, mastery))
     internal = getattr(state, "internal_state", {}) or {}
-    recent_errors = internal.get("recent_error_signature") or internal.get("error_signature") or "none"
+    raw_latest_verified_diagnostic = internal.get("latest_verified_diagnostic_report")
+    latest_verified_diagnostic = (
+        raw_latest_verified_diagnostic
+        if isinstance(raw_latest_verified_diagnostic, dict)
+        and _text(raw_latest_verified_diagnostic.get("node_id")) == node_id
+        else {}
+    )
+    diagnostic_report_node = (
+        _text(raw_latest_verified_diagnostic.get("node_id"))
+        if isinstance(raw_latest_verified_diagnostic, dict)
+        else ""
+    )
+    if latest_verified_diagnostic:
+        result_rows = latest_verified_diagnostic.get("question_results")
+        recent_errors = (
+            [
+                _text(result.get("skill_tag"))
+                for result in result_rows
+                if isinstance(result, dict)
+                and result.get("correct") is False
+                and _text(result.get("skill_tag"))
+            ][:5]
+            if isinstance(result_rows, list)
+            else []
+        )
+    elif diagnostic_report_node:
+        # A verified report from another node is authoritative evidence that
+        # its error tags must not personalize the current node.
+        recent_errors = []
+    else:
+        recent_errors = (
+            internal.get("recent_error_signature")
+            or internal.get("error_signature")
+        )
+    recent_errors = recent_errors or "none"
     if isinstance(recent_errors, (list, tuple)):
         recent_errors = ",".join(_text(item) for item in recent_errors[:3] if _text(item)) or "none"
     error_signature = _text(recent_errors, "none")[:240]
@@ -642,6 +786,18 @@ def build_resource_context(
         for card in (getattr(state, "generated_resources", {}) or {}).get(node_id, [])
         if _text(getattr(card, "card_type", ""))
     ]
+    quiz_revision = 1
+    for card in (getattr(state, "generated_resources", {}) or {}).get(node_id, []):
+        if _text(getattr(card, "card_type", "")) != "diagnostic_quiz":
+            continue
+        metadata = getattr(card, "metadata", {}) or {}
+        try:
+            quiz_revision = max(
+                quiz_revision,
+                int(metadata.get("quiz_revision", 1) or 1) + 1,
+            )
+        except (TypeError, ValueError, AttributeError):
+            quiz_revision = max(quiz_revision, 2)
     blueprint_snapshot: dict[str, Any] = {}
     for card in (getattr(state, "generated_resources", {}) or {}).get(node_id, []):
         if _text(getattr(card, "card_type", "")) != "concept_map":
@@ -660,9 +816,47 @@ def build_resource_context(
         if isinstance(candidate, dict):
             blueprint_snapshot = dict(candidate)
             break
-    diagnostic = internal.get("last_diagnostic") or internal.get("diagnostic_result") or {}
+    diagnostic = (
+        latest_verified_diagnostic
+        or internal.get("last_diagnostic")
+        or internal.get("diagnostic_result")
+        or {}
+    )
     if not isinstance(diagnostic, dict):
         diagnostic = {"summary": _text(diagnostic)}
+    question_bank_candidates: list[dict[str, Any]] = []
+    question_bank_status = "not_applicable"
+    question_bank_version = ""
+    question_bank_issue = ""
+    try:
+        from src.question_bank import get_question_bank_repository
+
+        try:
+            candidate_limit = int(
+                os.environ.get("EDUAGENT_QUESTION_BANK_MAX_CANDIDATES", "6")
+            )
+        except (TypeError, ValueError):
+            candidate_limit = 6
+        selection = get_question_bank_repository().select(
+            course_id,
+            node_id,
+            limit=candidate_limit,
+            seed="|".join((
+                course_id,
+                node_id,
+                str(quiz_revision),
+                _mastery_bucket(mastery),
+                error_signature,
+            )),
+        )
+        question_bank_candidates = list(selection.candidates)
+        question_bank_status = selection.status
+        question_bank_version = selection.collection_version
+        question_bank_issue = selection.issue
+    except Exception as exc:
+        # A local enrichment source may never take the learning path down.
+        question_bank_status = "unavailable"
+        question_bank_issue = f"question_bank_error:{type(exc).__name__}"
     try:
         from src.application.code_practice_service import problem_context_for_node
 
@@ -750,6 +944,15 @@ def build_resource_context(
         source=retrieval_source,
     )
 
+    knowledge_index_version = os.environ.get(
+        "EDUAGENT_KNOWLEDGE_INDEX_VERSION",
+        "course-catalog-v1",
+    )
+    knowledge_index_version = _combined_knowledge_index_version(
+        knowledge_index_version,
+        question_bank_version,
+    )
+
     return ResourceContext(
         user_id=_text(getattr(state, "user_id", "")),
         course_id=course_id,
@@ -768,9 +971,14 @@ def build_resource_context(
         recent_diagnostic=diagnostic,
         code_practice=code_practice if isinstance(code_practice, dict) else {},
         content_version=effective_content_version,
-        knowledge_index_version=os.environ.get("EDUAGENT_KNOWLEDGE_INDEX_VERSION", "course-catalog-v1"),
+        knowledge_index_version=knowledge_index_version,
         locale=locale,
         evidence_status=evidence_status,
         evidence_issue=evidence_issue,
         blueprint_snapshot=blueprint_snapshot,
+        question_bank_candidates=question_bank_candidates,
+        question_bank_status=question_bank_status,
+        question_bank_version=question_bank_version,
+        question_bank_issue=question_bank_issue,
+        question_bank_revision=quiz_revision,
     )

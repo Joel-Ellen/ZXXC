@@ -298,13 +298,16 @@ def _verify_targeted_practice_answer(
 
     expected_index = question.get("answer_index")
     selected_index = result.get("answer_index", result.get("selected_option_index"))
+    options = question.get("options")
     if (
-        isinstance(expected_index, bool)
+        not isinstance(options, list)
+        or len(options) < 2
+        or isinstance(expected_index, bool)
         or not isinstance(expected_index, int)
-        or expected_index < 0
+        or not 0 <= expected_index < len(options)
         or isinstance(selected_index, bool)
         or not isinstance(selected_index, int)
-        or selected_index < 0
+        or not 0 <= selected_index < len(options)
     ):
         return {
             "verified": False,

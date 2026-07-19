@@ -531,7 +531,21 @@ def _verify_quiz_completion(
     for question in questions:
         question_id = str(question.get("id") or "").strip()
         answer_index = question.get("answer_index")
-        if not question_id or isinstance(answer_index, bool) or not isinstance(answer_index, int) or answer_index < 0:
+        options = question.get("options")
+        normalized_options = (
+            [str(option).strip() for option in options]
+            if isinstance(options, list)
+            else []
+        )
+        if (
+            not question_id
+            or len(normalized_options) != 4
+            or any(not option for option in normalized_options)
+            or len({"".join(option.casefold().split()) for option in normalized_options}) != 4
+            or isinstance(answer_index, bool)
+            or not isinstance(answer_index, int)
+            or not 0 <= answer_index < len(normalized_options)
+        ):
             return False, 0.0, "diagnostic_quiz_has_invalid_answer_key", {"resource_id": evidence.resource_id}
         if question_id in answer_key:
             # Do not collapse malformed questions into one answerable item. That
@@ -549,7 +563,11 @@ def _verify_quiz_completion(
             return False, 0.0, "quiz_answer_does_not_match_server_question", {"question_id": answer.question_id}
         if answer.question_id in submitted_answers:
             return False, 0.0, "duplicate_quiz_answer", {"question_id": answer.question_id}
-        if answer.answer_index < 0:
+        question_options = question_by_id[answer.question_id].get("options")
+        if (
+            not isinstance(question_options, list)
+            or not 0 <= answer.answer_index < len(question_options)
+        ):
             return False, 0.0, "invalid_quiz_answer_index", {"question_id": answer.question_id}
         submitted_answers[answer.question_id] = answer.answer_index
 

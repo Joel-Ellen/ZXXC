@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import json
 import threading
 
 from src.application import resource_service
@@ -13,6 +14,60 @@ from tests.helpers import FakeValidationPipeline, disable_persistence, install_f
 
 def _event_types(repo: MemoryResourceGenerationRepo, job_id: str) -> list[str]:
     return [event["event_type"] for event in repo.list_events(job_id)]
+
+
+def test_historical_quiz_event_replay_redacts_raw_markdown() -> None:
+    historical_event = {
+        "event_id": 1,
+        "event_type": "card_ready",
+        "payload": {
+            "card_type": "diagnostic_quiz",
+            "card": {
+                "resource_id": "legacy-quiz",
+                "node_id": "N01",
+                "resource_type": "diagnostic_quiz",
+                "body_markdown": (
+                    '{"answer_index":0,"distractor_error_tags":{"1":"错"},'
+                    '"explanation":"服务端解析","source_answer_label":"A"}'
+                ),
+                "structured_payload": {
+                    "title": "诊断测验",
+                    "questions": [{
+                        "id": "q1",
+                        "prompt": "队列遵循哪种顺序？",
+                        "options": ["先进先出", "后进先出", "随机", "排序"],
+                        "answer_index": 0,
+                        "explanation": "服务端解析",
+                        "distractor_error_tags": {"1": "错"},
+                        "source_answer_label": "A",
+                    }],
+                },
+            },
+        },
+    }
+
+    class HistoricalRepo:
+        @staticmethod
+        def get_job(job_id):
+            return {"job_id": job_id, "user_id": "event-user"}
+
+        @staticmethod
+        def list_events(job_id, after_event_id=0, limit=100):
+            del job_id, after_event_id, limit
+            return [historical_event]
+
+    events = resource_service.list_generation_events(
+        "legacy-job",
+        user_id="event-user",
+        repo=HistoricalRepo(),
+    )
+    serialized = json.dumps(events, ensure_ascii=False)
+
+    assert "answer_index" not in serialized
+    assert "distractor_error_tags" not in serialized
+    assert "服务端解析" not in serialized
+    assert "source_answer_label" not in serialized
+    assert "队列遵循哪种顺序" in events[0]["payload"]["card"]["body_markdown"]
 
 
 def test_generation_job_is_idempotent_and_publishes_incremental_cards(monkeypatch) -> None:

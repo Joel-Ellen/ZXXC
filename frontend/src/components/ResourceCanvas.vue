@@ -226,8 +226,8 @@
                 </template>
                 <template v-else>
                   <p v-if="quizGuidance(card)" class="text-text-muted">{{ quizGuidance(card) }}</p>
-                  <div v-for="question in quizQuestions" :key="question.id" class="mt-10"><p class="font-medium text-text-primary">{{ question.prompt }}</p><p v-if="question.skillTag || question.difficulty" class="mt-1 text-xs text-text-muted">{{ [question.skillTag, question.difficulty].filter(Boolean).join(" · ") }}</p><div class="mt-4 space-y-2"><button v-for="(option, optionIndex) in question.options" :key="`${question.id}-${optionIndex}`" type="button" class="focus-ring w-full rounded-lg border px-4 py-2.5 text-left text-sm transition-colors" :class="answerClass(question.id, optionIndex)" @click="setAnswer(question.id, optionIndex)">{{ option }}</button></div><div v-if="submittedScore !== null && question.explanation" class="mt-4 text-xs text-text-muted">{{ question.explanation }}</div></div>
-                  <div class="mt-10 flex flex-wrap items-center justify-between gap-3"><p class="text-xs text-text-muted">{{ diagnosticStatusText }}</p><button type="button" class="focus-ring btn-capsule" :disabled="!allAnswered || loading" @click="submitQuizScore">提交诊断</button></div>
+                  <div v-for="question in quizQuestions" :key="question.id" class="mt-10"><p class="font-medium text-text-primary">{{ question.prompt }}</p><p v-if="question.skillTag || question.difficulty" class="mt-1 text-xs text-text-muted">{{ [question.skillTag, question.difficulty].filter(Boolean).join(" · ") }}</p><div class="mt-4 space-y-2"><button v-for="(option, optionIndex) in question.options" :key="`${question.id}-${optionIndex}`" type="button" class="focus-ring w-full rounded-lg border px-4 py-2.5 text-left text-sm transition-colors" :class="answerClass(question.id, optionIndex)" :disabled="quizSubmitting" @click="setAnswer(question.id, optionIndex)">{{ option }}</button></div></div>
+                  <div class="mt-10 flex flex-wrap items-center justify-between gap-3"><p class="text-xs text-text-muted">{{ diagnosticStatusText }}</p><button type="button" class="focus-ring btn-capsule" :disabled="!allAnswered || loading || quizSubmitting" @click="submitQuizScore">{{ quizSubmitting ? "提交中…" : "提交诊断" }}</button></div>
                   <p v-if="quizAfterGuidance(card) && submittedScore !== null" class="mt-8">{{ quizAfterGuidance(card) }}</p>
                 </template>
               </article>
@@ -336,6 +336,8 @@ const dragId = ref("");
 const focusMode = ref(false);
 const answers = ref({});
 const submittedScore = ref(null);
+const submittedDiagnostic = ref(null);
+const quizSubmitting = ref(false);
 const showQuizOverlay = ref(false);
 const quizAttemptNumber = ref(1);
 const quizStartedAt = ref(Date.now());
@@ -497,6 +499,8 @@ watch(
   () => {
     answers.value = {};
     submittedScore.value = null;
+    submittedDiagnostic.value = null;
+    quizSubmitting.value = false;
     quizAttemptNumber.value = 1;
     quizStartedAt.value = Date.now();
     quizEventId.value = "";
@@ -510,22 +514,13 @@ const quizQuestions = computed(() => {
       id: question.id,
       prompt: question.prompt,
       options: question.options || [],
-      answerIndex: question.answer_index ?? question.answerIndex ?? 0,
-      explanation: question.explanation || "",
       skillTag: question.skill_tag || "",
       difficulty: difficultyLabel(question.difficulty),
     }));
   }
-
-  return props.buildQuiz(bodyMarkdown(quizCard.value)).map((question) => ({
-    id: question.id,
-    prompt: question.prompt,
-    options: question.options,
-    answerIndex: question.answer ?? 0,
-    explanation: "",
-    skillTag: "",
-    difficulty: "",
-  }));
+  // Diagnostic answers are server-owned. Unstructured Markdown is never
+  // reparsed into a locally graded quiz because it has no verifiable key.
+  return [];
 });
 const allAnswered = computed(
   () => quizQuestions.value.length > 0 && quizQuestions.value.every((question) => answers.value[question.id] !== undefined),
@@ -587,12 +582,13 @@ const learningStages = computed(() => [
 ]);
 
 const diagnosticStatusText = computed(() => {
-  if (props.lastDiagnostic) {
-    const scorePercent = Math.round((props.lastDiagnostic.score ?? 0) * 100);
-    const beforePercent = Math.round((props.lastDiagnostic.masteryBefore ?? 0) * 100);
-    const afterPercent = Math.round((props.lastDiagnostic.masteryAfter ?? 0) * 100);
-    if (props.lastDiagnostic.advancedToNextNode) {
-      return `上次诊断得分 ${scorePercent}% · 掌握度 ${beforePercent}% -> ${afterPercent}% · 已推进到 ${props.lastDiagnostic.nextNodeTitle || "下一节点"}`;
+  const diagnostic = props.lastDiagnostic || submittedDiagnostic.value;
+  if (diagnostic && typeof diagnostic.score === "number") {
+    const scorePercent = Math.round(diagnostic.score * 100);
+    const beforePercent = Math.round((diagnostic.masteryBefore ?? 0) * 100);
+    const afterPercent = Math.round((diagnostic.masteryAfter ?? 0) * 100);
+    if (diagnostic.advancedToNextNode) {
+      return `上次诊断得分 ${scorePercent}% · 掌握度 ${beforePercent}% -> ${afterPercent}% · 已推进到 ${diagnostic.nextNodeTitle || "下一节点"}`;
     }
     return `上次诊断得分 ${scorePercent}% · 掌握度 ${beforePercent}% -> ${afterPercent}% · 继续停留当前节点`;
   }
@@ -606,19 +602,19 @@ const diagnosticStatusText = computed(() => {
 
 // ── 诊断结果悬浮窗 ────────────────────────────────────────────────
 const quizOverlayScore = computed(() => {
-  const diag = props.lastDiagnostic;
+  const diag = props.lastDiagnostic || submittedDiagnostic.value;
   if (diag && typeof diag.score === "number") return diag.score;
   return submittedScore.value ?? 0;
 });
 
 const quizOverlayMasteryBefore = computed(() => {
-  const diag = props.lastDiagnostic;
+  const diag = props.lastDiagnostic || submittedDiagnostic.value;
   if (diag && typeof diag.masteryBefore === "number") return diag.masteryBefore;
   return null;
 });
 
 const quizOverlayMasteryAfter = computed(() => {
-  const diag = props.lastDiagnostic;
+  const diag = props.lastDiagnostic || submittedDiagnostic.value;
   if (diag && typeof diag.masteryAfter === "number") return diag.masteryAfter;
   return null;
 });
@@ -629,14 +625,15 @@ const quizOverlayMasteryDelta = computed(() => {
 });
 
 const quizNextNode = computed(() => {
-  const evaluatedNodeId = props.lastDiagnostic?.evaluatedNodeId || props.currentNode;
-  const explicitNextNodeId = props.lastDiagnostic?.nextNodeId;
+  const diagnostic = props.lastDiagnostic || submittedDiagnostic.value;
+  const evaluatedNodeId = diagnostic?.evaluatedNodeId || props.currentNode;
+  const explicitNextNodeId = diagnostic?.nextNodeId;
 
   if (explicitNextNodeId && explicitNextNodeId !== evaluatedNodeId) {
     const node = props.pathNodes.find((item) => item.id === explicitNextNodeId);
     return node || {
       id: explicitNextNodeId,
-      title: props.lastDiagnostic?.nextNodeTitle || explicitNextNodeId,
+      title: diagnostic?.nextNodeTitle || explicitNextNodeId,
     };
   }
 
@@ -645,18 +642,14 @@ const quizNextNode = computed(() => {
 });
 
 const quizOverlayQuestionResults = computed(() => {
-  const diag = props.lastDiagnostic;
+  const diag = props.lastDiagnostic || submittedDiagnostic.value;
   if (diag && Array.isArray(diag.questionResults) && diag.questionResults.length) {
     return diag.questionResults.map((qr) => ({
       prompt: qr.prompt || qr.question_text || qr.question_id || "",
       correct: qr.correct === true || qr.is_correct === true,
     }));
   }
-  // Fallback: compute from local answers
-  return quizQuestions.value.map((q) => ({
-    prompt: q.prompt,
-    correct: answers.value[q.id] === q.answerIndex,
-  }));
+  return [];
 });
 
 function dismissQuizOverlay() {
@@ -1062,6 +1055,7 @@ function onDrop(targetId) {
 }
 
 function setAnswer(questionId, optionIndex) {
+  if (quizSubmitting.value) return;
   answers.value = {
     ...answers.value,
     [questionId]: optionIndex,
@@ -1076,19 +1070,15 @@ function answerClass(questionId, optionIndex) {
 }
 
 function submitQuizScore() {
-  let correct = 0;
-  quizQuestions.value.forEach((question) => {
-    if (answers.value[question.id] === question.answerIndex) {
-      correct += 1;
-    }
-  });
-  const score = quizQuestions.value.length ? correct / quizQuestions.value.length : 0;
+  if (quizSubmitting.value || !allAnswered.value) return;
   const resourceId = quizCard.value?.resource_id ?? quizCard.value?.id;
   if (!resourceId) return;
   if (!quizEventId.value) {
     quizEventId.value = `diagnostic-${resourceId}-${quizAttemptNumber.value}-${Date.now()}`;
   }
-  submittedScore.value = score;
+  quizSubmitting.value = true;
+  submittedScore.value = null;
+  submittedDiagnostic.value = null;
   emit("submit-quiz", {
     eventId: quizEventId.value,
     resourceId: String(resourceId),
@@ -1099,13 +1089,21 @@ function submitQuizScore() {
       questionId: question.id,
       selectedOptionIndex: answers.value[question.id],
     })),
-    onRecorded() {
+    onRecorded(result) {
       quizAttemptNumber.value += 1;
       quizEventId.value = "";
-      showQuizOverlay.value = true;
+      quizSubmitting.value = false;
+      submittedDiagnostic.value = result && typeof result === "object" ? result : null;
+      const authoritativeScore = Number(result?.score);
+      submittedScore.value = Number.isFinite(authoritativeScore)
+        ? Math.max(0, Math.min(1, authoritativeScore))
+        : null;
+      showQuizOverlay.value = submittedScore.value !== null;
     },
     onFailure() {
+      quizSubmitting.value = false;
       submittedScore.value = null;
+      submittedDiagnostic.value = null;
       showQuizOverlay.value = false;
     },
   });

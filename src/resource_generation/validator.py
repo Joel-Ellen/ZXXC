@@ -317,7 +317,60 @@ def _validate_semantics(
                         "reading_sequence",
                     ))
     elif card_type == "diagnostic_quiz":
-        levels = {str(question.get("level") or "") for question in payload.get("questions", [])}
+        questions = payload.get("questions", [])
+        levels = {str(question.get("level") or "") for question in questions}
+        question_ids: set[str] = set()
+        normalized_prompts: set[str] = set()
+        known_bank_ids = {
+            str(candidate.get("id") or "")
+            for candidate in context.question_bank_candidates
+            if isinstance(candidate, dict) and str(candidate.get("id") or "")
+        }
+        for index, question in enumerate(questions):
+            if not isinstance(question, dict):
+                continue
+            question_id = str(question.get("id") or "").strip()
+            if question_id in question_ids:
+                issues.append(ValidationIssue(
+                    "quiz_question_id_duplicate",
+                    "Diagnostic question ids must be unique within one quiz.",
+                    f"questions.{index}.id",
+                ))
+            question_ids.add(question_id)
+            normalized_prompt = re.sub(
+                r"\W+",
+                "",
+                str(question.get("prompt") or "").casefold(),
+                flags=re.UNICODE,
+            )
+            if normalized_prompt in normalized_prompts:
+                issues.append(ValidationIssue(
+                    "quiz_question_duplicate",
+                    "Diagnostic questions must not repeat the same normalized prompt.",
+                    f"questions.{index}.prompt",
+                ))
+            normalized_prompts.add(normalized_prompt)
+            source_question_ids = {
+                str(value).strip()
+                for value in question.get("source_question_ids", [])
+                if str(value).strip()
+            }
+            if source_question_ids and not source_question_ids.issubset(known_bank_ids):
+                issues.append(ValidationIssue(
+                    "quiz_question_bank_source_unknown",
+                    "Question-bank provenance may only reference supplied candidate ids.",
+                    f"questions.{index}.source_question_ids",
+                ))
+            visible_text = "\n".join([
+                str(question.get("prompt") or ""),
+                *[str(option) for option in question.get("options", [])],
+            ])
+            if "[OBJECT]" in visible_text.upper():
+                issues.append(ValidationIssue(
+                    "quiz_missing_asset_placeholder",
+                    "Questions with missing image or formula placeholders cannot be published.",
+                    f"questions.{index}",
+                ))
         required = {"concept", "understanding", "application"}
         if not required.issubset(levels):
             issues.append(ValidationIssue(
@@ -326,7 +379,6 @@ def _validate_semantics(
                 "questions",
             ))
         if context.content_version.startswith("resource-v4"):
-            questions = payload.get("questions", [])
             required_v4 = {
                 "concept",
                 "understanding",
@@ -346,10 +398,19 @@ def _validate_semantics(
                     if isinstance(question, dict)
                     else {}
                 )
-                if not isinstance(tags, dict) or len(tags) != 3:
+                try:
+                    answer_index = int(question.get("answer_index"))
+                except (TypeError, ValueError, AttributeError):
+                    answer_index = -1
+                expected_tag_keys = {
+                    str(option_index)
+                    for option_index in range(4)
+                    if option_index != answer_index
+                }
+                if not isinstance(tags, dict) or set(tags) != expected_tag_keys:
                     issues.append(ValidationIssue(
                         "quiz_distractor_tags_missing",
-                        "Every diagnostic distractor must map to an error tag.",
+                        "Every diagnostic distractor, and only distractors, must map to an error tag.",
                         f"questions.{index}.distractor_error_tags",
                     ))
             # Detect generic / meta-cognitive distractors that are not
@@ -364,7 +425,10 @@ def _validate_semantics(
             for q_idx, question in enumerate(questions):
                 if not isinstance(question, dict):
                     continue
+                answer_index = question.get("answer_index")
                 for o_idx, option in enumerate(question.get("options", []) or []):
+                    if o_idx == answer_index:
+                        continue
                     option_str = str(option).strip()
                     if _GENERIC_DISTRACTOR_RE.search(option_str):
                         issues.append(ValidationIssue(

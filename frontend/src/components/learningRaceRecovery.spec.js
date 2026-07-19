@@ -41,8 +41,6 @@ function quizCard(nodeId) {
         id: `question-${nodeId}`,
         prompt: `${nodeId} question`,
         options: [`${nodeId} option A`, `${nodeId} option B`],
-        answer_index: 0,
-        explanation: "Verified explanation",
       }],
     },
   };
@@ -104,7 +102,7 @@ afterEach(() => { vi.clearAllMocks(); });
 // ── Quiz interaction ──────────────────────────────────────────────
 
 describe("ResourceCanvas quiz interaction", () => {
-  it("renders questions and options in expanded view, submits score", async () => {
+  it("renders questions and options in expanded view, submits answers without a local score", async () => {
     const wrapper = mount(ResourceCanvas, {
       props: {
         cards: [quizCard("N01")],
@@ -135,6 +133,7 @@ describe("ResourceCanvas quiz interaction", () => {
     const sub = wrapper.emitted("submit-quiz")[0][0];
     expect(sub).toMatchObject({ resourceId: "quiz-N01", attemptNumber: 1, usedHint: false });
     expect(sub.answers[0]).toMatchObject({ questionId: "question-N01", selectedOptionIndex: 1 });
+    expect(sub).not.toHaveProperty("score");
 
     wrapper.unmount();
   });
@@ -184,7 +183,13 @@ describe("ResourceCanvas quiz interaction", () => {
 
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();
     const firstSubmission = wrapper.emitted("submit-quiz")[0][0];
-    firstSubmission.onRecorded();
+    firstSubmission.onRecorded({
+      score: 0.5,
+      evaluatedNodeId: "N01",
+      nextNodeId: "N02",
+      nextNodeTitle: "Node 02",
+      questionResults: [{ prompt: "N01 question", correct: false }],
+    });
     await settleUi();
 
     expect(document.body.querySelector('[role="dialog"]')?.textContent).toContain("诊断结果");
@@ -195,7 +200,14 @@ describe("ResourceCanvas quiz interaction", () => {
     expect(findButton(wrapper, "提交诊断").attributes("disabled")).toBeUndefined();
 
     await findButton(wrapper, "提交诊断").trigger("click");
-    wrapper.emitted("submit-quiz")[1][0].onRecorded();
+    wrapper.emitted("submit-quiz")[1][0].onRecorded({
+      score: 1,
+      evaluatedNodeId: "N01",
+      nextNodeId: "N02",
+      nextNodeTitle: "Node 02",
+      advancedToNextNode: true,
+      questionResults: [{ prompt: "N01 question", correct: true }],
+    });
     await settleUi();
     const nextButton = [...document.body.querySelectorAll("button")]
       .find((button) => button.textContent === "下一章");

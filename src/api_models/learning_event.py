@@ -63,6 +63,13 @@ class QuizAnswer(BaseModel):
     def normalize_question_id(cls, value: object) -> str:
         return str(value or "").strip()
 
+    @field_validator("answer_index", mode="before")
+    @classmethod
+    def require_strict_answer_index(cls, value: object) -> int:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("answer_index must be an integer option index")
+        return value
+
 
 class QuizCompletionEvidence(BaseModel):
     """Quiz evidence whose answer key remains under server control."""

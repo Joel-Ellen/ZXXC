@@ -179,18 +179,20 @@ class DiagnosticQuestion(BaseModel):
     level: Literal["concept", "understanding", "application", "boundary", "transfer"]
     prompt: str = Field(min_length=1, max_length=1200)
     options: list[str] = Field(min_length=4, max_length=4)
-    answer_index: int = Field(ge=0, le=3)
+    answer_index: int = Field(ge=0, le=3, strict=True)
     explanation: str = Field(min_length=1, max_length=1300)
     skill_tag: str = Field(min_length=1, max_length=160)
     error_tags: list[str] = Field(default_factory=list, max_length=5)
     distractor_error_tags: dict[str, str] = Field(default_factory=dict)
+    source_question_ids: list[str] = Field(default_factory=list, max_length=3)
     difficulty: Literal["easy", "medium", "hard"] = "medium"
 
     @field_validator("options")
     @classmethod
     def options_are_distinct(cls, options: list[str]) -> list[str]:
         normalized = [option.strip() for option in options]
-        if any(not option for option in normalized) or len(set(normalized)) != 4:
+        folded = ["".join(option.casefold().split()) for option in normalized]
+        if any(not option for option in normalized) or len(set(folded)) != 4:
             raise ValueError("questions require four distinct non-empty options")
         return normalized
 
