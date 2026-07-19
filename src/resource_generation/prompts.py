@@ -27,6 +27,8 @@ TOKEN_BUDGETS: dict[str, int] = {
 _CARD_REQUIREMENTS: dict[str, list[str]] = {
     "concept_map": [
         "必须包含定义、约束、机制、前置知识、常见误区、反例、迁移问题，以及合法的 Mermaid graph TD 图。",
+        "mermaid_source 必须表达学习关系而不是装饰：生成 8-14 个语义节点、至少 7 条有向边，至少 3 条边从核心概念分出，并为至少 5 条边写出关系标签（如‘成立条件’、‘通过’、‘不适用于’、‘迁移到’）。",
+        "图中必须同时出现前置知识、核心概念、成立条件、运行机制、典型应用和边界/反例；不要只生成一条首尾相连的线，也不要使用 sequenceDiagram、外部链接或无法验证的节点。",
         "学习目标要具体、可验证，所有论断必须以提供的知识证据为依据。",
         "learning_blueprint 与 concept_map 需一起生成，每条原子论断都必须引用真实存在的来源 id。",
     ],
@@ -76,7 +78,7 @@ _FEW_SHOTS: dict[str, dict[str, Any]] = {
         "counterexamples": ["FIFO 调度是队列的使用场景。"],
         "transfer_questions": ["为什么括号匹配需要 LIFO？"],
         "review_prompts": ["选择数据结构之前先说出不变量。"],
-        "mermaid_source": "graph TD\nA[输入] --> B[栈顶]",
+        "mermaid_source": "graph TD\nP[顺序存储] -->|准备| C[栈的不变量]\nC -->|成立条件| K[同端插入与删除]\nC -->|通过| M1[push 加入栈顶]\nM1 -->|随后| M2[pop 移除栈顶]\nC -->|解释| A[嵌套任务]\nC -->|不适用于| B[FIFO 调度]\nC -->|不要混淆| X[把栈当成队列]\nC -->|迁移到| T[括号匹配]",
         "source_ref_ids": ["course:example:stack"],
         "objective_ids": ["obj:stack:core"],
         "evidence_map": {
@@ -251,7 +253,9 @@ _FEW_SHOTS: dict[str, dict[str, Any]] = {
 
 def _schema_for(card_type: str) -> dict[str, Any]:
     schema = payload_model_for(card_type).model_json_schema()
-    schema.pop("$defs", None)
+    # Keep Pydantic definitions: nested ConceptSection and LearningBlueprint
+    # fields use local $ref pointers, so dropping $defs gives the model an
+    # invalid schema and encourages malformed structured output.
     return schema
 
 

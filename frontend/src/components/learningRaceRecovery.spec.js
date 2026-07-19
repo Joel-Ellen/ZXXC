@@ -16,6 +16,7 @@ const serviceMocks = vi.hoisted(() => ({
 vi.mock("../services/eduAgentApi", () => serviceMocks);
 
 import CodePracticePanel from "./CodePracticePanel.vue";
+import ConceptMapLearning from "./ConceptMapLearning.vue";
 import ResourceCanvas from "./ResourceCanvas.vue";
 import { useLearningAssetsStore } from "../stores/learningAssets";
 
@@ -295,6 +296,54 @@ describe("ResourceCanvas card rendering", () => {
     expect(wrapper.text()).not.toContain("与时间复杂度无关");
     expect(wrapper.text()).not.toContain("二分查找总是最优");
     expect(wrapper.text()).not.toContain("以上都不对");
+    wrapper.unmount();
+  });
+});
+
+describe("ConceptMapLearning", () => {
+  it("turns structured concept fields into a branching learning map", async () => {
+    const wrapper = mount(ConceptMapLearning, {
+      props: { card: conceptCard("N01"), nodeTitle: "Node 01" },
+    });
+    await settleUi();
+
+    expect(wrapper.text()).toContain("一句话定义");
+    expect(wrapper.text()).toContain("前置基础");
+    expect(wrapper.text()).toContain("成立条件");
+    expect(wrapper.text()).toContain("边界与反例");
+    expect(wrapper.text()).toContain("迁移挑战");
+    expect(wrapper.findAll("button").length).toBeGreaterThan(5);
+
+    const mechanism = wrapper.find("button[aria-label='通过：mechanism step']");
+    expect(mechanism.exists()).toBe(true);
+    await mechanism.trigger("click");
+    expect(wrapper.find(".concept-map__detail").text()).toContain("mechanism step");
+
+    const outlineTab = wrapper.findAll("button[role='tab']").find((button) => button.text() === "学习提纲");
+    expect(outlineTab).toBeTruthy();
+    await outlineTab.trigger("click");
+    expect(wrapper.find("[role='tabpanel']").text()).toContain("学习目标");
+    wrapper.unmount();
+  });
+
+  it("keeps a useful scaffold for legacy cards without structured fields", async () => {
+    const wrapper = mount(ConceptMapLearning, {
+      props: {
+        card: {
+          resource_id: "legacy-concept",
+          resource_type: "concept_map",
+          title: "旧概念",
+          body_markdown: "## 旧概念\n\n这是历史卡片中的中文摘要。",
+          structured_payload: {},
+        },
+      },
+    });
+    await settleUi();
+
+    expect(wrapper.text()).toContain("旧概念");
+    expect(wrapper.text()).toContain("先确认该节点依赖的基础概念");
+    expect(wrapper.text()).toContain("迁移挑战");
+    expect(wrapper.text()).not.toContain("关系节点\n1");
     wrapper.unmount();
   });
 });

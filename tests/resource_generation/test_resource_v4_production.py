@@ -99,6 +99,18 @@ def test_v4_model_output_does_not_silently_receive_missing_citations() -> None:
     assert "source_refs_missing" in generated.validation_issues
 
 
+def test_v4_concept_map_rejects_a_visually_valid_but_shallow_diagram() -> None:
+    context = _v4_context()
+    payload = ResourceGenerator().template(context, "concept_map").structured_payload
+    payload["mermaid_source"] = "graph TD\nA[核心] --> B[结论]"
+
+    validation = validate_resource_payload("concept_map", payload, context)
+
+    issue_codes = {issue.code for issue in validation.issues}
+    assert validation.valid is False
+    assert {"mermaid_too_shallow", "mermaid_edges_missing", "mermaid_branch_missing"}.issubset(issue_codes)
+
+
 def test_nli_outage_can_only_produce_degraded_quality() -> None:
     class UnavailableNLI:
         def entailment(self, *_args, **_kwargs):

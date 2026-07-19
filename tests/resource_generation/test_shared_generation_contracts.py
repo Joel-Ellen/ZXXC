@@ -6,7 +6,7 @@ import pytest
 
 from src.adapters.state_to_domain import resource_contract_from_card
 from src.resource_generation import CARD_TYPES, ResourceContext, ResourceGenerator, TEMPLATE_NOTICE, payload_model_for, validate_resource_payload
-from src.resource_generation.prompts import build_supporting_bundle_messages
+from src.resource_generation.prompts import _schema_for, build_card_messages, build_supporting_bundle_messages
 from src.state.agent_state import ResourceCard
 from src.validation.language import is_chinese_learning_content
 
@@ -123,6 +123,34 @@ def test_local_template_replaces_an_english_blueprint_snapshot(
         generated.structured_payload,
         context,
     ).valid
+
+
+def test_concept_prompt_keeps_nested_schema_defs_and_requires_a_branches_map(
+    generation_context: ResourceContext,
+) -> None:
+    schema = _schema_for("concept_map")
+    assert "$defs" in schema
+    assert "ConceptSection" in schema["$defs"]
+
+    prompt = build_card_messages(generation_context, "concept_map")[1]["content"]
+    assert "8-14 个语义节点" in prompt
+    assert "至少 7 条有向边" in prompt
+    assert "至少 3 条边从核心概念分出" in prompt
+
+
+def test_local_concept_template_is_a_labeled_branching_map(
+    generation_context: ResourceContext,
+) -> None:
+    payload = ResourceGenerator().template(
+        generation_context,
+        "concept_map",
+    ).structured_payload
+    diagram = payload["mermaid_source"]
+    assert diagram.startswith("graph TD")
+    assert diagram.count("-->") >= 7
+    assert diagram.count("|准备|") == 1
+    assert "|不适用于|" in diagram
+    assert "|迁移到|" in diagram
 
 
 def test_local_video_template_drops_an_english_trusted_timeline(

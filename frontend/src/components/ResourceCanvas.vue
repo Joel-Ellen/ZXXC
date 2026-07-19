@@ -169,22 +169,11 @@
                 <span class="text-xs font-semibold text-text-muted">{{ slot.label }}</span>
                 <span class="h-px flex-1 bg-subtle" />
               </div>
-              <article v-if="resourceType(card) === 'concept_map'" class="text-sm leading-7 text-text-secondary">
-                <div class="rounded-lg border-l-2 border-primary pl-4 py-1 mb-8">
-                  <p class="text-text-primary font-medium">{{ conceptSummary(card) }}</p>
-                </div>
-                <template v-if="conceptSections(card).length">
-                  <section v-for="(section, index) in conceptSections(card)" :key="'sec-'+index" class="mt-8 first:mt-0">
-                    <h3 class="text-base font-semibold text-text-primary">{{ section.heading }}</h3>
-                    <p class="mt-2 border-l border-subtle pl-4">{{ section.body }}</p>
-                  </section>
-                </template>
-                <ul v-if="conceptObjectives(card).length" class="mt-8 rounded-lg bg-[#FAFCFB] py-3 px-4 space-y-2"><li v-for="(item, index) in conceptObjectives(card)" :key="'obj-'+index" class="flex gap-2"><span class="text-primary font-medium shrink-0 text-xs">{{ index + 1 }}.</span><span>{{ item }}</span></li></ul>
-                <ul v-if="conceptBullets(card).length" class="mt-8 space-y-2 pl-1"><li v-for="item in conceptBullets(card)" :key="'b-'+item" class="flex gap-2"><span class="text-text-muted shrink-0">&bull;</span><span>{{ item }}</span></li></ul>
-                <MarkdownContent v-if="conceptMermaidSource(card)" class="mt-8" :content="''" :mermaid-source="conceptMermaidSource(card)" />
-                <div v-if="conceptMisconceptions(card).length" class="mt-8 rounded-lg border border-warning-soft bg-warning-soft/30 py-3 px-4 space-y-1.5"><p class="text-xs font-semibold text-warning-dark mb-2">常见误区</p><ul class="space-y-1.5"><li v-for="item in conceptMisconceptions(card)" :key="'mis-'+item" class="text-xs flex gap-2"><span class="text-warning shrink-0">&times;</span><span>{{ item }}</span></li></ul></div>
-                <ul v-if="conceptReviewPrompts(card).length" class="mt-8 space-y-2 bg-[#FAFCFB] rounded-lg py-3 px-4"><li v-for="(item, index) in conceptReviewPrompts(card)" :key="'rev-'+index" class="flex gap-2"><span class="text-primary font-medium shrink-0 text-xs">{{ index + 1 }}.</span><span>{{ item }}</span></li></ul>
-              </article>
+              <ConceptMapLearning
+                v-if="resourceType(card) === 'concept_map'"
+                :card="card"
+                :node-title="nodeTitle"
+              />
               <article v-else-if="resourceType(card) === 'code_snippet'" class="text-sm leading-7 text-text-secondary">
                 <div class="rounded-lg border-l-2 border-primary pl-4 py-1 mb-8">
                   <p>{{ codeScenario(card) }}</p>
@@ -308,6 +297,7 @@
 
 <script setup>
 import { computed, nextTick, ref, watch } from "vue";
+import ConceptMapLearning from "./ConceptMapLearning.vue";
 import MarkdownContent from "./MarkdownContent.vue";
 import ResourceCard from "./ResourceCard.vue";
 import { extractCodePreview, extractTextPreview } from "../utils/markdownPreview.js";
@@ -697,49 +687,6 @@ function previewText(card) {
 function previewCode(card) {
   const metadata = cardMetadata(card);
   return metadata.code ? extractCodePreview(`\`\`\`\n${metadata.code}\n\`\`\``, 8) : codePreview(bodyMarkdown(card));
-}
-
-function conceptMarkdown(card) {
-  const metadata = cardMetadata(card);
-  if (!metadata.title && !metadata.summary && !Array.isArray(metadata.bullets)) {
-    return bodyMarkdown(card);
-  }
-
-  const sections = Array.isArray(metadata.sections)
-    ? `\n\n${metadata.sections.map((section) => `### ${section.heading}\n${section.body}`).join("\n\n")}`
-    : "";
-  const bullets = Array.isArray(metadata.bullets) && metadata.bullets.length
-    ? `\n\n${metadata.bullets.map((bullet) => `- ${bullet}`).join("\n")}`
-    : "";
-  return `## ${metadata.title || cardLabel(resourceType(card))}\n\n${metadata.summary || ""}${sections}${bullets}`.trim();
-}
-
-function conceptMermaidSource(card) {
-  return cardMetadata(card).mermaid_source || "";
-}
-
-function conceptSummary(card) {
-  return cardMetadata(card).summary || textPreview(bodyMarkdown(card));
-}
-
-function conceptObjectives(card) {
-  return Array.isArray(cardMetadata(card).learning_objectives) ? cardMetadata(card).learning_objectives : [];
-}
-
-function conceptSections(card) {
-  return Array.isArray(cardMetadata(card).sections) ? cardMetadata(card).sections : [];
-}
-
-function conceptBullets(card) {
-  return Array.isArray(cardMetadata(card).bullets) ? cardMetadata(card).bullets : [];
-}
-
-function conceptMisconceptions(card) {
-  return Array.isArray(cardMetadata(card).common_misconceptions) ? cardMetadata(card).common_misconceptions : [];
-}
-
-function conceptReviewPrompts(card) {
-  return Array.isArray(cardMetadata(card).review_prompts) ? cardMetadata(card).review_prompts : [];
 }
 
 function codeLanguage(card) {

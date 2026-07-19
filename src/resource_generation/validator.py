@@ -20,6 +20,26 @@ from .schemas import CARD_TYPES, coerce_payload
 _MAX_PYTHON_SOURCE_BYTES = 16 * 1024
 _MAX_PYTHON_SOURCE_LINES = 600
 
+_MERMAID_SHAPED_NODE_RE = re.compile(
+    r"(?<![\w-])([A-Za-z][A-Za-z0-9_-]*)\s*(?=\[|\(\(|\{|\(\s)"
+)
+_MERMAID_EDGE_RE = re.compile(
+    r"(?P<source>[A-Za-z][A-Za-z0-9_-]*)\s*(?:-->\|[^|\r\n]{1,120}\||-->|-\.->|==>|---)\s*"
+    r"(?P<target>[A-Za-z][A-Za-z0-9_-]*)"
+)
+_MERMAID_LABELED_EDGE_RE = re.compile(r"-->(?:\|[^|\r\n]{1,120}\|)")
+
+
+def _mermaid_graph_metrics(source: str) -> tuple[set[str], list[tuple[str, str]], int]:
+    """Extract bounded structural metrics without trying to execute Mermaid."""
+    nodes = set(_MERMAID_SHAPED_NODE_RE.findall(source))
+    edges = [
+        (match.group("source"), match.group("target"))
+        for match in _MERMAID_EDGE_RE.finditer(source)
+    ]
+    labeled_edges = len(_MERMAID_LABELED_EDGE_RE.findall(source))
+    return nodes, edges, labeled_edges
+
 
 @dataclass(frozen=True)
 class ValidationIssue:
@@ -162,9 +182,52 @@ def _validate_semantics(
             ))
 
     if card_type == "concept_map":
-        diagram = str(payload.get("mermaid_source") or "").lstrip().lower()
+        raw_diagram = str(payload.get("mermaid_source") or "")
+        diagram = raw_diagram.lstrip().lower()
         if not (diagram.startswith("graph td") or diagram.startswith("flowchart td")):
             issues.append(ValidationIssue("mermaid_invalid", "Concept map Mermaid must start with graph TD or flowchart TD.", "mermaid_source"))
+        elif context.content_version.startswith("resource-v4"):
+            node_ids, edges, labeled_edges = _mermaid_graph_metrics(raw_diagram)
+            edge_nodes = {node_id for edge in edges for node_id in edge}
+            outgoing: dict[str, int] = {}
+            for source, _target in edges:
+                outgoing[source] = outgoing.get(source, 0) + 1
+            if len(node_ids) < 8:
+                issues.append(ValidationIssue(
+                    "mermaid_too_shallow",
+                    "v4 concept maps need at least eight labeled semantic nodes.",
+                    "mermaid_source",
+                ))
+            if len(node_ids) > 14:
+                issues.append(ValidationIssue(
+                    "mermaid_too_dense",
+                    "Concept maps must stay within fourteen nodes so the learner can scan them.",
+                    "mermaid_source",
+                ))
+            if len(edges) < 7:
+                issues.append(ValidationIssue(
+                    "mermaid_edges_missing",
+                    "v4 concept maps need at least seven directed relationships.",
+                    "mermaid_source",
+                ))
+            if max(outgoing.values(), default=0) < 3:
+                issues.append(ValidationIssue(
+                    "mermaid_branch_missing",
+                    "The core concept must branch into at least three learning relationships.",
+                    "mermaid_source",
+                ))
+            if labeled_edges < 5:
+                issues.append(ValidationIssue(
+                    "mermaid_relation_labels_missing",
+                    "At least five Mermaid edges must state the relationship between nodes.",
+                    "mermaid_source",
+                ))
+            if not edge_nodes.issubset(node_ids):
+                issues.append(ValidationIssue(
+                    "mermaid_dangling_node",
+                    "Every Mermaid edge endpoint must have a labeled node declaration.",
+                    "mermaid_source",
+                ))
         if context.content_version.startswith("resource-v4"):
             blueprint = payload.get("learning_blueprint")
             if not isinstance(blueprint, dict):

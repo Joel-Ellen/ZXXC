@@ -177,6 +177,24 @@ def _template_topic_title(context: ResourceContext) -> str:
     return f"当前知识点（{context.node_id}）" if context.node_id else "当前知识点"
 
 
+def _mermaid_label(value: Any, fallback: str, limit: int = 48) -> str:
+    """Return a bounded label that cannot break Mermaid's node syntax."""
+    text = str(value or fallback).replace("\r", " ").replace("\n", " ")
+    text = re.sub(r"\s+", " ", text).strip()
+    # Quotes, brackets and pipes have structural meaning in Mermaid labels.
+    text = (
+        text.replace('"', "'")
+        .replace("[", "（")
+        .replace("]", "）")
+        .replace("{", "（")
+        .replace("}", "）")
+        .replace("|", "／")
+    )
+    if len(text) > limit:
+        text = f"{text[: limit - 1]}…"
+    return text or fallback
+
+
 def _template_blueprint(context: ResourceContext) -> dict[str, Any]:
     if context.blueprint_snapshot:
         snapshot = dict(context.blueprint_snapshot)
@@ -258,6 +276,30 @@ def _template_payload(context: ResourceContext, card_type: str) -> dict[str, Any
             evidence_fields=["summary", "definition", "constraints", "mechanism"],
             blueprint=blueprint,
         )
+        prerequisite = _template_display_name(
+            context.prerequisite_nodes[0].get("title")
+            if context.prerequisite_nodes
+            else "",
+            "课程前置知识",
+        )
+        constraint = "必须先说明输入假设和成立条件。"
+        mechanism_one = "逐步跟踪状态变化"
+        mechanism_two = "每一步都保持核心不变量"
+        application = "在具体问题中选择合适的操作"
+        boundary = "违反前提的输入"
+        misconception = "只记住操作步骤，却不检查前提"
+        transfer = "共享相同核心约束的新问题"
+        mermaid_source = (
+            "graph TD\n"
+            f'P["{_mermaid_label(prerequisite, "课程前置知识")}"] -->|准备| C["{_mermaid_label(title, "当前概念")}"]\n'
+            f'C -->|成立条件| K["{_mermaid_label(constraint, "成立条件")}"]\n'
+            f'C -->|通过| M1["{_mermaid_label(mechanism_one, "状态变化")}"]\n'
+            f'M1 -->|保持| M2["{_mermaid_label(mechanism_two, "核心不变量")}"]\n'
+            f'C -->|应用于| A["{_mermaid_label(application, "典型应用")}"]\n'
+            f'C -->|不适用于| B["{_mermaid_label(boundary, "边界反例")}"]\n'
+            f'C -->|不要混淆| X["{_mermaid_label(misconception, "常见误区")}"]\n'
+            f'C -->|迁移到| T["{_mermaid_label(transfer, "迁移问题")}"]'
+        )
         return {
             **common,
             "render_type": card_type,
@@ -276,7 +318,7 @@ def _template_payload(context: ResourceContext, card_type: str) -> dict[str, Any
             "counterexamples": ["违反必要前提的输入不能直接套用同一种方法。"],
             "transfer_questions": [f"哪个新问题与{title}共享相同的核心约束？"],
             "review_prompts": ["说出核心不变量，并验证一个边界输入。"],
-            "mermaid_source": "graph TD\nA[前置知识] --> B[定义]\nB --> C[约束]\nC --> D[机制]\nD --> E[应用]",
+            "mermaid_source": mermaid_source,
             "learning_blueprint": blueprint,
         }
     if card_type == "code_snippet":
