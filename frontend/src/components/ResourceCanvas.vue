@@ -198,7 +198,7 @@
       <div v-else class="space-y-6" :key="'page-'+filterType">
         <template v-for="slot in cardTypeSlots" :key="slot.type">
           <div v-if="slot.card && !minimizedIds.includes(slot.card.resource_id)" class="rounded-xl border border-subtle bg-card p-6">
-            <template v-for="card of [slot.card]" :key="slot.type">
+            <template v-for="card of [slot.card]" :key="card.resource_id">
               <div class="flex items-center gap-3 mb-5">
                 <span class="text-xs font-semibold text-text-muted">{{ slot.label }}</span>
                 <span class="h-px flex-1 bg-subtle" />
@@ -379,11 +379,9 @@
 <script setup>
 import { computed, nextTick, ref, watch } from "vue";
 import CodePracticePanel from "./CodePracticePanel.vue";
-import ConceptMapLearning from "./ConceptMapLearning.vue";
 import IconPresentation from "./icons/IconPresentation.vue";
 import MarkdownContent from "./MarkdownContent.vue";
 import PptPreview from "./PptPreview.vue";
-import ResourceCard from "./ResourceCard.vue";
 import { extractCodePreview, extractTextPreview } from "../utils/markdownPreview.js";
 import { buildNodePresentationModel, createNodePptBlob, downloadBlob } from "../utils/pptGenerator.js";
 import {
@@ -599,14 +597,6 @@ const minimizedCards = computed(() =>
   sortedCards.value.filter((card) => minimizedIds.value.includes(card.resource_id)),
 );
 
-const visibleCards = computed(() => {
-  const base = sortedCards.value.filter((card) => !minimizedIds.value.includes(card.resource_id));
-  if (focusMode.value && activeCardId.value) {
-    return base.filter((card) => card.resource_id === activeCardId.value);
-  }
-  return base;
-});
-
 const quizCard = computed(() =>
   sortedCards.value.find((card) => resourceType(card) === "diagnostic_quiz"),
 );
@@ -663,7 +653,6 @@ const resourceGuidance = computed(() => ({
   all: "多种学习资源共同支持理解、实践与诊断的完整过程。",
 }[props.filterType] ?? "当前资源帮助你理解并掌握这个知识点。"));
 
-const availableTypes = computed(() => new Set(props.cards.map((card) => resourceType(card))));
 const nextPendingNode = computed(() =>
   props.pathNodes.find((node) => (node.mastery ?? 0) < 0.65 && node.id !== props.currentNode) ?? null,
 );
@@ -674,29 +663,6 @@ const learningTone = computed(() => {
   if (currentMastery.value >= 65) return "节点达标";
   return "继续学习";
 });
-
-const learningStages = computed(() => [
-  {
-    label: "目标",
-    detail: currentNodeMeta.value ? "定位当前知识点" : "等待路径",
-    active: Boolean(currentNodeMeta.value),
-  },
-  {
-    label: "资源",
-    detail: props.loading ? "生成中" : `${props.cards.length} 份材料`,
-    active: props.loading || props.cards.length > 0,
-  },
-  {
-    label: "练习",
-    detail: availableTypes.value.has("interactive_exercise") ? "可训练" : "待生成",
-    active: availableTypes.value.has("interactive_exercise"),
-  },
-  {
-    label: "诊断",
-    detail: availableTypes.value.has("diagnostic_quiz") ? "可提交" : "待评估",
-    active: availableTypes.value.has("diagnostic_quiz"),
-  },
-]);
 
 const diagnosticStatusText = computed(() => {
   const diagnostic = props.lastDiagnostic || submittedDiagnostic.value;
@@ -838,21 +804,6 @@ function previewText(card) {
 
 function previewCode(card) {
   return extractCodePreview(extractCCode(card), 8);
-}
-
-function conceptMarkdown(card) {
-  const metadata = cardMetadata(card);
-  if (!metadata.title && !metadata.summary && !Array.isArray(metadata.bullets)) {
-    return bodyMarkdown(card);
-  }
-
-  const sections = Array.isArray(metadata.sections)
-    ? `\n\n${metadata.sections.map((section) => `### ${section.heading}\n${section.body}`).join("\n\n")}`
-    : "";
-  const bullets = Array.isArray(metadata.bullets) && metadata.bullets.length
-    ? `\n\n${metadata.bullets.map((bullet) => `- ${bullet}`).join("\n")}`
-    : "";
-  return `## ${metadata.title || cardLabel(resourceType(card))}\n\n${metadata.summary || ""}${sections}${bullets}`.trim();
 }
 
 function conceptMermaidSource(card) {
@@ -1038,31 +989,6 @@ function cardLabel(cardType) {
   return props.getCardLabel(cardType);
 }
 
-function agentLabel(cardType) {
-  return props.getAgentLabel(cardType);
-}
-
-function cardColor(cardType) {
-  switch (cardType) {
-    case "concept_map": return "primary";
-    case "code_snippet": return "info";
-    case "interactive_exercise": return "tertiary";
-    case "video_summary": return "secondary";
-    case "diagnostic_quiz": return "warning";
-    default: return "primary";
-  }
-}
-
-function progressHint(cardType) {
-  if (cardType === "diagnostic_quiz") {
-    return 72;
-  }
-  if (cardType === "code_snippet") {
-    return 58;
-  }
-  return 84;
-}
-
 function nodeChipClass(node) {
   if (node.id === selectedNodeId.value) {
     return "border-primary/45 bg-primary-soft font-semibold text-primary-dark ring-1 ring-primary/20";
@@ -1197,17 +1123,6 @@ function textPreview(content) {
   return extractTextPreview(content, 190);
 }
 
-function previewLabel(cardType) {
-  switch (cardType) {
-    case "code_snippet": return "代码示例";
-    case "interactive_exercise": return "互动练习";
-    case "diagnostic_quiz": return "诊断测验";
-    case "video_summary": return "视频摘要";
-    case "concept_map":
-    default: return "概念导图";
-  }
-}
-
 function previewDesc(cardType) {
   switch (cardType) {
     case "code_snippet": return "可运行的代码片段与逐步讲解";
@@ -1247,22 +1162,6 @@ function slotSlogan(_cardType) {
   const s = SLOGANS[_sloganIdx % SLOGANS.length];
   _sloganIdx++;
   return s;
-}
-
-function pinCard(cardId) {
-  const next = orderedIds.value.filter((id) => id !== cardId);
-  orderedIds.value = [cardId, ...next];
-  setActiveCard(cardId);
-}
-
-function minimizeCard(cardId) {
-  if (!minimizedIds.value.includes(cardId)) {
-    minimizedIds.value = [...minimizedIds.value, cardId];
-  }
-  if (activeCardId.value === cardId) {
-    const fallback = orderedIds.value.find((id) => !minimizedIds.value.includes(id) && id !== cardId);
-    activeCardId.value = fallback ?? "";
-  }
 }
 
 function restoreCard(cardId) {
