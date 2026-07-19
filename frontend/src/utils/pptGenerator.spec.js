@@ -165,6 +165,91 @@ describe("node PPT generator", () => {
       .rejects
       .toThrow("当前节点还没有可导出的学习资料");
   });
+
+  it("adds a diagram slide when the concept card carries mermaid source", () => {
+    const mermaid = 'graph TD\nA["前置"] --> B["概念"]';
+    const model = buildNodePresentationModel({
+      nodeTitle: "二叉树",
+      cards: [{
+        resource_type: "concept_map",
+        title: "二叉树核心概念",
+        structured_payload: {
+          definition: "二叉树中每个节点最多有两个子节点。",
+          mermaid_source: mermaid,
+          constraints: ["根节点可以没有子节点。"],
+          mechanism: ["从根节点向左右子树递归展开"],
+        },
+      }],
+    });
+
+    const diagram = model.slides.find((slide) => slide.kind === "diagram");
+    expect(diagram).toBeTruthy();
+    expect(diagram.mermaid).toBe(mermaid);
+    expect(diagram.fallback.bullets.length).toBeGreaterThan(0);
+  });
+
+  it("exports successfully even when mermaid rendering is unavailable", async () => {
+    const result = await createNodePptBlob({
+      nodeTitle: "二叉树",
+      cards: [{
+        resource_type: "concept_map",
+        title: "二叉树核心概念",
+        structured_payload: {
+          definition: "二叉树中每个节点最多有两个子节点。",
+          mermaid_source: "graph TD\nA --> B",
+        },
+      }],
+    });
+
+    expect(result.blob.type).toBe(MIME_TYPE);
+    const bytes = new Uint8Array(await blobToArrayBuffer(result.blob));
+    expect(String.fromCharCode(...bytes.slice(0, 2))).toBe("PK");
+  });
+
+  it("strips residual markdown emphasis markers from slide text", () => {
+    const model = buildNodePresentationModel({
+      nodeTitle: "排序",
+      cards: [{
+        resource_type: "concept_map",
+        title: "快速排序",
+        structured_payload: {
+          definition: "**快速排序**基于*分治*策略。",
+          learning_objectives: ["1. 理解 `partition` 的作用", "> 掌握基准选择"],
+        },
+      }],
+    });
+
+    const deckText = JSON.stringify(model.slides);
+    expect(deckText).toContain("快速排序基于分治策略");
+    expect(deckText).toContain("理解 partition 的作用");
+    expect(deckText).toContain("掌握基准选择");
+    expect(deckText).not.toContain("**");
+    expect(deckText).not.toContain("> 掌握");
+  });
+
+  it("splits overlong bullet lists into continuation slides instead of shrinking", () => {
+    const longBullets = Array.from({ length: 14 }, (_, index) => (
+      `第 ${index + 1} 条：这是一条足够长的中文要点，用来验证内容会按估算行数拆分成续页而不是被压缩到不可读的字号。`
+    ));
+    const model = buildNodePresentationModel({
+      nodeTitle: "分页",
+      cards: [{
+        resource_type: "concept_map",
+        title: "长内容概念",
+        structured_payload: {
+          definition: "定义。",
+          learning_objectives: longBullets,
+        },
+      }],
+    });
+
+    const pages = model.slides.filter((slide) => slide.title.startsWith("长内容概念") && slide.kind === "content");
+    expect(pages.length).toBeGreaterThan(1);
+    expect(pages.some((slide) => slide.title.endsWith("（续）"))).toBe(true);
+    const allBullets = pages.flatMap((slide) => slide.bullets);
+    // 分页不丢内容（原逻辑 slice(0, 6) 会截断）。
+    expect(allBullets.filter((item) => item.startsWith("第")).length).toBe(14);
+  });
 });
 
 function blobToArrayBuffer(blob) {

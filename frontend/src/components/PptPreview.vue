@@ -131,6 +131,19 @@
                     <pre class="ppt-preview-code"><code>{{ currentSlide.code }}</code></pre>
                   </template>
 
+                  <template v-else-if="currentSlide.kind === 'diagram'">
+                    <span class="ppt-preview-slide-kicker">{{ currentSlide.kicker || "结构总览" }}</span>
+                    <h3>{{ currentSlide.title }}</h3>
+                    <div v-show="!diagramError" ref="diagramHost" class="ppt-preview-diagram" />
+                    <template v-if="diagramError">
+                      <p class="ppt-preview-slide-lead">{{ currentSlide.fallback?.lead }}</p>
+                      <ul v-if="currentSlide.fallback?.bullets?.length" class="ppt-preview-bullets">
+                        <li v-for="(item, index) in currentSlide.fallback.bullets" :key="`diagram-fallback-${index}`">{{ item }}</li>
+                      </ul>
+                    </template>
+                    <p v-if="currentSlide.note" class="ppt-preview-slide-note">{{ currentSlide.note }}</p>
+                  </template>
+
                   <template v-else-if="currentSlide.kind === 'summary'">
                     <span class="ppt-preview-slide-kicker">节点学习</span>
                     <h3>{{ currentSlide.title }}</h3>
@@ -178,6 +191,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { CODE_LANGUAGE_LABEL, normalizeCodeLanguage } from "../utils/codeExample.js";
+import { renderMermaidDiagram } from "../utils/mermaidRuntime.js";
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -188,11 +202,29 @@ const props = defineProps({
 
 const emit = defineEmits(["close", "download"]);
 const dialog = ref(null);
+const diagramHost = ref(null);
+const diagramError = ref(false);
 const currentIndex = ref(0);
 let previousBodyOverflow = "";
 
 const slides = computed(() => (Array.isArray(props.model?.slides) ? props.model.slides : []));
 const currentSlide = computed(() => slides.value[currentIndex.value] || slides.value[0] || null);
+
+watch(
+  () => [currentSlide.value, props.open],
+  async ([slide, open]) => {
+    if (!open || slide?.kind !== "diagram" || !slide.mermaid) return;
+    diagramError.value = false;
+    await nextTick();
+    if (!diagramHost.value) return;
+    try {
+      await renderMermaidDiagram({ source: slide.mermaid, element: diagramHost.value, isLight: true });
+    } catch {
+      diagramError.value = true;
+    }
+  },
+  { immediate: true },
+);
 
 watch(
   () => props.open,
@@ -645,6 +677,24 @@ function trapFocus(event) {
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.ppt-preview-diagram {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  margin-top: 0.8rem;
+  border-radius: var(--radius-sm);
+  background: #ffffff;
+  padding: 0.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ppt-preview-diagram :deep(svg) {
+  max-width: 100%;
+  height: auto;
 }
 
 .ppt-preview-summary-list {

@@ -4,9 +4,18 @@ import {
   normalizeCodeLanguage,
   resolveStructuredPayload,
 } from "./codeExample.js";
+import { renderMermaidSvg } from "./mermaidRuntime.js";
 
 const MIME_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 const BULLET = "\u2022";
+
+// \u5fae\u8f6f\u96c5\u9ed1\u5728\u56fd\u5185 Windows / WPS / Office \u5168\u7248\u672c\u53ef\u7528\uff1bAptos \u4ec5 Office 2024+\uff0c
+// \u7f3a\u5b57\u4f53\u65f6\u4e2d\u6587\u4f1a\u56de\u9000\u5230\u5b8b\u4f53\uff0c\u89c2\u611f\u660e\u663e\u4e0b\u964d\u3002
+const FONTS = {
+  head: "Microsoft YaHei",
+  body: "Microsoft YaHei",
+  code: "Consolas",
+};
 
 const COLORS = {
   ink: "17352D",
@@ -23,6 +32,25 @@ const COLORS = {
   codeText: "E7F4EE",
   white: "FFFFFF",
 };
+
+// \u4ee3\u7801\u9762\u677f\uff08\u6df1\u5e95\uff09\u4e0a\u7684\u8bed\u6cd5\u7740\u8272\u3002
+const CODE_TOKEN_COLORS = {
+  comment: "6FA287",
+  string: "E0C083",
+  keyword: "7FB4E8",
+  preprocessor: "C79FD8",
+  plain: COLORS.codeText,
+};
+
+const C_KEYWORDS = new Set([
+  "auto", "bool", "break", "case", "char", "const", "continue", "default", "do",
+  "double", "else", "enum", "extern", "false", "float", "for", "goto", "if",
+  "int", "long", "NULL", "register", "return", "short", "signed", "sizeof",
+  "size_t", "static", "struct", "switch", "true", "typedef", "union",
+  "unsigned", "void", "volatile", "while",
+]);
+
+const CODE_LINES_PER_SLIDE = 28;
 
 const CARD_META = {
   concept_map: { label: "概念理解", accent: COLORS.primary },
@@ -82,8 +110,60 @@ export function buildNodePresentationModel({ nodeTitle = "", nodeId = "", cards 
     title,
     nodeId: String(nodeId || ""),
     filename: `EduAgent-${safeFilename(title)}.pptx`,
-    slides,
+    slides: paginateSlides(slides),
   };
+}
+
+// ── 溢出分页 ────────────────────────────────────────────────────────────
+// 以估算行数取代无限 fit:"shrink"：长内容拆成续页，字号保持可读。
+
+const BULLET_CHARS_PER_LINE = 42;
+
+function textWeight(text) {
+  let weight = 0;
+  for (const character of String(text || "")) {
+    weight += character.charCodeAt(0) > 0x2e80 ? 1 : 0.55;
+  }
+  return weight;
+}
+
+function bulletLineCount(text) {
+  return Math.max(1, Math.ceil(textWeight(text) / BULLET_CHARS_PER_LINE));
+}
+
+function paginateSlides(slides) {
+  const result = [];
+  for (const descriptor of slides) {
+    if (descriptor.kind !== "content" || !(descriptor.bullets?.length > 0)) {
+      result.push(descriptor);
+      continue;
+    }
+    const budget = descriptor.lead ? 8 : 11;
+    const pages = [];
+    let current = [];
+    let usedLines = 0;
+    for (const bullet of descriptor.bullets) {
+      const lines = bulletLineCount(bullet);
+      if (current.length && usedLines + lines > budget) {
+        pages.push(current);
+        current = [];
+        usedLines = 0;
+      }
+      current.push(bullet);
+      usedLines += lines;
+    }
+    if (current.length) pages.push(current);
+
+    pages.forEach((bullets, index) => {
+      result.push({
+        ...descriptor,
+        title: index === 0 ? descriptor.title : `${descriptor.title}（续）`,
+        lead: index === 0 ? descriptor.lead : "",
+        bullets,
+      });
+    });
+  }
+  return result;
 }
 
 export async function generateNodePpt(input = {}) {
@@ -110,13 +190,17 @@ export async function createNodePptBlob(input = {}) {
   pptx.subject = `${model.title} 节点学习课件`;
   pptx.title = model.title;
   pptx.theme = {
-    headFontFace: "Aptos Display",
-    bodyFontFace: "Aptos",
+    headFontFace: FONTS.head,
+    bodyFontFace: FONTS.body,
   };
+
+  const diagramImages = await renderDiagramImages(model.slides);
 
   model.slides.forEach((descriptor, index) => {
     const slide = pptx.addSlide();
-    renderSlide(slide, pptx, descriptor, index + 1, model.slides.length, model.title);
+    renderSlide(slide, pptx, descriptor, index + 1, model.slides.length, model.title, {
+      diagramImage: diagramImages.get(index) || null,
+    });
   });
 
   const output = await pptx.write({ outputType: "blob", compression: true });
@@ -127,6 +211,64 @@ export async function createNodePptBlob(input = {}) {
     slideCount: model.slides.length,
     nodeId: model.nodeId,
   };
+}
+
+// ── 概念关系图渲染（mermaid → PNG dataURL）────────────────────────────
+// 任一环节失败都只降级为文字版式，绝不阻塞导出。
+
+async function renderDiagramImages(slides) {
+  const images = new Map();
+  await Promise.all(slides.map(async (descriptor, index) => {
+    if (descriptor.kind !== "diagram" || !descriptor.mermaid) return;
+    try {
+      const svg = await renderMermaidSvg({ source: descriptor.mermaid, isLight: true });
+      if (!svg) return;
+      const image = await svgToPngDataUrl(svg);
+      if (image) images.set(index, image);
+    } catch {
+      // 无浏览器画布 / mermaid 运行时不可用（如测试环境）时静默降级。
+    }
+  }));
+  return images;
+}
+
+function parseSvgSize(svg) {
+  const viewBox = /viewBox\s*=\s*"[\d.\s-]*?([\d.]+)\s+([\d.]+)"\s*/.exec(svg)
+    || /viewBox\s*=\s*"0 0 ([\d.]+) ([\d.]+)"/.exec(svg);
+  if (viewBox) {
+    const width = Number.parseFloat(viewBox[1]);
+    const height = Number.parseFloat(viewBox[2]);
+    if (width > 0 && height > 0) return { width, height };
+  }
+  return { width: 1200, height: 700 };
+}
+
+async function svgToPngDataUrl(svg, scale = 2) {
+  if (typeof document === "undefined" || typeof Image === "undefined" || typeof URL?.createObjectURL !== "function") {
+    return null;
+  }
+  const { width, height } = parseSvgSize(svg);
+  const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  try {
+    const image = new Image();
+    await new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = () => reject(new Error("mermaid 图像解码失败"));
+      image.src = url;
+    });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(width * scale);
+    canvas.height = Math.round(height * scale);
+    const context = canvas.getContext("2d");
+    if (!context) return null;
+    context.fillStyle = "#FFFFFF";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return { dataUrl: canvas.toDataURL("image/png"), width, height };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 export function downloadBlob(blob, filename) {
@@ -200,9 +342,24 @@ function conceptSlides(title, payload, card) {
     kicker: "概念理解",
     title,
     lead: definition,
-    bullets: objectives.slice(0, 6),
+    bullets: objectives.slice(0, 20),
     note: conceptNotes.join("；") || "先说清楚定义，再追踪它如何工作。",
   });
+
+  const mermaidSource = rawText(payload.mermaid_source, payload.mermaid_code, payload.mermaid_src);
+  if (mermaidSource) {
+    slides.push({
+      kind: "diagram",
+      kicker: "结构总览",
+      title: `${title}：概念关系图`,
+      mermaid: mermaidSource,
+      note: "沿箭头讲解：先前置与条件，再机制、应用与边界。",
+      fallback: {
+        lead: firstText(summary, definition),
+        bullets: uniqueStrings([...constraints, ...mechanism]).slice(0, 6),
+      },
+    });
+  }
 
   if (constraints.length || mechanism.length) {
     slides.push({
@@ -242,7 +399,7 @@ function conceptSlides(title, payload, card) {
     ...listValue(payload, "review_prompts"),
   ]);
   if (transfer.length) {
-    slides.push({ kind: "content", kicker: "迁移练习", title: "换一个问题试试看", lead: "先预测结构，再检查它是否满足当前概念的条件。", bullets: transfer.slice(0, 6) });
+    slides.push({ kind: "content", kicker: "迁移练习", title: "换一个问题试试看", lead: "先预测结构，再检查它是否满足当前概念的条件。", bullets: transfer.slice(0, 20) });
   }
   return slides;
 }
@@ -264,7 +421,7 @@ function codeSlides(title, payload, card) {
     kicker: "代码示例",
     title,
     lead: scenario,
-    bullets: walkthrough.slice(0, 6),
+    bullets: walkthrough.slice(0, 20),
     note: codeNotes.join("；") || "读代码时，逐步追踪状态变化和不变量。",
   });
 
@@ -275,19 +432,21 @@ function codeSlides(title, payload, card) {
       kicker: "原理解释",
       title: `${title}：为什么可行？`,
       lead: explanation,
-      bullets: walkthrough.slice(0, 6),
+      bullets: walkthrough.slice(0, 20),
     });
   }
 
   const code = extractCCode(card);
   if (code) {
     const lines = code.split("\n");
-    for (let index = 0; index < lines.length; index += 34) {
+    const pageCount = Math.ceil(lines.length / CODE_LINES_PER_SLIDE);
+    for (let index = 0; index < lines.length; index += CODE_LINES_PER_SLIDE) {
+      const page = Math.floor(index / CODE_LINES_PER_SLIDE) + 1;
       slides.push({
         kind: "code",
         kicker: "可运行片段",
-        title: lines.length > 34 ? `${title}：代码 ${Math.floor(index / 34) + 1}` : `${title}：代码`,
-        code: lines.slice(index, index + 34).join("\n"),
+        title: pageCount > 1 ? `${title}：代码 ${page}/${pageCount}` : `${title}：代码`,
+        code: lines.slice(index, index + CODE_LINES_PER_SLIDE).join("\n"),
         language: normalizeCodeLanguage(payload.language),
       });
     }
@@ -333,7 +492,7 @@ function exerciseSlides(title, payload, card) {
     kicker: "动手练习",
     title,
     lead: goal || prompt,
-    bullets: hasSeparatePrompt ? [] : steps.slice(0, 6),
+    bullets: hasSeparatePrompt ? [] : steps.slice(0, 20),
     note: overviewNotes.join("；"),
   }];
   if (hasSeparatePrompt) {
@@ -342,7 +501,7 @@ function exerciseSlides(title, payload, card) {
       kicker: "任务说明",
       title: "开始完成任务",
       lead: prompt,
-      bullets: steps.slice(0, 6),
+      bullets: steps.slice(0, 20),
       note: expectedOutcome,
     });
   }
@@ -363,7 +522,7 @@ function exerciseSlides(title, payload, card) {
       kicker: "评分标准",
       title: "完成后如何判断质量",
       lead: firstText(payload.expected_outcome, "按证据逐项检查练习结果。"),
-      bullets: rubric.slice(0, 7),
+      bullets: rubric.slice(0, 20),
     });
   }
   if (payload.solution_outline) {
@@ -384,7 +543,7 @@ function videoSlides(title, payload, card) {
     ? payload.timeline.map((item) => `${firstText(item?.label, "片段")}：${cleanMarkdown(item?.summary)}`).filter(Boolean)
     : [];
   const routeItems = uniqueStrings([...timeline, ...readingSequence]);
-  const slides = [{ kind: "content", kicker: "视频回顾", title, lead: summary, bullets: points.slice(0, 7), note: payload.duration_minutes ? `建议用时：${payload.duration_minutes} 分钟` : "观看时先抓住主线，再回到关键细节。" }];
+  const slides = [{ kind: "content", kicker: "视频回顾", title, lead: summary, bullets: points.slice(0, 20), note: payload.duration_minutes ? `建议用时：${payload.duration_minutes} 分钟` : "观看时先抓住主线，再回到关键细节。" }];
   if (routeItems.length || watchFocus.length) {
     slides.push({
       kind: "columns",
@@ -449,7 +608,10 @@ function buildTakeaways(cards) {
   return uniqueStrings(takeaways).slice(0, 3);
 }
 
-function renderSlide(slide, pptx, descriptor, slideNumber, totalSlides, nodeTitle) {
+function renderSlide(slide, pptx, descriptor, slideNumber, totalSlides, nodeTitle, { diagramImage = null } = {}) {
+  if (descriptor.note || descriptor.detail) {
+    slide.addNotes([descriptor.note, descriptor.detail].filter(Boolean).join("\n"));
+  }
   if (descriptor.kind === "cover") return renderCover(slide, pptx, descriptor, slideNumber, totalSlides);
 
   slide.background = { color: COLORS.paper };
@@ -469,15 +631,57 @@ function renderSlide(slide, pptx, descriptor, slideNumber, totalSlides, nodeTitl
     renderSummary(slide, pptx, descriptor, slideNumber, totalSlides, nodeTitle);
     return;
   }
+  if (descriptor.kind === "diagram") {
+    if (diagramImage) {
+      renderDiagram(slide, pptx, descriptor, slideNumber, totalSlides, nodeTitle, diagramImage);
+    } else {
+      // mermaid 渲染不可用时降级为文字版式，保证内容不缺页。
+      renderContent(slide, pptx, {
+        ...descriptor,
+        kind: "content",
+        lead: descriptor.fallback?.lead || "",
+        bullets: descriptor.fallback?.bullets || [],
+      }, slideNumber, totalSlides, nodeTitle);
+    }
+    return;
+  }
   renderContent(slide, pptx, descriptor, slideNumber, totalSlides, nodeTitle);
+}
+
+function renderDiagram(slide, pptx, descriptor, slideNumber, totalSlides, nodeTitle, diagramImage) {
+  addHeader(slide, pptx, descriptor, slideNumber, totalSlides, nodeTitle);
+  const area = { x: 0.82, y: 1.62, w: 11.65, h: 4.75 };
+  slide.addShape(pptx.ShapeType.roundRect, { ...area, fill: { color: COLORS.white }, line: { color: COLORS.line, width: 0.8 }, rectRadius: 0.08 });
+  const padding = 0.22;
+  const innerWidth = area.w - padding * 2;
+  const innerHeight = area.h - padding * 2;
+  const ratio = diagramImage.width > 0 && diagramImage.height > 0
+    ? diagramImage.width / diagramImage.height
+    : innerWidth / innerHeight;
+  let width = innerWidth;
+  let height = width / ratio;
+  if (height > innerHeight) {
+    height = innerHeight;
+    width = height * ratio;
+  }
+  slide.addImage({
+    data: diagramImage.dataUrl,
+    x: area.x + padding + (innerWidth - width) / 2,
+    y: area.y + padding + (innerHeight - height) / 2,
+    w: width,
+    h: height,
+  });
+  if (descriptor.note) {
+    slide.addText(descriptor.note, { x: 0.84, y: 6.52, w: 11.5, h: 0.4, fontSize: 11, color: COLORS.primary, italic: true, margin: 0, fit: "shrink" });
+  }
 }
 
 function renderCover(slide, pptx, descriptor, slideNumber, totalSlides) {
   slide.background = { color: COLORS.ink };
   slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 0.28, h: SLIDE_HEIGHT, fill: { color: COLORS.teal }, line: { color: COLORS.teal } });
   slide.addShape(pptx.ShapeType.rect, { x: 0.72, y: 1.15, w: 1.1, h: 0.12, fill: { color: COLORS.gold }, line: { color: COLORS.gold } });
-  slide.addText("EDUAGENT  /  NODE STUDY", { x: 0.78, y: 0.62, w: 5.8, h: 0.28, fontFace: "Aptos", fontSize: 10, bold: true, charSpacing: 1.8, color: "B8D6A7", margin: 0 });
-  slide.addText(descriptor.title, { x: 0.72, y: 1.62, w: 11.2, h: 1.35, fontFace: "Aptos Display", fontSize: 30, bold: true, color: COLORS.white, breakLine: false, fit: "shrink", margin: 0 });
+  slide.addText("EDUAGENT  /  NODE STUDY", { x: 0.78, y: 0.62, w: 5.8, h: 0.28, fontFace: FONTS.body, fontSize: 10, bold: true, charSpacing: 1.8, color: "B8D6A7", margin: 0 });
+  slide.addText(descriptor.title, { x: 0.72, y: 1.62, w: 11.2, h: 1.35, fontFace: FONTS.head, fontSize: 30, bold: true, color: COLORS.white, breakLine: false, fit: "shrink", margin: 0 });
   slide.addText(descriptor.subtitle, { x: 0.78, y: 3.35, w: 5.5, h: 0.45, fontSize: 19, bold: true, color: "D7E9E0", margin: 0 });
   slide.addText(descriptor.detail, { x: 0.8, y: 4.05, w: 7.2, h: 0.5, fontSize: 12, color: "A8C7B9", margin: 0, fit: "shrink" });
   addFooter(slide, slideNumber, totalSlides, descriptor.title, { dark: true });
@@ -489,7 +693,7 @@ function renderAgenda(slide, pptx, descriptor, slideNumber, totalSlides, nodeTit
   items.forEach((item, index) => {
     const y = 1.75 + index * 0.54;
     slide.addShape(pptx.ShapeType.ellipse, { x: 0.86, y: y + 0.06, w: 0.24, h: 0.24, fill: { color: COLORS.primary }, line: { color: COLORS.primary } });
-    slide.addText(String(index + 1).padStart(2, "0"), { x: 1.28, y, w: 0.5, h: 0.3, fontFace: "Aptos", fontSize: 11, bold: true, color: COLORS.primary, margin: 0 });
+    slide.addText(String(index + 1).padStart(2, "0"), { x: 1.28, y, w: 0.5, h: 0.3, fontFace: FONTS.body, fontSize: 11, bold: true, color: COLORS.primary, margin: 0 });
     slide.addText(item, { x: 1.95, y: y - 0.02, w: 9.8, h: 0.34, fontSize: 17, color: COLORS.ink, margin: 0, fit: "shrink" });
     slide.addShape(pptx.ShapeType.line, { x: 1.95, y: y + 0.38, w: 9.8, h: 0, line: { color: COLORS.line, width: 0.8 } });
   });
@@ -503,12 +707,17 @@ function renderContent(slide, pptx, descriptor, slideNumber, totalSlides, nodeTi
     y += 1.22;
   }
   if (descriptor.bullets?.length) {
-    const lines = descriptor.bullets.slice(0, 8).map((item) => `${BULLET} ${item}`).join("\n");
-    slide.addShape(pptx.ShapeType.roundRect, { x: 0.82, y, w: 11.65, h: Math.min(3.95, Math.max(1.2, descriptor.bullets.length * 0.52 + 0.35)), fill: { color: COLORS.panel }, line: { color: COLORS.line, width: 0.8 }, rectRadius: 0.08 });
-    slide.addText(lines, { x: 1.1, y: y + 0.28, w: 10.95, h: Math.min(3.45, Math.max(0.7, descriptor.bullets.length * 0.52)), fontSize: 15, color: COLORS.inkMuted, breakLine: false, fit: "shrink", margin: 0.02, paraSpaceAfter: 8, valign: "middle" });
+    // 分页已保证条目数在预算内；盒高按估算的换行行数计算，避免长句被压缩。
+    const bullets = descriptor.bullets;
+    const estimatedLines = bullets.reduce((total, item) => total + bulletLineCount(item), 0);
+    const textHeight = Math.min(4.2, Math.max(0.7, estimatedLines * 0.3 + bullets.length * 0.14));
+    const boxHeight = Math.min(4.55, textHeight + 0.5);
+    const lines = bullets.map((item) => `${BULLET} ${item}`).join("\n");
+    slide.addShape(pptx.ShapeType.roundRect, { x: 0.82, y, w: 11.65, h: boxHeight, fill: { color: COLORS.panel }, line: { color: COLORS.line, width: 0.8 }, rectRadius: 0.08 });
+    slide.addText(lines, { x: 1.1, y: y + 0.25, w: 10.95, h: textHeight, fontSize: 15, color: COLORS.inkMuted, breakLine: false, fit: "shrink", margin: 0.02, paraSpaceAfter: 8, valign: "middle" });
   }
   if (descriptor.note) {
-    slide.addText(descriptor.note, { x: 0.84, y: 6.05, w: 11.5, h: 0.46, fontSize: 11, color: COLORS.primary, italic: true, margin: 0, fit: "shrink" });
+    slide.addText(descriptor.note, { x: 0.84, y: 6.52, w: 11.5, h: 0.4, fontSize: 11, color: COLORS.primary, italic: true, margin: 0, fit: "shrink" });
   }
 }
 
@@ -529,9 +738,105 @@ function renderColumns(slide, pptx, descriptor, slideNumber, totalSlides, nodeTi
 
 function renderCode(slide, pptx, descriptor, slideNumber, totalSlides, nodeTitle) {
   addHeader(slide, pptx, descriptor, slideNumber, totalSlides, nodeTitle);
-  slide.addText(normalizeCodeLanguage(descriptor.language).toUpperCase() || CODE_LANGUAGE.toUpperCase(), { x: 0.84, y: 1.5, w: 2.2, h: 0.3, fontFace: "Aptos", fontSize: 10, bold: true, color: COLORS.teal, charSpacing: 1.2, margin: 0 });
+  slide.addText(normalizeCodeLanguage(descriptor.language).toUpperCase() || CODE_LANGUAGE.toUpperCase(), { x: 0.84, y: 1.5, w: 2.2, h: 0.3, fontFace: FONTS.body, fontSize: 10, bold: true, color: COLORS.teal, charSpacing: 1.2, margin: 0 });
   slide.addShape(pptx.ShapeType.roundRect, { x: 0.82, y: 1.88, w: 11.65, h: 4.65, fill: { color: COLORS.code }, line: { color: COLORS.code }, rectRadius: 0.08 });
-  slide.addText(descriptor.code, { x: 1.08, y: 2.16, w: 11.1, h: 4.05, fontFace: "Consolas", fontSize: 11.5, color: COLORS.codeText, margin: 0.02, fit: "shrink", breakLine: false, valign: "top" });
+  slide.addText(highlightCodeRuns(descriptor.code), { x: 1.08, y: 2.16, w: 11.1, h: 4.05, fontFace: FONTS.code, fontSize: 11.5, color: COLORS.codeText, margin: 0.02, fit: "shrink", valign: "top" });
+}
+
+// ── C 代码基础语法着色（注释 / 字符串 / 关键字 / 预处理指令）──────────
+function highlightCodeRuns(code) {
+  const runs = [];
+  let inBlockComment = false;
+  const lines = String(code || "").split("\n");
+  lines.forEach((line, lineIndex) => {
+    const lineRuns = tokenizeCodeLine(line, inBlockComment);
+    inBlockComment = lineRuns.inBlockComment;
+    for (const token of lineRuns.tokens) {
+      runs.push({ text: token.text, options: { color: CODE_TOKEN_COLORS[token.type] || CODE_TOKEN_COLORS.plain } });
+    }
+    if (lineIndex < lines.length - 1) {
+      const last = runs[runs.length - 1];
+      if (last) {
+        last.options.breakLine = true;
+      } else {
+        runs.push({ text: "", options: { breakLine: true } });
+      }
+    }
+  });
+  return runs.length ? runs : [{ text: String(code || ""), options: {} }];
+}
+
+function tokenizeCodeLine(line, startsInBlockComment) {
+  const tokens = [];
+  let rest = line;
+  let inBlockComment = startsInBlockComment;
+
+  const push = (text, type) => {
+    if (text) tokens.push({ text, type });
+  };
+
+  if (!inBlockComment && /^\s*#/.test(line)) {
+    push(line, "preprocessor");
+    return { tokens, inBlockComment };
+  }
+
+  while (rest.length) {
+    if (inBlockComment) {
+      const end = rest.indexOf("*/");
+      if (end === -1) {
+        push(rest, "comment");
+        rest = "";
+      } else {
+        push(rest.slice(0, end + 2), "comment");
+        rest = rest.slice(end + 2);
+        inBlockComment = false;
+      }
+      continue;
+    }
+    const lineComment = rest.indexOf("//");
+    const blockStart = rest.indexOf("/*");
+    const stringStart = rest.search(/["']/);
+    const candidates = [lineComment, blockStart, stringStart].filter((position) => position !== -1);
+    if (!candidates.length) {
+      pushPlainWithKeywords(rest, push);
+      rest = "";
+      continue;
+    }
+    const next = Math.min(...candidates);
+    pushPlainWithKeywords(rest.slice(0, next), push);
+    rest = rest.slice(next);
+    if (rest.startsWith("//")) {
+      push(rest, "comment");
+      rest = "";
+    } else if (rest.startsWith("/*")) {
+      inBlockComment = true;
+      rest = rest.slice(2);
+      tokens.push({ text: "/*", type: "comment" });
+    } else {
+      const quote = rest[0];
+      const match = new RegExp(`^${quote}(?:\\\\.|[^${quote}\\\\])*${quote}?`).exec(rest);
+      const literal = match ? match[0] : quote;
+      push(literal, "string");
+      rest = rest.slice(literal.length);
+    }
+  }
+  return { tokens, inBlockComment };
+}
+
+function pushPlainWithKeywords(segment, push) {
+  if (!segment) return;
+  const parts = segment.split(/\b/);
+  let buffer = "";
+  for (const part of parts) {
+    if (C_KEYWORDS.has(part)) {
+      push(buffer, "plain");
+      buffer = "";
+      push(part, "keyword");
+    } else {
+      buffer += part;
+    }
+  }
+  push(buffer, "plain");
 }
 
 function renderSummary(slide, pptx, descriptor, slideNumber, totalSlides, nodeTitle) {
@@ -539,7 +844,7 @@ function renderSummary(slide, pptx, descriptor, slideNumber, totalSlides, nodeTi
   const items = descriptor.bullets.slice(0, 3);
   items.forEach((item, index) => {
     const y = 1.65 + index * 1.18;
-    slide.addText(String(index + 1).padStart(2, "0"), { x: 0.86, y, w: 0.7, h: 0.42, fontFace: "Aptos Display", fontSize: 22, bold: true, color: index === 0 ? COLORS.primary : index === 1 ? COLORS.teal : COLORS.gold, margin: 0 });
+    slide.addText(String(index + 1).padStart(2, "0"), { x: 0.86, y, w: 0.7, h: 0.42, fontFace: FONTS.head, fontSize: 22, bold: true, color: index === 0 ? COLORS.primary : index === 1 ? COLORS.teal : COLORS.gold, margin: 0 });
     slide.addText(item, { x: 1.85, y: y + 0.02, w: 9.9, h: 0.62, fontSize: 19, color: COLORS.ink, bold: true, margin: 0, fit: "shrink" });
     slide.addShape(pptx.ShapeType.line, { x: 1.85, y: y + 0.76, w: 9.9, h: 0, line: { color: COLORS.line, width: 0.8 } });
   });
@@ -556,14 +861,14 @@ function addHeader(slide, pptx, descriptor, slideNumber, totalSlides, nodeTitle)
         : COLORS.primary;
   slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: SLIDE_WIDTH, h: 0.16, fill: { color: accent }, line: { color: accent } });
   slide.addText(descriptor.kicker || "节点学习", { x: 0.84, y: 0.52, w: 3.6, h: 0.26, fontSize: 10, bold: true, charSpacing: 1.2, color: accent, margin: 0 });
-  slide.addText(descriptor.title, { x: 0.82, y: 0.86, w: 11.6, h: 0.55, fontFace: "Aptos Display", fontSize: 24, bold: true, color: COLORS.ink, margin: 0, fit: "shrink" });
+  slide.addText(descriptor.title, { x: 0.82, y: 0.86, w: 11.6, h: 0.55, fontFace: FONTS.head, fontSize: 24, bold: true, color: COLORS.ink, margin: 0, fit: "shrink" });
   slide.addShape(pptx.ShapeType.line, { x: 0.82, y: 1.46, w: 11.65, h: 0, line: { color: COLORS.line, width: 0.8 } });
   addFooter(slide, slideNumber, totalSlides, nodeTitle);
 }
 
 function addFooter(slide, slideNumber, totalSlides, nodeTitle, { dark = false } = {}) {
   slide.addText(`EduAgent  ·  ${nodeTitle}`, { x: 0.82, y: 7.08, w: 7.8, h: 0.18, fontSize: 8.5, color: dark ? "9EC1B1" : COLORS.inkMuted, margin: 0, fit: "shrink" });
-  slide.addText(`${slideNumber} / ${totalSlides}`, { x: 11.35, y: 7.08, w: 1.1, h: 0.18, fontFace: "Aptos", fontSize: 8.5, color: dark ? "9EC1B1" : COLORS.inkMuted, align: "right", margin: 0 });
+  slide.addText(`${slideNumber} / ${totalSlides}`, { x: 11.35, y: 7.08, w: 1.1, h: 0.18, fontFace: FONTS.body, fontSize: 8.5, color: dark ? "9EC1B1" : COLORS.inkMuted, align: "right", margin: 0 });
 }
 
 function resourceType(card) {
@@ -668,8 +973,22 @@ function cleanMarkdown(value) {
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
     .replace(/^\s{0,3}#{1,6}\s*/gm, "")
     .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/^\s*\d+[.)]\s+/gm, "")
+    .replace(/^\s*>\s?/gm, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/\*([^*\n]+)\*/g, "$1")
+    .replace(/~~([^~]+)~~/g, "$1")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+// mermaid 源码等结构化文本需要保留换行与符号，不能过 markdown 清洗。
+function rawText(...values) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
 }
 
 function safeFilename(value) {
