@@ -3399,21 +3399,36 @@ async def _preload_services() -> None:
         except Exception as exc:
             print(f"[Startup] ES warmup skipped: {exc}")
 
-    async def _recover_resource_jobs_in_background() -> None:
+    async def _sweep_resource_jobs_in_background() -> None:
+        """Periodically expire deadline-overrun jobs and requeue stale work.
+
+        The first pass runs immediately (startup recovery); afterwards the
+        sweep repeats so an in-process crash can no longer strand a job in
+        ``running`` until the next restart. Set the interval to 0 to run
+        only the startup pass.
+        """
         try:
-            recovered = await asyncio.to_thread(resource_service.recover_pending_generation_jobs)
-            if recovered:
-                log_event("resource.generation.recovered", job_count=len(recovered))
-        except Exception as exc:
-            log_event(
-                "resource.generation.recovery_failed",
-                level="warning",
-                error_type=type(exc).__name__,
-            )
+            interval = float(os.environ.get("EDUAGENT_RESOURCE_JOB_SWEEP_INTERVAL_SEC", "60"))
+        except (TypeError, ValueError):
+            interval = 60.0
+        while True:
+            try:
+                summary = await asyncio.to_thread(resource_service.sweep_generation_jobs)
+                if summary.get("expired") or summary.get("recovered"):
+                    log_event("resource.generation.sweep", **summary)
+            except Exception as exc:
+                log_event(
+                    "resource.generation.sweep_failed",
+                    level="warning",
+                    error_type=type(exc).__name__,
+                )
+            if interval <= 0:
+                return
+            await asyncio.sleep(interval)
 
     # 不阻塞应用启动；知识库可用时自动增强，不可用时保持降级链路可用。
     asyncio.create_task(_warm_es_in_background())
-    asyncio.create_task(_recover_resource_jobs_in_background())
+    asyncio.create_task(_sweep_resource_jobs_in_background())
 
 
 def _register_startup_handler() -> None:

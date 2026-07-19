@@ -1859,12 +1859,17 @@ class ResourceGenerationRepo(_ResourceGenerationRepositoryMixin):
         return self._database_or_memory(recover_database, recover_memory)
 
     def expire_deadline_jobs(self, *, limit: int = 100) -> List[Dict[str, Any]]:
-        """Fail queued work whose end-to-end deadline elapsed before claim."""
+        """Fail work whose end-to-end deadline elapsed.
+
+        Covers queued/retrying jobs that were never claimed and running jobs
+        whose worker died or overran the promised deadline. Expiry clears the
+        lease, so a still-alive worker is fenced on its next owned write.
+        """
         safe_limit = max(1, min(int(limit), 500))
         now = _now()
         error = {
             "code": "deadline_exceeded",
-            "message": "The resource generation deadline elapsed in queue.",
+            "message": "The resource generation deadline elapsed.",
         }
 
         def expire_database() -> List[Dict[str, Any]]:
@@ -1872,7 +1877,7 @@ class ResourceGenerationRepo(_ResourceGenerationRepositoryMixin):
                 """WITH expired_jobs AS (
                        SELECT job_id
                        FROM resource_generation_jobs
-                       WHERE status IN ('queued', 'retrying')
+                       WHERE status IN ('queued', 'retrying', 'running')
                          AND deadline_at IS NOT NULL
                          AND deadline_at <= %s
                        ORDER BY deadline_at ASC
@@ -1918,7 +1923,7 @@ class ResourceGenerationRepo(_ResourceGenerationRepositoryMixin):
                     (
                         record
                         for record in self._store.jobs.values()
-                        if record.get("status") in {"queued", "retrying"}
+                        if record.get("status") in {"queued", "retrying", "running"}
                         and (
                             _as_utc_timestamp(record.get("deadline_at"))
                             or datetime.max.replace(tzinfo=timezone.utc)

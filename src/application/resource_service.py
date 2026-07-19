@@ -2029,6 +2029,46 @@ def request_generation(
     return result
 
 
+def _start_job_heartbeat(
+    repository: ResourceGenerationRepo,
+    job_id: str,
+    owner_id: str,
+    *,
+    interval_seconds: Optional[float] = None,
+) -> Optional[threading.Thread]:
+    """Renew an in-process worker lease until the job leaves ``running``.
+
+    The compatibility claim in :func:`run_generation_job` executes the whole
+    job on the claiming thread without the dedicated worker's heartbeat loop,
+    so its 60-second lease used to expire mid-bundle (deadline 120s) and the
+    stale sweep could steal a healthy job. The thread stops on its own once
+    ``heartbeat_job`` reports the lease is gone (terminal status or takeover)
+    and is hard-capped past the bundle deadline as a leak guard.
+    """
+    heartbeat = getattr(repository, "heartbeat_job", None)
+    if not callable(heartbeat):
+        return None
+    interval = float(interval_seconds or max(5.0, DEFAULT_LEASE_SECONDS / 3.0))
+    stop_after = time.monotonic() + BUNDLE_DEADLINE_SECONDS + DEFAULT_LEASE_SECONDS
+
+    def renew() -> None:
+        while time.monotonic() < stop_after:
+            time.sleep(interval)
+            try:
+                if not heartbeat(job_id, owner_id, lease_seconds=DEFAULT_LEASE_SECONDS):
+                    return
+            except Exception:
+                incr_metric("resource.generation.heartbeat_error_total")
+
+    thread = threading.Thread(
+        target=renew,
+        name=f"resource-job-heartbeat-{job_id[:8]}",
+        daemon=True,
+    )
+    thread.start()
+    return thread
+
+
 def recover_pending_generation_jobs(
     job_ids: Optional[Iterable[str]] = None,
     *,
@@ -2068,6 +2108,22 @@ def recover_pending_generation_jobs(
         _submit_generation_job(job_id, repo=repository)
         recovered.append(job_id)
     return recovered
+
+
+def sweep_generation_jobs(*, repo: Optional[ResourceGenerationRepo] = None) -> Dict[str, int]:
+    """Fail deadline-expired jobs, then requeue stale running work.
+
+    In-process deployments have no dedicated worker loop, so this sweep is
+    their only periodic recovery path; the server schedules it every
+    ``EDUAGENT_RESOURCE_JOB_SWEEP_INTERVAL_SEC`` (default 60s). Expiry runs
+    first so a running job past its end-to-end deadline fails cleanly instead
+    of being requeued for a client that already gave up.
+    """
+    repository = repo or get_resource_generation_repo()
+    expire = getattr(repository, "expire_deadline_jobs", None)
+    expired = expire() if callable(expire) else []
+    recovered = recover_pending_generation_jobs(repo=repository)
+    return {"expired": len(expired or []), "recovered": len(recovered)}
 
 
 def _cache_card_for_context(
@@ -2770,6 +2826,11 @@ def _run_claimed_generation_job(
     if job is None:
         return repository.get_job(str(job_id))
     lease_owner = str(job.get("lease_owner") or "") or None
+    if compatibility_owner is not None and lease_owner:
+        # The dedicated worker heartbeats its own claim; the in-process
+        # compatibility path must renew the lease itself or a healthy
+        # 120s bundle outlives its 60s lease and gets stolen by recovery.
+        _start_job_heartbeat(repository, str(job_id), lease_owner)
 
     class WorkerLeaseLost(RuntimeError):
         pass
