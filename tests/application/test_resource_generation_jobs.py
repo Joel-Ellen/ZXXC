@@ -5,7 +5,9 @@ import threading
 
 from src.application import resource_service
 from src.database.resource_generation_repo import MemoryResourceGenerationRepo
+from src.orchestration_runtime import ResourceGenerationResult
 from src.resource_generation import ResourceGenerator
+from src.validation.language import is_chinese_learning_content
 from tests.helpers import FakeValidationPipeline, disable_persistence, install_fake_runtime
 
 
@@ -50,6 +52,84 @@ def test_generation_job_is_idempotent_and_publishes_incremental_cards(monkeypatc
     quiz = ready_events[-1]["payload"]["card"]
     assert "answer_index" not in quiz["structured_payload"]["questions"][0]
     assert {card.card_type for card in state.generated_resources["N01"]} == {"concept_map", "diagnostic_quiz"}
+
+
+def test_legacy_unstructured_english_output_falls_back_before_publication(monkeypatch) -> None:
+    runtime = install_fake_runtime(monkeypatch)
+    disable_persistence(monkeypatch)
+    runtime.kg = type(
+        "EnglishTitleKnowledgeGraph",
+        (),
+        {"get_node_title": lambda _self, _node_id: "Queue invariants"},
+    )()
+    state = runtime.get_session("legacy-english-job-user", "course1").agent_state
+    state.current_node_id = "N01"
+    repo = MemoryResourceGenerationRepo()
+    english_explanation = "This lesson is entirely in English and must not reach the learner."
+
+    def generate_resource_contents(
+        node_id,
+        card_types,
+        _difficulty,
+        *,
+        node_title="",
+        **_kwargs,
+    ):
+        title = node_title or node_id
+        return {
+            card_type: ResourceGenerationResult(
+                content=f"## {title}\n\n{english_explanation}",
+                source="llm",
+                provider="legacy-test-provider",
+            )
+            for card_type in card_types
+        }
+
+    runtime.generate_resource_contents = generate_resource_contents
+    requested = resource_service.request_generation(
+        "legacy-english-job-user",
+        "course1",
+        "N01",
+        card_types=["interactive_exercise"],
+        use_cache=False,
+        submit=False,
+        repo=repo,
+    )
+
+    resource_service.run_generation_job(requested["job_id"], repo=repo)
+
+    card = next(
+        value
+        for value in state.generated_resources["N01"]
+        if value.card_type == "interactive_exercise"
+    )
+    generation = card.metadata["generation"]
+    assert english_explanation not in card.content
+    assert generation["source"] == "template"
+    assert generation["rejected_source"] == "llm"
+    assert "learner_content_not_chinese" in generation["validation_issue_codes"]
+
+    ready_event = next(
+        event
+        for event in repo.list_events(requested["job_id"])
+        if event["event_type"] == "card_ready"
+    )
+    assert english_explanation not in ready_event["payload"]["card"]["body_markdown"]
+
+
+def test_legacy_bound_template_does_not_reinsert_an_english_canonical_title() -> None:
+    content = resource_service._bound_template_content(  # noqa: SLF001
+        {
+            "course_id": "course1",
+            "node_id": "N01",
+            "title": "Queue invariants",
+        },
+        "concept_map",
+    )
+
+    assert "Queue invariants" not in content
+    assert "当前知识点（N01）" in content
+    assert is_chinese_learning_content(content)
 
 
 def test_one_failed_card_does_not_discard_ready_cards(monkeypatch) -> None:

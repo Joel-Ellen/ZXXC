@@ -91,7 +91,7 @@ def _prepare_app(monkeypatch):
 
     def fake_tutor(inp):
         inp.agent_state.tutor_response = {
-            "text_explanation": "Tutor answer from canonical service.",
+            "text_explanation": "这是统一辅导服务返回的中文回答。",
             "mermaid_src": "",
         }
         return type("TutorOutput", (), {"agent_state": inp.agent_state})()
@@ -186,7 +186,7 @@ def test_frontend_backend_main_session_flow_regression(monkeypatch):
         headers=headers,
     )
     assert tutor_response.status_code == 200
-    assert "Tutor answer" in tutor_response.json()["tutor_response"]["text_explanation"]
+    assert "中文回答" in tutor_response.json()["tutor_response"]["text_explanation"]
 
     stream_response = client.post(
         f"/api/sessions/{session_path}/tutor",

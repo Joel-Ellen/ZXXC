@@ -9,7 +9,45 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
+from src.validation.language import is_chinese_learning_content
+
 from .prompt_registry import build_user_prompt, get_system_prompt
+
+
+_ASSESSMENT_STRATEGY_LABELS = {
+    "STANDARD_PATH": "标准进阶阶段",
+    "SCAFFOLD_HELP": "脚手架辅助阶段",
+    "EDGE_CASE_DRILL": "边界用例强化阶段",
+}
+
+
+def _assessment_fallback(
+    radar: List[float],
+    a_mix: float,
+    strategy: str,
+    fallback_markdown: str,
+) -> Dict[str, Any]:
+    dim_names = ["概念理解力", "代码工程力", "逻辑推理力", "纠错韧性", "时间管理力"]
+    return {
+        "metrics": {"knowledge_mastery": a_mix},
+        "current_level": _ASSESSMENT_STRATEGY_LABELS.get(strategy, "当前学习阶段"),
+        "weak_areas": [dim_names[i] for i, value in enumerate(radar) if value < 0.4],
+        "strengths": [dim_names[i] for i, value in enumerate(radar) if value >= 0.7],
+        "suggestions": ["继续按照当前学习路径推进，并优先复习掌握度较低的知识点。"],
+        "radar_data": {"labels": dim_names, "values": radar},
+        "report_markdown": fallback_markdown,
+    }
+
+
+def _assessment_visible_strings(value: Any):
+    if isinstance(value, dict):
+        for item in value.values():
+            yield from _assessment_visible_strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _assessment_visible_strings(item)
+    elif isinstance(value, str) and value.strip():
+        yield value
 
 
 def run_tutor_mode_with_llm(
@@ -72,17 +110,10 @@ def run_assessment_report_with_llm(
     fallback_markdown: str = "",
 ) -> Dict[str, Any]:
     dim_names = ["概念理解力", "代码工程力", "逻辑推理力", "纠错韧性", "时间管理力"]
+    fallback = _assessment_fallback(radar, a_mix, strategy, fallback_markdown)
 
     if llm is None:
-        return {
-            "metrics": {"knowledge_mastery": a_mix},
-            "current_level": strategy,
-            "weak_areas": [dim_names[i] for i, v in enumerate(radar) if v < 0.4],
-            "strengths": [dim_names[i] for i, v in enumerate(radar) if v >= 0.7],
-            "suggestions": [],
-            "radar_data": {"labels": dim_names, "values": radar},
-            "report_markdown": fallback_markdown,
-        }
+        return fallback
 
     prompt = build_user_prompt(
         "assessment.report",
@@ -116,19 +147,24 @@ def run_assessment_report_with_llm(
             content = "{}"
 
         data = json.loads(content) if isinstance(content, str) else content
+        if not isinstance(data, dict):
+            return fallback
+        learner_fields = {
+            "current_level": data.get("current_level"),
+            "weak_areas": data.get("weak_areas", []),
+            "strengths": data.get("strengths", []),
+            "suggestions": data.get("suggestions", []),
+        }
+        if any(
+            not is_chinese_learning_content(text)
+            for text in _assessment_visible_strings(learner_fields)
+        ):
+            return fallback
         data["radar_data"] = {"labels": dim_names, "values": radar}
         data["report_markdown"] = fallback_markdown
         return data
     except Exception:
-        return {
-            "metrics": {"knowledge_mastery": a_mix},
-            "current_level": strategy,
-            "weak_areas": [dim_names[i] for i, v in enumerate(radar) if v < 0.4],
-            "strengths": [dim_names[i] for i, v in enumerate(radar) if v >= 0.7],
-            "suggestions": ["继续保持当前学习节奏"],
-            "radar_data": {"labels": dim_names, "values": radar},
-            "report_markdown": fallback_markdown,
-        }
+        return fallback
 
 
 def patch_tutor_node_class(TutorAgentNode) -> None:

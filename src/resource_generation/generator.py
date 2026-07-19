@@ -10,6 +10,11 @@ import time
 from dataclasses import dataclass, replace
 from typing import Any
 
+from src.validation.language import (
+    is_chinese_learning_content,
+    non_chinese_resource_fields,
+)
+
 from .context import ResourceContext
 from .prompts import TOKEN_BUDGETS, build_card_messages, build_supporting_bundle_messages, render_markdown
 from .validator import ResourcePayloadValidation, validate_resource_payload
@@ -150,30 +155,55 @@ def _mastery_bucket_label(bucket: str) -> str:
     }.get(bucket, bucket)
 
 
+def _template_display_name(value: Any, fallback: str) -> str:
+    """Localize context-owned labels without treating English prose as a name."""
+    raw = str(value or "").strip()
+    if not raw:
+        return fallback
+    if is_chinese_learning_content(raw, allow_name_only=True):
+        return raw
+    localized = f"{fallback}（{raw}）"
+    return localized if is_chinese_learning_content(localized) else fallback
+
+
+def _template_topic_title(context: ResourceContext) -> str:
+    raw = str(context.node_title or "").strip()
+    if raw and is_chinese_learning_content(raw, allow_name_only=True):
+        return raw
+    if raw:
+        localized = f"当前知识点（{raw}）"
+        if is_chinese_learning_content(localized):
+            return localized
+    return f"当前知识点（{context.node_id}）" if context.node_id else "当前知识点"
+
+
 def _template_blueprint(context: ResourceContext) -> dict[str, Any]:
     if context.blueprint_snapshot:
-        return dict(context.blueprint_snapshot)
+        snapshot = dict(context.blueprint_snapshot)
+        if not non_chinese_resource_fields({"learning_blueprint": snapshot}):
+            return snapshot
     refs = _source_ref_ids(context)
     objective_id = f"obj:{context.node_id}:core"
+    title = _template_topic_title(context)
     return {
         "version": "resource-blueprint-v1",
         "objectives": [
             {
                 "id": objective_id,
-                "text": f"解释{context.node_title}的定义、成立条件与边界。",
+                "text": f"解释{title}的定义、成立条件与边界。",
             }
         ],
         "claims": [
             {
                 "id": f"claim:{context.node_id}:definition",
-                "text": f"{context.node_title}必须根据课程证据中的定义和约束来解释。",
+                "text": f"{title}必须根据课程证据中的定义和约束来解释。",
                 "critical": True,
                 "evidence_ids": refs[:2],
             }
         ],
-        "terms": [context.node_title],
+        "terms": [title],
         "misconceptions": ["只记忆术语而不检查成立条件。"],
-        "examples": [f"用一个小规模输入追踪{context.node_title}的状态变化。"],
+        "examples": [f"用一个小规模输入追踪{title}的状态变化。"],
         "boundaries": ["检查空输入、最小输入和违反前提的输入。"],
         "difficulty_strategy": (
             f"面向{_mastery_bucket_label(context.mastery_bucket)}阶段，先解释约束，再给出可复核例子。"
@@ -202,7 +232,7 @@ def _template_common(
         if isinstance(value, dict) and str(value.get("id") or "")
     ]
     return {
-        "title": context.node_title,
+        "title": _template_topic_title(context),
         "source_ref_ids": refs,
         "objective_ids": objective_ids,
         "evidence_map": {field: refs[:2] for field in evidence_fields},
@@ -220,7 +250,7 @@ def _template_common(
 
 
 def _template_payload(context: ResourceContext, card_type: str) -> dict[str, Any]:
-    title = context.node_title
+    title = _template_topic_title(context)
     if card_type == "concept_map":
         blueprint = _template_blueprint(context)
         common = _template_common(
@@ -235,7 +265,10 @@ def _template_payload(context: ResourceContext, card_type: str) -> dict[str, Any
             "definition": f"{title}应从不变量、成立条件和适用边界三个方面解释。",
             "constraints": ["应用该概念前，必须先说明输入假设和成立条件。"],
             "mechanism": ["逐步跟踪维持核心不变量的状态变化。"],
-            "prerequisites": [item.get("title") or "课程前置知识" for item in context.prerequisite_nodes[:2]] or ["上一课程节点的基础知识"],
+            "prerequisites": [
+                _template_display_name(item.get("title"), "课程前置知识")
+                for item in context.prerequisite_nodes[:2]
+            ] or ["上一课程节点的基础知识"],
             "learning_objectives": [f"能够解释{title}背后的约束并检查边界。"],
             "sections": [{"heading": "运行机制", "body": f"把{title}中的每一步操作与它所保持的不变量对应起来。"}],
             "bullets": ["依次检查前提、状态变化和边界情况。"],
@@ -330,6 +363,10 @@ def _template_payload(context: ResourceContext, card_type: str) -> dict[str, Any
             ),
             None,
         )
+        if trusted_video and non_chinese_resource_fields({
+            "timeline": list(trusted_video.get("timeline") or []),
+        }):
+            trusted_video = None
         common = _template_common(
             context,
             evidence_fields=["summary", "key_points", "reading_sequence"],

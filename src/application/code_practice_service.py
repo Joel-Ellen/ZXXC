@@ -76,9 +76,9 @@ _PROBLEMS: Dict[str, PracticeProblem] = {
     "ds-list-sum": PracticeProblem(
         id="ds-list-sum",
         version=1,
-        title="Sum a sequence",
-        prompt="Implement `sum_values(numbers)` and return the sum of all integers in the list.",
-        constraints="Return an integer. Empty input must return 0.",
+        title="序列求和",
+        prompt="请实现 `sum_values(numbers)`，返回列表中所有整数之和。",
+        constraints="返回整数；输入为空时必须返回 0。",
         function_name="sum_values",
         starter_code="def sum_values(numbers: list[int]) -> int:\n    # Return the sum of all values.\n    pass\n",
         reference_solution="def sum_values(numbers):\n    return sum(numbers)\n",
@@ -94,9 +94,9 @@ _PROBLEMS: Dict[str, PracticeProblem] = {
     "ds-balanced-brackets": PracticeProblem(
         id="ds-balanced-brackets",
         version=1,
-        title="Balanced brackets",
-        prompt="Implement `is_balanced(text)` to determine whether (), [] and {} are correctly nested.",
-        constraints="Ignore characters other than brackets. Return a boolean.",
+        title="平衡括号",
+        prompt="请实现 `is_balanced(text)`，判断 ()、[] 和 {} 是否正确嵌套。",
+        constraints="忽略括号以外的字符，并返回布尔值。",
         function_name="is_balanced",
         starter_code=(
             "def is_balanced(text: str) -> bool:\n"
@@ -127,12 +127,12 @@ _PROBLEMS: Dict[str, PracticeProblem] = {
     "ds-tree-height": PracticeProblem(
         id="ds-tree-height",
         version=1,
-        title="Height of a binary tree",
+        title="二叉树的高度",
         prompt=(
-            "Implement `tree_height(values)` for a binary tree represented as a level-order list. "
-            "`None` means a missing node. Return 0 for an empty tree."
+            "请实现 `tree_height(values)`，其中二叉树使用层序列表表示，"
+            "`None` 表示缺失节点；空树返回 0。"
         ),
-        constraints="Return the number of levels containing at least one node.",
+        constraints="返回至少包含一个节点的层数。",
         function_name="tree_height",
         starter_code=(
             "def tree_height(values: list[object]) -> int:\n"
@@ -164,12 +164,12 @@ _PROBLEMS: Dict[str, PracticeProblem] = {
     "ds-bfs-distances": PracticeProblem(
         id="ds-bfs-distances",
         version=1,
-        title="Breadth-first distances",
+        title="广度优先搜索距离",
         prompt=(
-            "Implement `bfs_distances(graph, start)`. `graph` maps node labels to adjacent labels. "
-            "Return a mapping from every reachable node to its shortest edge distance from `start`."
+            "请实现 `bfs_distances(graph, start)`。`graph` 将节点标签映射到相邻节点标签列表；"
+            "返回从 `start` 出发可到达的每个节点到起点的最短边数。"
         ),
-        constraints="Treat missing adjacency lists as empty. Return JSON-compatible keys and integers.",
+        constraints="缺失的邻接列表按空列表处理；返回可由 JSON 表示的键和整数值。",
         function_name="bfs_distances",
         starter_code=(
             "def bfs_distances(graph: dict[str, list[str]], start: str) -> dict[str, int]:\n"
@@ -210,12 +210,12 @@ _PROBLEMS: Dict[str, PracticeProblem] = {
     "ds-max-non-adjacent": PracticeProblem(
         id="ds-max-non-adjacent",
         version=1,
-        title="Maximum non-adjacent sum",
+        title="最大非相邻元素和",
         prompt=(
-            "Implement `max_non_adjacent(values)` and return the largest sum obtainable without taking "
-            "two adjacent values. You may choose no values."
+            "请实现 `max_non_adjacent(values)`，返回不同时选取两个相邻元素时可得到的最大和；"
+            "可以不选择任何元素。"
         ),
-        constraints="Return 0 when all values are negative or the list is empty.",
+        constraints="当所有元素均为负数或列表为空时返回 0。",
         function_name="max_non_adjacent",
         starter_code=(
             "def max_non_adjacent(values: list[int]) -> int:\n"
@@ -442,7 +442,7 @@ def get_practice_problem(
     if problem is None:
         return {
             "status": error.get("reason", "practice_problem_not_configured"),
-            "message": "No executable practice problem is configured for this resource.",
+            "message": "该资源尚未配置可执行的编程练习。",
             **error,
         }
     return {
@@ -525,7 +525,7 @@ class DockerSandboxExecutor:
         if not self.available():
             return {
                 "status": "sandbox_unavailable",
-                "message": "The isolated Docker execution runtime is not available.",
+                "message": "隔离的 Docker 执行环境不可用。",
             }
 
         timeout_seconds = max(0.2, (float(time_limit_ms) / 1000.0) + 1.0)
@@ -602,12 +602,12 @@ class DockerSandboxExecutor:
                     "verdict": "time_limit",
                     "runtime_ms": round((time.perf_counter() - started) * 1000, 3),
                     "memory_kb": None,
-                    "message": "Execution exceeded the time limit.",
+                    "message": "代码执行超过时间限制。",
                 }
             except OSError as error:
                 return {
                     "status": "sandbox_unavailable",
-                    "message": f"Unable to start the isolated execution runtime: {type(error).__name__}.",
+                    "message": f"无法启动隔离执行环境：{type(error).__name__}。",
                 }
 
         elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
@@ -620,9 +620,9 @@ class DockerSandboxExecutor:
                 "runtime_ms": elapsed_ms,
                 "memory_kb": None,
                 "message": (
-                    "The isolated execution runtime could not start."
+                    "隔离执行环境启动失败。"
                     if completed.returncode == 125
-                    else "The isolated runner returned no structured result."
+                    else "隔离执行器未返回结构化结果。"
                 ),
                 "runner_error": stderr[:500] if completed.returncode == 125 else "",
             }
@@ -636,7 +636,7 @@ class DockerSandboxExecutor:
                 "verdict": "internal_error",
                 "runtime_ms": elapsed_ms,
                 "memory_kb": None,
-                "message": "The isolated runner returned an invalid result.",
+                "message": "隔离执行器返回了无效结果。",
             }
         if not isinstance(worker_result, dict):
             return {
@@ -644,7 +644,7 @@ class DockerSandboxExecutor:
                 "verdict": "internal_error",
                 "runtime_ms": elapsed_ms,
                 "memory_kb": None,
-                "message": "The isolated runner returned an invalid result.",
+                "message": "隔离执行器返回了无效结果。",
             }
         worker_result["runtime_ms"] = worker_result.get("runtime_ms", elapsed_ms)
         return worker_result
@@ -671,7 +671,7 @@ def _test_result_payload(
         if worker_result.get("message"):
             payload["message"] = str(worker_result["message"])[:500]
     elif not passed:
-        payload["message"] = "A hidden test did not pass."
+        payload["message"] = "隐藏测试未通过。"
     return payload
 
 
@@ -779,7 +779,7 @@ def execute_practice(
     total_runtime_ms = 0.0
     peak_memory_kb: Optional[int] = None
     terminal_verdict = "accepted"
-    terminal_message = "All selected tests passed."
+    terminal_message = "所选测试全部通过。"
 
     for test in selected_tests:
         worker_result = active_executor.execute(
@@ -796,7 +796,7 @@ def execute_practice(
                 "mode": mode,
                 "problem_id": problem.id,
                 "problem_version": problem.version,
-                "message": worker_result.get("message", "The isolated execution runtime is unavailable."),
+                "message": worker_result.get("message", "隔离执行环境不可用。"),
             }
         runtime_value = worker_result.get("runtime_ms")
         if isinstance(runtime_value, (int, float)):
@@ -824,7 +824,7 @@ def execute_practice(
             terminal_message = (
                 worker_result.get("message")
                 if test.visibility == "public" and worker_result.get("message")
-                else ("A public test failed." if test.visibility == "public" else "A hidden test failed.")
+                else ("公开测试未通过。" if test.visibility == "public" else "隐藏测试未通过。")
             )
             break
 

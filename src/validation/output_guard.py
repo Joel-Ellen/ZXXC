@@ -11,10 +11,20 @@ from src.agents.validator_node import EntityExtractor, Pole1Gate, Pole2Gate
 from src.llm.content_filter import ContentFilter
 from src.state.agent_state import ResourceCard
 
+from .language import is_chinese_learning_content
 from .result import ValidationDecision, ValidationResult
 
 
 _SEMANTIC_SCOPE_LIMIT = 1600
+_CHINESE_LEARNER_OUTPUT_TYPES = {
+    "assessment_report",
+    "code_snippet",
+    "concept_map",
+    "diagnostic_quiz",
+    "interactive_exercise",
+    "tutor_response",
+    "video_summary",
+}
 
 
 def _normalize_semantic_text(value: object) -> str:
@@ -71,11 +81,26 @@ def validate_resource_semantic_binding(card: ResourceCard) -> ValidationResult:
         )
         return result
 
-    searchable = _normalize_semantic_text(str(card.content or "")[:_SEMANTIC_SCOPE_LIMIT])
+    scoped_content = str(card.content or "")[:_SEMANTIC_SCOPE_LIMIT]
+    searchable = _normalize_semantic_text(scoped_content)
     normalized_title = _normalize_semantic_text(title)
     if normalized_title and normalized_title in searchable:
         verification.update({"status": "verified", "matched_by": "canonical_title"})
         return result
+
+    generation = metadata.get("generation")
+    generation = generation if isinstance(generation, dict) else {}
+    if str(generation.get("source") or "") == "template":
+        node_pattern = (
+            rf"(?<![A-Za-z0-9_-]){re.escape(expected_node_id)}"
+            r"(?![A-Za-z0-9_-])"
+        )
+        if re.search(node_pattern, scoped_content):
+            verification.update({
+                "status": "verified",
+                "matched_by": "server_node_id_template",
+            })
+            return result
 
     result.add_issue(
         "resource_semantic_mismatch",
@@ -120,6 +145,17 @@ class OutputGuard:
                 result.add_issue("code_syntax_error", err, field=output_type)
             for err in pole1.formula_syntax_errors:
                 result.add_issue("formula_syntax_error", err, field=output_type)
+            return result
+
+        if (
+            output_type in _CHINESE_LEARNER_OUTPUT_TYPES
+            and not is_chinese_learning_content(text)
+        ):
+            result.add_issue(
+                "learner_content_not_chinese",
+                "面向学习者的说明必须使用中文；代码、公式、符号和专有名称除外。",
+                field=output_type,
+            )
             return result
 
         if ground_truth_context:

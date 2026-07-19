@@ -9,6 +9,8 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from src.validation.language import non_chinese_resource_fields
+
 from .context import ResourceContext
 from .schemas import CARD_TYPES, coerce_payload
 
@@ -82,6 +84,13 @@ def _validate_semantics(
     context: ResourceContext,
 ) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
+    if context.locale.lower().startswith("zh"):
+        for field_name in non_chinese_resource_fields(payload):
+            issues.append(ValidationIssue(
+                "learner_content_not_chinese",
+                "Learner-visible resource prose must be Chinese; code, formulas and proper names are exempt.",
+                field_name,
+            ))
     ref_ids = payload.get("source_ref_ids") or []
     known_refs = _source_ids(context)
     grounding_ids = set(context.grounding_ref_ids)

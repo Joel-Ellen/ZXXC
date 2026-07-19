@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createPinia, setActivePinia } from "pinia";
 
 const apiMocks = vi.hoisted(() => ({
   fetchSessionResources: vi.fn(),
@@ -22,6 +23,8 @@ vi.mock("../stores/learningAssets", () => ({
 }));
 
 import { useEduAgent } from "./useEduAgent";
+
+setActivePinia(createPinia());
 
 describe("quiz result navigation", () => {
   beforeEach(() => {

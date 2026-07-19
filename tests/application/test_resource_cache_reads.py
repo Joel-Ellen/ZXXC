@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from src.application import resource_service
 from src.application import _common
-from src.database.resource_generation_repo import MemoryResourceGenerationRepo, ResourceGenerationRepo
+from src.database.resource_generation_repo import (
+    MemoryResourceGenerationRepo,
+    ResourceGenerationRepo,
+    _MemoryGenerationStore,
+)
+from src.state.agent_state import ResourceCard
 from tests.helpers import FakeValidationPipeline, disable_persistence, install_fake_runtime
 
 
@@ -111,6 +116,82 @@ def test_personalized_generation_never_populates_the_course_base_cache(monkeypat
 
     assert result["resources"] == []
     assert result["missing_card_types"] == ["interactive_exercise"]
+
+
+def test_resource_read_hides_english_cards_from_existing_sessions(monkeypatch) -> None:
+    runtime = install_fake_runtime(monkeypatch)
+    disable_persistence(monkeypatch)
+    monkeypatch.setattr(resource_service, "get_validation_pipeline", lambda: FakeValidationPipeline())
+    repo = MemoryResourceGenerationRepo(store=_MemoryGenerationStore())
+    session = runtime.get_session("legacy-english-user", "course1")
+    session.agent_state.current_node_id = "N01"
+    session.agent_state.generated_resources["N01"] = [ResourceCard(
+        resource_id="legacy-english-concept",
+        node_id="N01",
+        card_type="concept_map",
+        content="## Queue\n\nThis is a complete English explanation for the learner.",
+    )]
+
+    result = resource_service.get_node_resources(
+        "legacy-english-user",
+        "course1",
+        "N01",
+        card_types=["concept_map"],
+        repo=repo,
+    )
+
+    assert result["resources"] == []
+    assert result["missing_card_types"] == ["concept_map"]
+
+    requested = resource_service.request_generation(
+        "legacy-english-user",
+        "course1",
+        "N01",
+        card_types=["concept_map"],
+        use_cache=False,
+        submit=False,
+        repo=repo,
+    )
+    assert requested["job_id"] is not None
+
+    resource_service.run_generation_job(requested["job_id"], repo=repo)
+
+    replacement = next(
+        card
+        for card in session.agent_state.generated_resources["N01"]
+        if card.card_type == "concept_map"
+    )
+    assert "This is a complete English explanation" not in replacement.content
+    assert replacement.metadata["generation"]["source"] == "template"
+
+
+def test_resource_read_hides_english_legacy_metadata(monkeypatch) -> None:
+    runtime = install_fake_runtime(monkeypatch)
+    disable_persistence(monkeypatch)
+    repo = MemoryResourceGenerationRepo(store=_MemoryGenerationStore())
+    session = runtime.get_session("legacy-metadata-user", "course1")
+    session.agent_state.current_node_id = "N01"
+    session.agent_state.generated_resources["N01"] = [ResourceCard(
+        resource_id="legacy-metadata-concept",
+        node_id="N01",
+        card_type="concept_map",
+        content="## 当前知识点\n\n这是面向学习者的中文正文。",
+        metadata={
+            "title": "当前知识点",
+            "summary": "THIS IS AN ENGLISH SUMMARY HIDDEN IN LEGACY METADATA",
+        },
+    )]
+
+    result = resource_service.get_node_resources(
+        "legacy-metadata-user",
+        "course1",
+        "N01",
+        card_types=["concept_map"],
+        repo=repo,
+    )
+
+    assert result["resources"] == []
+    assert result["missing_card_types"] == ["concept_map"]
 
 
 def test_course_cache_rejects_records_without_the_generic_context_policy() -> None:

@@ -195,12 +195,12 @@ def _code_practice_material(
         return {
             "resource_id": resource_id,
             "resource_type": card_type,
-            "label": _RESOURCE_LABELS.get(card_type, "Code practice"),
+            "label": _RESOURCE_LABELS.get(card_type, "代码练习"),
         }
     return {
         "resource_id": resource_id,
         "resource_type": "code_snippet",
-        "label": "Code practice",
+        "label": "代码练习",
     }
 
 
@@ -719,7 +719,7 @@ def record_verified_code_submission(
         original_answer = (
             submitted_source
             if isinstance(submitted_source, str) and submitted_source.strip()
-            else f"Submission verdict: {verdict}"
+            else "本次提交的源代码未保存。"
         )
         materials = _code_recommended_materials(
             state,
@@ -742,7 +742,7 @@ def record_verified_code_submission(
                 "node_title": get_node_title(normalized_node_id, normalized_node_id),
                 "related_node": normalized_node_id,
                 "question_id": f"code:{problem_id}:v{problem_version}",
-                "question_prompt": f"Code practice: {problem_id}",
+                "question_prompt": f"代码练习：{problem_id}",
                 "practice_problem_id": problem_id,
                 "practice_problem_version": problem_version,
                 "code_verdict": verdict,
@@ -1110,7 +1110,7 @@ def _start_review_item_unlocked(
                 return {
                     "status": "targeted_practice_unavailable",
                     "status_code": int(generated.get("status_code") or 503),
-                    "detail": generated.get("error") or "Unable to prepare directed practice.",
+                    "detail": generated.get("error") or "暂时无法准备定向练习，请稍后重试。",
                 }
             session = get_session(user_id, course_id)
             item = _find_item(_review_items(session.agent_state), normalized_id)
@@ -1122,7 +1122,7 @@ def _start_review_item_unlocked(
             return {
                 "status": "targeted_practice_unavailable",
                 "status_code": 503,
-                "detail": "The directed practice resource has no verifiable exercise.",
+                "detail": "定向练习资源缺少可验证的题目，请稍后重试。",
             }
 
     item["status"] = "in_progress"
@@ -1361,7 +1361,7 @@ def _prepare_review_retest_unlocked(
         return {
             "status": "review_retest_generation_failed",
             "status_code": int(generated.get("status_code") or 500),
-            "detail": generated.get("error") or "Unable to prepare a fresh retest.",
+            "detail": generated.get("error") or "暂时无法准备新的复测，请稍后重试。",
         }
 
     refreshed_session = get_session(user_id, course_id)

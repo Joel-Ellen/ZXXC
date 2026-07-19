@@ -57,7 +57,7 @@ class ValidationPipeline:
         if result.passed and result.refined_text:
             next_response["text_explanation"] = result.refined_text
         elif not result.passed:
-            next_response["text_explanation"] = "Tutor response was blocked by validation. Please rephrase the question or try a narrower learning topic."
+            next_response["text_explanation"] = "辅导回答未通过安全校验。请换一种说法，或将问题缩小到更具体的学习主题后重试。"
             next_response["blocked"] = True
         return next_response, result
 

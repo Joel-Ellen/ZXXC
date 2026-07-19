@@ -242,9 +242,9 @@ class AssessmentReporterNode:
         old_strategy: str,
     ) -> str:
         strategy_desc = {
-            STRATEGY_STANDARD: "[Normal] 标准进阶路径",
-            STRATEGY_SCAFFOLD: "[Help] 脚手架辅助模式",
-            STRATEGY_EDGE_CASE: "[Drill] 边界用例强化模式",
+            STRATEGY_STANDARD: "[标准] 标准进阶路径",
+            STRATEGY_SCAFFOLD: "[辅助] 脚手架辅助模式",
+            STRATEGY_EDGE_CASE: "[强化] 边界用例强化模式",
         }
         strategy_change = ""
         if new_strategy != old_strategy:

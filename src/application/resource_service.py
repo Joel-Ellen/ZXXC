@@ -58,6 +58,10 @@ from src.resource_generation.policy import (
 from src.resource_generation.quality import evaluate_resource_quality
 from src.resource_generation.services import content_hash
 from src.state.agent_state import ResourceCard
+from src.validation.language import (
+    is_chinese_learning_content,
+    non_chinese_resource_fields,
+)
 from src.validation.pipeline import get_validation_pipeline
 
 from .code_practice_service import problem_binding_for_node
@@ -154,7 +158,11 @@ def _canonical_node_binding(runtime: Any, course_id: str, node_id: str) -> Dict[
 def _bound_template_content(binding: Dict[str, Any], card_type: str) -> str:
     """Return a deterministic template whose topic is the canonical node."""
     node_id = str(binding.get("node_id") or "")
-    title = str(binding.get("title") or node_id)
+    canonical_title = str(binding.get("title") or node_id)
+    title = canonical_title
+    if not is_chinese_learning_content(title, allow_name_only=True):
+        localized = f"当前知识点（{node_id}）" if node_id else "当前知识点"
+        title = localized if is_chinese_learning_content(localized) else "当前知识点"
     templates = {
         "concept_map": (
             f"## {title}\n\n"
@@ -212,12 +220,28 @@ def _truthful_generated_content(content: str, generation: Dict[str, Any]) -> str
     return normalized_content
 
 
+def _resource_card_language_valid(card: ResourceCard, locale: str) -> bool:
+    if not str(locale or "").lower().startswith("zh"):
+        return True
+    if not is_chinese_learning_content(card.content):
+        return False
+    metadata = card.metadata if isinstance(card.metadata, dict) else {}
+    structured_payload = metadata.get("structured_payload")
+    if not isinstance(structured_payload, dict):
+        try:
+            projected = resource_contract_from_card(card).structured_payload
+        except Exception:
+            projected = {}
+        structured_payload = projected if isinstance(projected, dict) else {}
+    return not non_chinese_resource_fields(structured_payload)
+
+
 def _requested_card_types(card_type: Optional[str]) -> tuple[Optional[list[str]], Optional[str]]:
     if card_type is None or not str(card_type).strip():
         return list(RESOURCE_CARD_ORDER), None
     normalized = str(card_type).strip()
     if normalized not in RESOURCE_CARD_ORDER:
-        return None, f"Unsupported card_type '{normalized}'"
+        return None, f"不支持的资源类型：{normalized}。"
     return [normalized], None
 
 
@@ -667,7 +691,7 @@ def _legacy_generate_current_node_resources(
         state = session.agent_state
         target_node = node_id or state.current_node_id or (state.active_path[0] if state.active_path else None)
         if not target_node:
-            return {"error": "node_id is required", "status_code": 400}
+            return {"error": "缺少学习节点标识。", "status_code": 400}
 
         requested_types, card_type_error = _requested_card_types(card_type)
         if card_type_error:
@@ -678,7 +702,7 @@ def _legacy_generate_current_node_resources(
             if str(card_type or "").strip() == "diagnostic_quiz":
                 return {
                     "status": "review_retest_active",
-                    "error": "An active review retest must be completed before replacing its diagnostic quiz.",
+                    "error": "请先完成当前复习复测，再替换诊断测验。",
                     "status_code": 409,
                     "node_id": target_node,
                     "retest_resource_id": active_retest_resource_id,
@@ -1075,7 +1099,7 @@ def _normalise_requested_types(
     requested = list(dict.fromkeys(str(value).strip() for value in values if str(value).strip()))
     invalid = [value for value in requested if value not in CARD_TYPES]
     if invalid:
-        return None, f"Unsupported card_type '{invalid[0]}'"
+        return None, f"不支持的资源类型：{invalid[0]}。"
     return [card_type for card_type in RESOURCE_CARD_ORDER if card_type in requested], None
 
 
@@ -1360,8 +1384,16 @@ def get_node_resources(
     state = getattr(session, "agent_state", None)
     target_node = str(node_id or getattr(state, "current_node_id", "") or "")
     if not target_node:
-        return {"error": "node_id is required", "status_code": 400}
-    cards = list(getattr(state, "generated_resources", {}).get(target_node, [])) if state else []
+        return {"error": "缺少学习节点标识。", "status_code": 400}
+    cards = [
+        card
+        for card in (
+            list(getattr(state, "generated_resources", {}).get(target_node, []))
+            if state
+            else []
+        )
+        if _resource_card_language_valid(card, locale)
+    ]
     selected_by_type = {
         card.card_type: card
         for card in cards
@@ -1662,14 +1694,14 @@ def request_generation(
     state = session.agent_state
     target_node = str(node_id or state.current_node_id or (state.active_path[0] if state.active_path else "") or "")
     if not target_node:
-        return {"error": "node_id is required", "status_code": 400}
+        return {"error": "缺少学习节点标识。", "status_code": 400}
 
     active_retest_resource_id = _active_retest_resource_id(state, target_node)
     if force and active_retest_resource_id and "diagnostic_quiz" in (requested_types or []):
         if (requested_types or []) == ["diagnostic_quiz"]:
             return {
                 "status": "review_retest_active",
-                "error": "An active review retest must be completed before replacing its diagnostic quiz.",
+                "error": "请先完成当前复习复测，再替换诊断测验。",
                 "status_code": 409,
                 "node_id": target_node,
                 "retest_resource_id": active_retest_resource_id,
@@ -1687,7 +1719,11 @@ def request_generation(
         allow_remote_retrieval=False,
     )
     observe_metric("resource.generation.context_ms", round((time.perf_counter() - context_started) * 1000, 3))
-    existing_cards = list(state.generated_resources.get(target_node, []))
+    existing_cards = [
+        card
+        for card in state.generated_resources.get(target_node, [])
+        if _resource_card_language_valid(card, locale)
+    ]
     existing_types = {card.card_type for card in existing_cards}
     types_to_generate = list(requested_types or []) if force else [
         card_type for card_type in requested_types or [] if card_type not in existing_types
@@ -1760,7 +1796,7 @@ def request_generation(
     if existing_active is None:
         if int(queue.get("depth") or 0) >= 5_000 and not concept_lane:
             return {
-                "error": "Resource generation queue is temporarily full.",
+                "error": "学习资源生成队列暂时已满，请稍后重试。",
                 "status_code": 503,
                 "retry_after": 30,
                 "queue_depth": int(queue.get("depth") or 0),
@@ -1770,14 +1806,14 @@ def request_generation(
             and normalized_priority in {"shadow", "supporting", "supporting_bundle"}
         ):
             return {
-                "error": "Low-priority resource generation is temporarily paused.",
+                "error": "低优先级学习资源生成暂时暂停，请稍后重试。",
                 "status_code": 503,
                 "retry_after": 15,
                 "queue_depth": int(queue.get("depth") or 0),
             }
         if repository.active_job_count_for_user(user_id) >= 2:
             return {
-                "error": "At most two resource generation jobs may be active per learner.",
+                "error": "每位学习者最多只能同时运行两个资源生成任务。",
                 "status_code": 429,
                 "retry_after": 5,
             }
@@ -2582,7 +2618,11 @@ def _run_claimed_generation_job(
             force = bool(job.get("force"))
             request_params = job.get("request_params") if isinstance(job.get("request_params"), dict) else {}
             use_cache = bool(request_params.get("use_cache", True))
-            existing_cards = list(state.generated_resources.get(context.node_id, []))
+            existing_cards = [
+                card
+                for card in state.generated_resources.get(context.node_id, [])
+                if _resource_card_language_valid(card, locale)
+            ]
             existing_by_type = {card.card_type: card for card in existing_cards}
             unresolved: list[str] = []
             for card_type in requested:
@@ -3060,7 +3100,7 @@ def generate_current_node_resources(
     session = get_session(user_id, course_id)
     target_node = str(node_id or session.agent_state.current_node_id or (session.agent_state.active_path[0] if session.agent_state.active_path else "") or "")
     if not target_node:
-        return {"error": "node_id is required", "status_code": 400}
+        return {"error": "缺少学习节点标识。", "status_code": 400}
     repaired = False
     if not force:
         repaired = _repair_legacy_cards(session, get_runtime(), course_id, target_node, requested_types or [])

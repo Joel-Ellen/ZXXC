@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
 from src.observability import incr_metric
+from src.validation.language import non_chinese_resource_fields
 
 from .context import ResourceContext
 from .services import (
@@ -87,12 +88,7 @@ def _language_score(
         return 0.0
     if not locale.lower().startswith("zh"):
         return 100.0
-    text = _learner_visible_text(payload)
-    chinese = len(re.findall(r"[\u4e00-\u9fff]", text))
-    latin_words = len(re.findall(r"\b[A-Za-z]{3,}\b", text))
-    # API names and code are controlled exceptions; only reject a clearly
-    # English-dominant learner-facing payload.
-    return 100.0 if chinese >= max(8, latin_words) else 60.0
+    return 0.0 if non_chinese_resource_fields(payload) else 100.0
 
 
 def evaluate_resource_quality(
@@ -361,6 +357,9 @@ def evaluate_resource_quality(
         verifiability = 40.0
     coordination = 100.0 if objective_ids else 0.0
     language = _language_score(payload, context.locale, card_type)
+    if language < 100.0:
+        issues.append("learner_content_not_chinese")
+        hard_fail = True
     dimensions = {
         "factual": factual,
         "evidence": evidence,

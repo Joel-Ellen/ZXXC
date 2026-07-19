@@ -15,6 +15,13 @@ from src.agents.tutor_node import TutorInput
 from src.api_models.tutor_request import TutorRequest
 from src.auth.rate_limiter import KeyedConcurrencyLimiter
 from src.observability import bind_context, incr_metric, log_event, observe_metric
+from src.validation.language import (
+    TUTOR_LEARNER_TEXT_FIELDS,
+    is_chinese_explanatory_text,
+    is_chinese_learning_content,
+    is_chinese_mermaid_text,
+    non_chinese_tutor_fields,
+)
 from src.validation.pipeline import get_validation_pipeline
 from src.validation.result import ValidationResult
 
@@ -64,42 +71,108 @@ _TUTOR_STREAM_CAPACITY = threading.BoundedSemaphore(
 _TUTOR_STREAM_USER_CAPACITY = KeyedConcurrencyLimiter(1)
 
 
+def _chinese_tutor_mermaid() -> str:
+    return (
+        "graph TD\n"
+        '    Q["问题"] --> C["核心概念"]\n'
+        '    C --> E["具体示例"]\n'
+        '    E --> R["推理规则"]'
+    )
+
+
 def _fallback_tutor_response(request: TutorRequest, node_id: str = "") -> Dict[str, object]:
-    title = get_node_title(node_id, node_id or "当前知识点")
+    node_title = get_node_title(node_id, node_id or "当前学习节点")
+    title = (
+        node_title
+        if is_chinese_learning_content(node_title, allow_name_only=True)
+        else "当前学习节点"
+    )
     text_explanation = (
         f"## {title}\n\n"
-        "智能辅导本次响应超时，先给你一个可继续推进的分析框架：\n\n"
-        f"- **你的问题**：{request.question}\n"
+        "智能辅导本次响应超时，已切换为中文兜底讲解。先给你一个可继续推进的分析框架：\n\n"
         "- **先明确核心概念**：用一句话写出它解决什么问题，以及成立所需的关键条件。\n"
         "- **再构造具体例子**：给出一个输入、预期输出，并逐步说明两者之间的规则。\n"
         "- **最后检查边界情况**：尝试空输入、最小规模和容易混淆的反例。\n\n"
-        "你可以继续追问其中任意一步，辅导智能体会结合当前知识点展开说明。"
+        "你可以继续追问其中任意一步，辅导智能体会结合当前学习节点展开说明。"
     )
     if request.context_type == "code_debug":
         code_block = request.code_snippet or "（未提供代码片段）"
-        error_block = request.error_message or "（未提供报错信息）"
+        error_block = request.error_message or "（未提供运行错误信息）"
         text_explanation = (
             f"## {title}：代码调试\n\n"
-            f"**你的问题**：{request.question}\n\n"
+            "学生问题已记录，下面按最小可复现路径进行排查。\n\n"
             "### 待检查代码\n"
             f"```\n{code_block}\n```\n\n"
-            "### 报错信息\n"
-            f"{error_block}\n\n"
-            "智能辅导本次响应超时。请先用最小可复现输入运行代码，并检查报错位置之前各变量的实际值、类型和边界条件。"
+            "### 错误信息\n"
+            f"```text\n{error_block}\n```\n\n"
+            "智能辅导本次响应超时。请先用最小输入稳定复现问题，再检查失败操作之前的变量值、边界条件和控制流。"
         )
     return {
         "text_explanation": text_explanation,
-        "mermaid_src": (
-            "graph TD\n"
-            '    Q["问题"] --> C["核心概念"]\n'
-            '    C --> E["具体例子"]\n'
-            '    E --> R["推理规则"]'
-        ),
+        "mermaid_src": _chinese_tutor_mermaid(),
         "video_hydration": None,
         "query": request.question,
         "tutoring_mode": request.context_type,
         "fallback": True,
     }
+
+
+def _ensure_chinese_tutor_response(
+    response: Dict[str, object],
+    request: TutorRequest,
+    node_id: str = "",
+    *,
+    operation: str = "tutor",
+) -> Dict[str, object]:
+    """Enforce the Chinese output contract at the application boundary."""
+    next_response = dict(response or {})
+    text = str(next_response.get("text_explanation") or "")
+    language_failures = non_chinese_tutor_fields(next_response)
+    if is_chinese_explanatory_text(text):
+        invalid_optional_fields = {
+            field_path.split(".", 1)[0]
+            for field_path in language_failures
+            if not field_path.startswith("text_explanation")
+        }
+        for field_name in invalid_optional_fields:
+            next_response.pop(field_name, None)
+        if invalid_optional_fields:
+            next_response["language_fallback"] = True
+            incr_metric("llm.fallback_total", operation=operation, fallback="chinese_structured_fields")
+            log_event(
+                "tutor.structured_language_fallback",
+                level="warning",
+                operation=operation,
+                fields=sorted(invalid_optional_fields),
+            )
+        if not is_chinese_mermaid_text(next_response.get("mermaid_src")):
+            next_response["mermaid_src"] = _chinese_tutor_mermaid()
+            next_response["language_fallback"] = True
+            incr_metric("llm.fallback_total", operation=operation, fallback="chinese_mermaid")
+            log_event(
+                "tutor.mermaid_language_fallback",
+                level="warning",
+                operation=operation,
+            )
+        return next_response
+
+    for field_name in TUTOR_LEARNER_TEXT_FIELDS:
+        next_response.pop(field_name, None)
+    if next_response.get("blocked"):
+        next_response["text_explanation"] = "辅导请求未通过安全校验。请换一种说法，或缩小问题范围后重试。"
+        next_response["mermaid_src"] = ""
+    else:
+        fallback = _fallback_tutor_response(request, node_id)
+        next_response.update(fallback)
+        next_response["language_fallback"] = True
+        incr_metric("llm.fallback_total", operation=operation, fallback="chinese_language")
+        log_event(
+            "tutor.language_fallback",
+            level="warning",
+            operation=operation,
+            output_length=len(text),
+        )
+    return next_response
 
 
 def _blocked_tutor_payload(validation) -> Dict[str, object]:
@@ -244,7 +317,7 @@ def _render_tutor_stream_value(value: Any) -> str:
             filter(
                 None,
                 (
-                    f"{_TUTOR_STREAM_FIELD_LABELS.get(str(key), str(key))}: {_render_tutor_stream_value(item)}"
+                    f"{_TUTOR_STREAM_FIELD_LABELS.get(str(key), '补充说明')}：{_render_tutor_stream_value(item)}"
                     for key, item in value.items()
                     if item not in (None, "", [], {})
                 ),
@@ -273,7 +346,7 @@ def _render_structured_tutor_stream(payload: Any) -> str:
         if key in {"response", "text_explanation", "answer", "content"}:
             sections.append(rendered)
             continue
-        label = _TUTOR_STREAM_FIELD_LABELS.get(str(key), str(key).replace("_", " "))
+        label = _TUTOR_STREAM_FIELD_LABELS.get(str(key), "补充说明")
         if isinstance(value, list):
             items = [f"- {_render_tutor_stream_value(item)}" for item in value]
             body = "\n".join(item for item in items if item != "- ")
@@ -334,7 +407,11 @@ def _run_tutor_unlimited(
             state.record_error(f"tutor_fallback:{exc}")
 
         validated_response, output_validation = pipeline.validate_tutor_response(state.tutor_response or {})
-        state.tutor_response = validated_response
+        state.tutor_response = _ensure_chinese_tutor_response(
+            validated_response,
+            request,
+            state.current_node_id,
+        )
         if not output_validation.passed:
             issue_codes = _validation_issue_codes(output_validation)
             incr_metric("validation.reject_total", stage="tutor_output", code=issue_codes[0] if issue_codes else "validation_failed")
@@ -351,8 +428,8 @@ def _run_tutor_unlimited(
 
         state.agent_feedback = [
             feedback_item(
-                agent="Tutor",
-                stage="tutor_question",
+                agent="智能辅导",
+                stage="辅导问答",
                 status="success" if output_validation.passed else "error",
                 headline="辅导回答已更新" if output_validation.passed else "辅导回答已拦截",
                 summary=(
@@ -362,13 +439,19 @@ def _run_tutor_unlimited(
                 ),
                 details_md=(state.tutor_response or {}).get("text_explanation", ""),
                 structured_data={
-                    "query": request.question,
-                    "context_type": request.context_type,
+                    "学生问题": request.question,
+                    "辅导模式": {
+                        "concept": "概念讲解",
+                        "problem_solving": "问题求解",
+                        "code_debug": "代码调试",
+                        "exam_prep": "考试复习",
+                        "general": "综合辅导",
+                    }.get(request.context_type, "综合辅导"),
                     "validation": output_validation.to_contract_validation(),
                 },
                 artifacts={"mermaid_src": (state.tutor_response or {}).get("mermaid_src", "")},
             ),
-            *[item for item in state.agent_feedback if item.agent != "Tutor"],
+            *[item for item in state.agent_feedback if item.agent not in {"Tutor", "智能辅导"}],
         ]
         if persist_history:
             try:
@@ -476,24 +559,19 @@ async def _stream_tutor_unlimited(
             return
 
         llm = get_runtime().get_llm()
-        full_text: list[str] = []
+        final_response: Dict[str, object]
+        warning_message = ""
         if llm is None:
             incr_metric("llm.fallback_total", operation="tutor_stream", fallback="run_tutor")
-            fallback = run_tutor(
+            final_response = run_tutor(
                 user_id,
                 course_id,
                 request.question,
                 tutor_request=request,
-            ).get("tutor_response", {}) or {}
-            text = fallback.get("text_explanation", "") or "辅导服务暂时不可用，请稍后重试。"
-            for chunk in [text[i:i + 80] for i in range(0, len(text), 80)]:
-                yield {"event": "token", "data": json.dumps({"token": chunk}, ensure_ascii=False)}
-                await asyncio.sleep(0.02)
+            ).get("tutor_response", {}) or _fallback_tutor_response(request)
         else:
             messages = _stream_messages(request)
             raw_tokens: list[str] = []
-            structured_stream: Optional[bool] = None
-            emitted_text = False
             stream_fallback = False
             try:
                 async with asyncio.timeout(_tutor_timeout_sec()):
@@ -502,32 +580,7 @@ async def _stream_tutor_unlimited(
                             continue
                         if token.strip().startswith("[Stream error:"):
                             raise RuntimeError(token.strip())
-
                         raw_tokens.append(token)
-                        raw_text = "".join(raw_tokens)
-                        if structured_stream is None:
-                            if not raw_text.strip():
-                                continue
-                            structured_stream = _structured_stream_prefix_state(raw_text)
-                            if structured_stream is None:
-                                continue
-                            if structured_stream:
-                                continue
-                            full_text = [raw_text]
-                            emitted_text = True
-                            yield {
-                                "event": "token",
-                                "data": json.dumps({"token": raw_text}, ensure_ascii=False),
-                            }
-                            continue
-
-                        if not structured_stream:
-                            full_text.append(token)
-                            emitted_text = True
-                            yield {
-                                "event": "token",
-                                "data": json.dumps({"token": token}, ensure_ascii=False),
-                            }
             except Exception as exc:
                 incr_metric("llm.timeout_total", operation="tutor_stream")
                 incr_metric("llm.fallback_total", operation="tutor_stream", fallback="local_template")
@@ -538,50 +591,28 @@ async def _stream_tutor_unlimited(
                     session.agent_state.current_node_id,
                 )
                 text = fallback.get("text_explanation", "") or "辅导服务暂时不可用，请稍后重试。"
-                full_text = [text]
                 stream_fallback = True
-                if emitted_text:
-                    yield {
-                        "event": "reset",
-                        "data": json.dumps({"reason": "stream_fallback"}, ensure_ascii=False),
-                    }
-                for chunk in [text[i:i + 80] for i in range(0, len(text), 80)]:
-                    yield {"event": "token", "data": json.dumps({"token": chunk}, ensure_ascii=False)}
-                    await asyncio.sleep(0.02)
-                yield {
-                    "event": "warning",
-                    "data": json.dumps({"message": f"stream_fallback:{exc}"}, ensure_ascii=False),
-                }
+                warning_message = "实时生成失败，已切换为中文兜底回答。"
             else:
                 raw_text = "".join(raw_tokens)
-                if structured_stream:
+                if _structured_stream_prefix_state(raw_text) is True:
                     parsed, structured_payload = _parse_structured_stream_output(raw_text)
                     text = _render_structured_tutor_stream(structured_payload) if parsed else ""
-                    if not text:
-                        text = _fallback_tutor_response(request).get("text_explanation", "")
-                        stream_fallback = True
-                        incr_metric("llm.fallback_total", operation="tutor_stream", fallback="local_template")
-                        log_event(
-                            "tutor.stream.invalid_structured_output",
-                            level="warning",
-                            output_length=len(raw_text),
-                        )
-                    full_text = [text]
-                    for chunk in [text[i:i + 80] for i in range(0, len(text), 80)]:
-                        yield {"event": "token", "data": json.dumps({"token": chunk}, ensure_ascii=False)}
-                        await asyncio.sleep(0.02)
-                elif not full_text:
-                    text = _fallback_tutor_response(request).get("text_explanation", "")
-                    full_text = [text]
+                else:
+                    text = raw_text.strip()
+                if not text:
+                    text = str(_fallback_tutor_response(request).get("text_explanation") or "")
                     stream_fallback = True
                     incr_metric("llm.fallback_total", operation="tutor_stream", fallback="local_template")
-                    for chunk in [text[i:i + 80] for i in range(0, len(text), 80)]:
-                        yield {"event": "token", "data": json.dumps({"token": chunk}, ensure_ascii=False)}
-                        await asyncio.sleep(0.02)
+                    log_event(
+                        "tutor.stream.invalid_output",
+                        level="warning",
+                        output_length=len(raw_text),
+                    )
 
             session = get_session(user_id, course_id)
             raw_response = {
-                "text_explanation": "".join(full_text),
+                "text_explanation": text,
                 "mermaid_src": "",
                 "query": request.question,
                 "tutoring_mode": request.context_type,
@@ -589,7 +620,13 @@ async def _stream_tutor_unlimited(
             if stream_fallback:
                 raw_response["fallback"] = True
             validated_response, validation = pipeline.validate_tutor_response(raw_response)
-            session.agent_state.tutor_response = validated_response
+            final_response = _ensure_chinese_tutor_response(
+                validated_response,
+                request,
+                session.agent_state.current_node_id,
+                operation="tutor_stream",
+            )
+            session.agent_state.tutor_response = final_response
             if not validation.passed:
                 issue_codes = _validation_issue_codes(validation)
                 incr_metric(
@@ -623,6 +660,23 @@ async def _stream_tutor_unlimited(
                     f"tutor_history_asset_sync_failed:{type(exc).__name__}"
                 )
             persist_session(session)
+
+        text = str(final_response.get("text_explanation") or "")
+        if not is_chinese_explanatory_text(text):
+            final_response = _ensure_chinese_tutor_response(
+                final_response,
+                request,
+                operation="tutor_stream",
+            )
+            text = str(final_response.get("text_explanation") or "")
+        for chunk in [text[i:i + 80] for i in range(0, len(text), 80)]:
+            yield {"event": "token", "data": json.dumps({"token": chunk}, ensure_ascii=False)}
+            await asyncio.sleep(0.02)
+        if warning_message:
+            yield {
+                "event": "warning",
+                "data": json.dumps({"message": warning_message}, ensure_ascii=False),
+            }
 
         duration_ms = round((time.perf_counter() - started) * 1000, 3)
         observe_metric("tutor.stream.duration_ms", duration_ms)

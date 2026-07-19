@@ -19,6 +19,7 @@ from typing import Any, Iterable, Optional
 from uuid import uuid4
 
 from src.state.agent_state import AgentState
+from src.validation.language import is_chinese_explanatory_text
 
 from ._common import get_session, persist_session
 
@@ -769,6 +770,31 @@ def _assets_response(
             derived = _diagnostic_metadata(state)
             if derived is not None and _matches_scope(derived, node_id, resource_id):
                 entries["latest"] = derived
+        if category == "tutor_history":
+            invalid_exchange_ids = {
+                str(entry.get("exchange_id") or "")
+                for entry in entries.values()
+                if (
+                    isinstance(entry, dict)
+                    and entry.get("role") == "assistant"
+                    and not is_chinese_explanatory_text(entry.get("content"))
+                    and str(entry.get("exchange_id") or "")
+                )
+            }
+            entries = {
+                key: entry
+                for key, entry in entries.items()
+                if not (
+                    isinstance(entry, dict)
+                    and (
+                        str(entry.get("exchange_id") or "") in invalid_exchange_ids
+                        or (
+                            entry.get("role") == "assistant"
+                            and not is_chinese_explanatory_text(entry.get("content"))
+                        )
+                    )
+                )
+            }
         output[category] = entries
     # The two timeline categories are naturally rendered as ordered lists.
     # Keep the canonical keyed map above for conflict-free upserts, while
@@ -1079,7 +1105,13 @@ def record_tutor_exchange_asset(
         return
     question_text = str(question or "").strip()
     answer_text = str(response.get("text_explanation") or "").strip()
-    if not question_text or not answer_text or _contains_secret(question_text) or _contains_secret(answer_text):
+    if (
+        not question_text
+        or not answer_text
+        or not is_chinese_explanatory_text(answer_text)
+        or _contains_secret(question_text)
+        or _contains_secret(answer_text)
+    ):
         return
     with _asset_lock(state.user_id, state.course_id):
         context = str(context_type or "").strip()[:80]

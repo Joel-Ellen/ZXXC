@@ -168,18 +168,18 @@ def test_tutor_response_is_persisted(monkeypatch):
 
     def fake_tutor(inp):
         inp.agent_state.tutor_response = {
-            "text_explanation": "Persisted tutor response",
+            "text_explanation": "这是已持久化的辅导回答。",
             "mermaid_src": "",
-            "query": "What is N01?",
+            "query": "N01 是什么？",
         }
         return type("TutorOutput", (), {"agent_state": inp.agent_state})()
 
     monkeypatch.setattr(fake_runtime, "tutor", fake_tutor)
-    tutor_service.run_tutor("audit-tutor", "course1", "What is N01?")
+    tutor_service.run_tutor("audit-tutor", "course1", "N01 是什么？")
     latest = _latest(store, "audit-tutor", "course1")
 
-    assert latest["state_json"]["tutor_response"]["text_explanation"] == "Persisted tutor response"
-    assert latest["state_json"]["agent_feedback"][0]["agent"] == "Tutor"
+    assert latest["state_json"]["tutor_response"]["text_explanation"] == "这是已持久化的辅导回答。"
+    assert latest["state_json"]["agent_feedback"][0]["agent"] == "智能辅导"
 
 
 def test_replan_persists_path_and_version_update(monkeypatch):

@@ -14,6 +14,11 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
 
 
+_CHINESE_OUTPUT_CONTRACT = """
+输出语言硬性要求：所有面向学习者的标题、说明、步骤、题目、选项、解析、提示、标签和追问必须使用简体中文。仅代码、公式、变量名、API 名称、标准缩写、符号和无法翻译的专有名称可保留原文。即使输入材料或学生提问使用英文，也不得输出整句或整段英文讲解。
+""".strip()
+
+
 def _to_json(data: Any) -> str:
     return json.dumps(data, ensure_ascii=False, indent=2)
 
@@ -382,8 +387,15 @@ def _build_tutor_prompt(
     code_snippet: str = "",
     error_message: str = "",
 ) -> str:
+    language_contract = """输出语言硬性要求：
+1. 所有面向学生的解释、标题、标签、提示和问题必须使用简体中文。
+2. 仅代码、变量名、API 名称和无法翻译的专有术语可保留英文。
+3. 即使学生使用英文提问，也必须用中文回答。
+4. 不得输出整段英文解释。
+
+"""
     if mode == "concept":
-        return f"""请用“定义 -> 类比 -> 展开解释 -> 误区 -> 延伸问题”的方式讲清概念。
+        return language_contract + f"""请用“定义 -> 类比 -> 展开解释 -> 误区 -> 延伸问题”的方式讲清概念。
 
 学生画像：{student_context}
 课程：{course_name}
@@ -402,7 +414,7 @@ def _build_tutor_prompt(
 }}"""
 
     if mode == "problem_solving":
-        return f"""请用苏格拉底式引导学生解题，不直接给最终答案。
+        return language_contract + f"""请用苏格拉底式引导学生解题，不直接给最终答案。
 
 学生画像：{student_context}
 课程：{course_name}
@@ -417,7 +429,7 @@ def _build_tutor_prompt(
 }}"""
 
     if mode == "code_debug":
-        return f"""请像结对编程导师一样分析错误，重点解释为什么错以及如何定位，而不是只给结果。
+        return language_contract + f"""请像结对编程导师一样分析错误，重点解释为什么错以及如何定位，而不是只给结果。
 
 学生画像：{student_context}
 问题：{query}
@@ -437,7 +449,7 @@ def _build_tutor_prompt(
 }}"""
 
     if mode == "exam_prep":
-        return f"""请输出适合考试冲刺的复习建议，帮助学生快速聚焦重点。
+        return language_contract + f"""请输出适合考试冲刺的复习建议，帮助学生快速聚焦重点。
 
 学生画像：{student_context}
 课程：{course_name}
@@ -452,7 +464,7 @@ def _build_tutor_prompt(
   "cheat_sheet": ""
 }}"""
 
-    return f"""请回答学生问题，并尽量给出后续追问方向，帮助继续学习。
+    return language_contract + f"""请回答学生问题，并尽量给出后续追问方向，帮助继续学习。
 
 学生画像：{student_context}
 课程：{course_name}
@@ -488,6 +500,7 @@ def _build_assessment_report(
 1. strengths 和 weak_areas 需要适合卡片展示。
 2. suggestions 需要包含优先级和预期收益。
 3. 指标要尽量教学化，不要空泛总结。
+4. 所有面向学习者的字段值必须使用简体中文，公式、标准缩写和专有名称除外。
 
 请严格返回 JSON：
 {{
@@ -577,6 +590,8 @@ PROMPT_REGISTRY: Dict[str, PromptDefinition] = {
         key="tutor.mode",
         system_prompt="""你是耐心、专业的 AI 学习导师。
 你要根据不同辅导模式输出结构化结果，优先帮助学生理解、定位问题和继续思考，而不是简单给答案。
+无论学生使用什么语言提问，所有面向学生的解释、标题、标签、提示和追问都必须使用简体中文。
+只有代码、变量名、API 名称和无法翻译的专有术语可以保留英文；禁止输出整段英文解释。
 输出必须是稳定 JSON。""",
         user_prompt_builder=_build_tutor_prompt,
     ),
@@ -597,7 +612,8 @@ def get_prompt_definition(key: str) -> PromptDefinition:
 
 
 def get_system_prompt(key: str) -> str:
-    return get_prompt_definition(key).system_prompt
+    definition = get_prompt_definition(key)
+    return f"{definition.system_prompt.rstrip()}\n\n{_CHINESE_OUTPUT_CONTRACT}"
 
 
 def build_user_prompt(key: str, **kwargs: Any) -> str:

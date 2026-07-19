@@ -339,6 +339,8 @@ async function streamSsePost(url, payload, { onToken, onDone, onReset, onError, 
         if (rawEvent.trim()) dispatch(rawEvent);
       }
     }
+    buffer += decoder.decode();
+    buffer = buffer.replace(/\r\n/g, "\n");
     // 冲刷残余
     if (buffer.trim()) dispatch(buffer);
     if (!receivedTerminalEvent) {
@@ -438,6 +440,8 @@ async function streamSseGet(url, {
         if (rawEvent.trim()) dispatch(rawEvent);
       }
     }
+    buffer += decoder.decode();
+    buffer = buffer.replace(/\r\n/g, "\n");
     if (buffer.trim()) dispatch(buffer);
     if (!receivedTerminalEvent && !signal?.aborted) {
       onError?.(new Error("Resource generation stream ended before completion."));

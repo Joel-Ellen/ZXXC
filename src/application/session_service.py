@@ -482,17 +482,31 @@ def advance_session(
         )
 
         state = result.state
+        agent_labels = {
+            "Evaluator": "学习评估智能体",
+            "Profiler": "画像分析智能体",
+            "Planner": "路径规划智能体",
+            "Assessment": "综合评估智能体",
+            "Validator": "内容校验智能体",
+        }
+        status_labels = {
+            "success": "已完成",
+            "warning": "需关注",
+            "error": "执行失败",
+            "skipped": "已跳过",
+            "info": "处理中",
+        }
         state.agent_feedback = [
             feedback_item(
                 agent=log.get("agent", "Agent"),
-                stage="official_orchestration",
+                stage="统一学习编排",
                 status=log.get("status", "success"),
-                headline=f"{log.get('agent', 'Agent')} completed",
-                summary=(
-                    f"Processed {get_node_title(result.evaluated_node, result.evaluated_node)}"
-                    " through the official service layer."
-                ),
-                structured_data=log,
+                headline=f"{agent_labels.get(log.get('agent'), '学习智能体')}已完成本轮处理",
+                summary=f"已完成「{get_node_title(result.evaluated_node, result.evaluated_node)}」的学习状态分析与更新。",
+                structured_data={
+                    "处理节点": get_node_title(result.evaluated_node, result.evaluated_node),
+                    "运行状态": status_labels.get(log.get("status", "success"), "已完成"),
+                },
             )
             for log in result.logs
         ]

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from src.adapters.state_to_domain import resource_contract_from_card
 from src.resource_generation import CARD_TYPES, ResourceContext, ResourceGenerator, TEMPLATE_NOTICE, payload_model_for, validate_resource_payload
 from src.state.agent_state import ResourceCard
+from src.validation.language import is_chinese_learning_content
 
 
 @pytest.fixture
@@ -41,6 +44,69 @@ def test_local_templates_validate_against_all_shared_card_schemas(
     assert validation.valid, validation.issues
     assert generated.source == "template"
     assert generated.body_markdown.startswith(TEMPLATE_NOTICE)
+
+
+@pytest.mark.parametrize("card_type", CARD_TYPES)
+def test_local_templates_localize_an_english_context_title(
+    generation_context: ResourceContext,
+    card_type: str,
+) -> None:
+    generated = ResourceGenerator().template(generation_context, card_type)
+
+    assert generated.structured_payload["title"].startswith("当前知识点")
+    assert is_chinese_learning_content(generated.body_markdown)
+
+
+def test_local_template_replaces_an_english_blueprint_snapshot(
+    generation_context: ResourceContext,
+) -> None:
+    snapshot = ResourceGenerator().template(
+        generation_context,
+        "concept_map",
+    ).structured_payload["learning_blueprint"]
+    snapshot["objectives"][0]["text"] = (
+        "This objective explains the concept entirely in English."
+    )
+    context = replace(generation_context, blueprint_snapshot=snapshot)
+
+    generated = ResourceGenerator().template(context, "concept_map")
+
+    blueprint = generated.structured_payload["learning_blueprint"]
+    assert "entirely in English" not in str(blueprint)
+    assert validate_resource_payload(
+        "concept_map",
+        generated.structured_payload,
+        context,
+    ).valid
+
+
+def test_local_video_template_drops_an_english_trusted_timeline(
+    generation_context: ResourceContext,
+) -> None:
+    context = replace(
+        generation_context,
+        knowledge_refs=[{
+            "id": "video-queue-english",
+            "type": "video",
+            "title": "Queue lecture",
+            "excerpt": "可信的视频索引记录。",
+            "video_url": "https://video.example/queue-english",
+            "video_source_id": "queue-video-english",
+            "duration_minutes": 12,
+            "timeline": [{
+                "label": "00:00",
+                "summary": "This section introduces the queue invariant.",
+            }],
+        }],
+    )
+
+    generated = ResourceGenerator().template(context, "video_summary")
+    payload = generated.structured_payload
+
+    assert payload["media_status"] == "no_trusted_video"
+    assert payload["timeline"] == []
+    assert payload["video_url"] is None
+    assert validate_resource_payload("video_summary", payload, context).valid
 
 
 def test_resource_contract_redacts_server_owned_answer_indexes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -156,6 +222,99 @@ def test_generator_rebinds_provider_citations_to_retrieved_evidence(
 
     assert generated.source == "llm"
     assert generated.structured_payload["source_ref_ids"] == ["kb-queue-1"]
+
+
+@pytest.mark.parametrize(
+    ("card_type", "field_path"),
+    (
+        ("concept_map", ("summary",)),
+        ("code_snippet", ("explanation",)),
+        ("interactive_exercise", ("prompt",)),
+        ("video_summary", ("summary",)),
+        ("diagnostic_quiz", ("questions", 0, "explanation")),
+    ),
+)
+def test_english_resource_prose_is_replaced_by_a_chinese_template(
+    generation_context: ResourceContext,
+    card_type: str,
+    field_path: tuple[object, ...],
+) -> None:
+    payload = ResourceGenerator().template(generation_context, card_type).structured_payload
+    target = payload
+    for part in field_path[:-1]:
+        target = target[part]
+    target[field_path[-1]] = "This is a complete English explanation for the learner."
+
+    validation = validate_resource_payload(card_type, payload, generation_context)
+    generated = ResourceGenerator()._result_from_payload(  # noqa: SLF001
+        card_type,
+        payload,
+        generation_context,
+        source="llm",
+    )
+
+    assert validation.valid is False
+    assert any(issue.code == "learner_content_not_chinese" for issue in validation.issues)
+    assert generated.source == "template"
+    assert "complete English explanation" not in generated.body_markdown
+    assert "learner_content_not_chinese" in generated.validation_issues
+
+
+def test_resource_language_gate_allows_names_apis_and_plain_formulas(
+    generation_context: ResourceContext,
+) -> None:
+    payload = ResourceGenerator().template(generation_context, "concept_map").structured_payload
+    payload["summary"] = (
+        "使用 Dijkstra 算法和 OpenAI API 说明状态转移，并计算 "
+        "d[v] = min(d[v], d[u] + w(u,v))。"
+    )
+    payload["mermaid_source"] = (
+        'graph TD\nA["Dijkstra"] --> B["最短路径"]\n'
+        'B --> C["O(n log n)"]'
+    )
+
+    validation = validate_resource_payload("concept_map", payload, generation_context)
+
+    assert validation.valid, validation.issues
+
+
+@pytest.mark.parametrize("english_expected", (
+    "The function returns an empty list for this input.",
+    "Summary: The algorithm runs in linear time.",
+))
+def test_resource_language_gate_rejects_english_boundary_expectations(
+    generation_context: ResourceContext,
+    english_expected: str,
+) -> None:
+    payload = ResourceGenerator().template(generation_context, "code_snippet").structured_payload
+    payload["boundary_tests"][0]["expected"] = english_expected
+
+    validation = validate_resource_payload("code_snippet", payload, generation_context)
+
+    assert validation.valid is False
+    assert any(
+        issue.code == "learner_content_not_chinese"
+        and issue.field == "boundary_tests.0.expected"
+        for issue in validation.issues
+    )
+
+
+def test_resource_language_gate_rejects_english_boundary_inputs(
+    generation_context: ResourceContext,
+) -> None:
+    payload = ResourceGenerator().template(generation_context, "code_snippet").structured_payload
+    payload["boundary_tests"][0]["input"] = (
+        "The learner enters an empty list for this test."
+    )
+
+    validation = validate_resource_payload("code_snippet", payload, generation_context)
+
+    assert validation.valid is False
+    assert any(
+        issue.code == "learner_content_not_chinese"
+        and issue.field == "boundary_tests.0.input"
+        for issue in validation.issues
+    )
 
 
 def test_code_snippet_rejects_invalid_python_syntax(

@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from src.api_models.tutor_request import TutorRequest
+from src.validation.language import is_chinese_explanatory_text, is_chinese_mermaid_text
 
 from .prompt_adapters import patch_tutor_node_class, run_tutor_mode_with_llm
 
@@ -144,9 +145,13 @@ class TutorAgentNode:
                 text_response = self._code_debug_fallback(query, code_snippet, error_message)
             else:
                 text_response = self._generate_text_explanation(llm, query, reference_chunks)
+        if not is_chinese_explanatory_text(text_response):
+            text_response = self._chinese_language_fallback(query, mode)
 
         raw_mermaid = self._generate_mermaid(llm, query, text_response)
         clean_mermaid = self._guard.validate_and_repair(raw_mermaid)
+        if not is_chinese_mermaid_text(clean_mermaid):
+            clean_mermaid = self._template_mermaid()
 
         video_metadata = self._search_video_slices(milvus, query)
         video_card = VideoHydrationCard(
@@ -210,16 +215,29 @@ class TutorAgentNode:
 
     @staticmethod
     def _code_debug_fallback(query: str, code_snippet: str, error_message: str) -> str:
-        code_block = code_snippet or "(No code snippet was provided.)"
-        error_block = error_message or "(No runtime error message was provided.)"
+        code_block = code_snippet or "（未提供代码片段）"
+        error_block = error_message or "（未提供运行错误信息）"
         return (
-            f"## Debugging: {query}\n\n"
-            "### Code under review\n"
+            "## 代码调试建议\n\n"
+            "### 待检查代码\n"
             f"```\n{code_block}\n```\n\n"
-            "### Reported error\n"
-            f"{error_block}\n\n"
-            "Start by matching the error location to the values and control flow around it, "
-            "then test the smallest input that reproduces the failure."
+            "### 错误信息\n"
+            f"```text\n{error_block}\n```\n\n"
+            "建议先用最小输入稳定复现问题，再对照报错位置检查执行前的变量值和控制流。"
+        )
+
+    @staticmethod
+    def _chinese_language_fallback(query: str, mode: str = "general") -> str:
+        if mode == TutoringMode.CODE_DEBUG.value:
+            return (
+                "## 代码调试建议\n\n"
+                "模型返回内容未满足中文输出要求。请先定位最小可复现输入，"
+                "再检查报错位置之前的变量值、边界条件和控制流。"
+            )
+        return (
+            "## 中文辅导提示\n\n"
+            "模型返回内容未满足中文输出要求，已切换为中文辅导提示。"
+            "可以先明确题目中的核心概念，再用一个具体例子验证输入、输出和推理规则之间的关系。"
         )
 
     @staticmethod
@@ -243,9 +261,15 @@ class TutorAgentNode:
 
         if reference_chunks:
             context = "\n\n".join(reference_chunks[:3])
-            return f"## 关于“{query}”的相关讲解\n\n{context}"
+            return f"## 相关概念讲解\n\n{context}"
 
-        return f"## 关于“{query}”的解答\n\n离线模式下当前没有足够上下文，请尝试补充问题背景。"
+        if is_chinese_explanatory_text(query):
+            return (
+                f"## 关于“{query}”的解答\n\n"
+                "离线模式下当前没有足够上下文，请尝试补充问题背景。"
+            )
+
+        return "## 学习问题解答\n\n离线模式下当前没有足够上下文，请尝试补充问题背景。"
 
     def _generate_mermaid(self, llm: Any, query: str, text_explanation: str) -> str:
         if llm is not None and hasattr(llm, "generate_mermaid_graph"):
@@ -256,16 +280,15 @@ class TutorAgentNode:
         return self._template_mermaid(query)
 
     @staticmethod
-    def _template_mermaid(query: str) -> str:
-        sanitized = query[:30].replace('"', "'")
+    def _template_mermaid(query: str = "") -> str:
         return (
             "graph TD\n"
-            f'    Q["[Q] {sanitized}"] --> A["[1] 核心概念"]\n'
-            '    A --> B["[2] 原理解析"]\n'
-            '    A --> C["[3] 示例"]\n'
-            '    B --> D["[4] 常见误区"]\n'
+            '    Q["学习问题"] --> A["核心概念"]\n'
+            '    A --> B["原理解析"]\n'
+            '    A --> C["具体示例"]\n'
+            '    B --> D["常见误区"]\n'
             '    C --> D\n'
-            '    D --> E["[5] 巩固问题"]'
+            '    D --> E["巩固问题"]'
         )
 
     def _search_video_slices(self, milvus: Any, query: str) -> List[Dict[str, Any]]:

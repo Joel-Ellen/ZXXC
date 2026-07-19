@@ -75,6 +75,7 @@ describe("Tutor stream transport hardening", () => {
     expect(handlers.signal.aborted).toBe(true);
     expect(assistant).toMatchObject({
       role: "assistant",
+      content: "发送失败，输入内容已保留，请稍后重试。",
       isStreaming: false,
       streamStatus: "error",
       streamError: "transport rejected",

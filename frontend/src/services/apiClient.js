@@ -1,7 +1,5 @@
 import axios from "axios";
-
-const ACCESS_TOKEN_KEY = "access_token";
-const REFRESH_TOKEN_KEY = "refresh_token";
+import { tokenStore } from "./tokenStore";
 
 export function createRequestId() {
   if (typeof window !== "undefined" && window.crypto?.randomUUID) {
@@ -10,26 +8,7 @@ export function createRequestId() {
   return `${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
 }
 
-export const tokenStore = {
-  getAccessToken() {
-    return window.localStorage.getItem(ACCESS_TOKEN_KEY);
-  },
-  getRefreshToken() {
-    return window.localStorage.getItem(REFRESH_TOKEN_KEY);
-  },
-  setTokens({ accessToken, refreshToken }) {
-    if (accessToken) {
-      window.localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
-    }
-    if (refreshToken) {
-      window.localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
-    }
-  },
-  clear() {
-    window.localStorage.removeItem(ACCESS_TOKEN_KEY);
-    window.localStorage.removeItem(REFRESH_TOKEN_KEY);
-  },
-};
+export { tokenStore };
 
 let refreshPromise = null;
 
