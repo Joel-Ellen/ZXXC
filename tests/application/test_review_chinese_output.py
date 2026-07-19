@@ -21,6 +21,24 @@ def _session_with_review_item(
     return SimpleNamespace(agent_state=state)
 
 
+def test_delete_review_item_removes_persisted_record(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = _session_with_review_item({
+        "review_item_id": "review-delete-1",
+        "review_kind": "diagnostic_quiz",
+        "node_id": "N01",
+        "status": "due",
+    })
+    persisted: list[object] = []
+    monkeypatch.setattr(service, "get_session", lambda _user_id, _course_id: session)
+    monkeypatch.setattr(service, "persist_session", persisted.append)
+
+    result = service.delete_review_item("review-user", "course1", "review-delete-1")
+
+    assert result == {"status": "deleted", "review_item_id": "review-delete-1"}
+    assert session.agent_state.internal_state[service.REVIEW_ITEMS_KEY] == []
+    assert persisted == [session]
+
+
 def test_code_review_copy_is_chinese(monkeypatch: pytest.MonkeyPatch) -> None:
     state = AgentState(user_id="review-user", course_id="course1")
     monkeypatch.setattr(service, "get_node_title", lambda node_id, _default=None: node_id)

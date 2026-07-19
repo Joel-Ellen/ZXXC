@@ -1,187 +1,632 @@
 <template>
-  <div class="h-screen flex flex-col" :style="{ background: 'var(--space-bg)', color: 'var(--text-primary)' }">
-    <header class="sticky top-0 z-20 border-b border-subtle backdrop-blur-lg shrink-0" style="background:color-mix(in srgb, var(--space-panel) 96%, transparent);min-height:4rem">
-      <div class="mx-auto flex h-16 max-w-6xl items-center justify-between px-5">
-        <div class="flex items-center gap-4">
-          <button type="button" class="focus-ring rounded-lg px-3 py-1.5 text-sm font-medium text-text-secondary hover:text-text-primary transition-colors" @click="goBack">&larr; 返回错题本</button>
-          <div class="flex items-center gap-2">
-            <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-[10px] font-black text-primary-text">练</span>
-            <h1 class="text-base font-bold text-text-primary">重新刷题</h1>
-          </div>
+  <div class="retest-page">
+    <header class="retest-topbar">
+      <div class="retest-topbar__inner">
+        <button type="button" class="retest-back focus-ring" @click="goBack">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 12H5" />
+            <path d="m12 19-7-7 7-7" />
+          </svg>
+          返回错题本
+        </button>
+        <div class="retest-heading">
+          <span class="retest-heading__eyebrow">错题复习</span>
+          <h1>重刷题目</h1>
         </div>
-        <div class="flex items-center gap-2">
-          <button type="button" class="focus-ring rounded-lg border border-subtle px-3 py-1.5 text-xs text-text-secondary hover:text-primary transition-colors" @click="resetAll" v-if="allQuestions.length">全部重置</button>
-          <span class="text-sm text-text-muted ml-2">{{ visibleCount }} / {{ allQuestions.length }} 题</span>
-        </div>
+        <span class="retest-counter">{{ answeredCount }} / {{ questions.length }} 已作答</span>
       </div>
-      <div class="mx-auto max-w-6xl px-5 pb-3">
-        <div class="h-1 rounded-full bg-card-hover overflow-hidden">
-          <div class="h-full rounded-full bg-primary transition-all duration-700" :style="{ width: progressPercent + '%' }" />
-        </div>
+      <div class="retest-progress" aria-hidden="true">
+        <span :style="{ width: `${progressPercent}%` }" />
       </div>
     </header>
 
-    <div class="flex-1 flex min-h-0">
-    <main class="flex-1 overflow-y-auto">
-      <div v-if="!allQuestions.length" class="flex flex-col items-center justify-center py-20 text-center">
-        <p class="text-text-muted">没有可刷的题目</p>
-        <button type="button" class="focus-ring mt-4 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-text" @click="goBack">返回</button>
-      </div>
+    <main class="retest-main">
+      <section v-if="loading" class="retest-state" aria-live="polite">
+        <div class="retest-spinner" />
+        <h2>正在准备新的复测题</h2>
+        <p>题目由服务端生成，请稍候。</p>
+      </section>
 
-      <TransitionGroup name="question" tag="div" class="mx-auto max-w-2xl px-5 py-6 space-y-4">
-        <article
-          v-for="(q, idx) in visibleQuestions"
-          :key="q.review_item_id"
-          class="rounded-xl border border-subtle bg-card p-5 transition-all duration-300"
-        >
-          <div class="flex flex-wrap items-center gap-2 mb-3">
-            <span class="rounded-full bg-error-soft px-2 py-0.5 text-xs font-semibold text-error">{{ labelMap[q.error_type] || '错题' }}</span>
-            <span class="text-sm text-text-muted">{{ q.node_title || q.node_id }}</span>
-            <span class="ml-auto text-xs text-text-muted">#{{ allQuestions.indexOf(q) + 1 }}</span>
-          </div>
+      <section v-else-if="error" class="retest-state retest-state--error" role="alert">
+        <div class="retest-state__icon" aria-hidden="true">!</div>
+        <h2>复测题加载失败</h2>
+        <p>{{ error }}</p>
+        <button type="button" class="retest-submit focus-ring" @click="loadQuiz">重新加载</button>
+      </section>
 
-          <p class="text-sm font-medium text-text-primary leading-6 mb-4">{{ q.question_prompt }}</p>
+      <template v-else-if="questions.length">
+        <section class="retest-intro">
+          <p class="retest-intro__eyebrow">{{ item?.node_title || "当前知识点" }}</p>
+          <h2>请完成下面的复测题</h2>
+          <p>每道题只选择一个答案。提交后系统会统一判分，并更新本次错题复习结果。</p>
+        </section>
 
-          <div class="flex items-center gap-2">
-            <button v-if="!q._revealed" type="button" class="focus-ring rounded-lg border border-subtle px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary hover:bg-card-hover transition-colors" @click="q._revealed = true">显示答案</button>
-            <span v-else class="text-xs text-success font-medium">已显示</span>
-            <button v-if="!q._skipped" type="button" class="focus-ring rounded-lg border border-subtle px-3 py-1.5 text-xs text-text-muted hover:text-error hover:border-error/30 transition-colors ml-auto" @click="skipQuestion(q)">跳过</button>
-          </div>
-
-          <Transition name="reveal">
-            <div v-if="q._revealed" class="mt-4 rounded-lg bg-[#FAFCFB] p-3 text-sm leading-6 text-text-secondary">
-              <span class="font-semibold text-text-muted">正确答案：</span>
-              <span class="text-success font-medium">{{ q.correct_answer || '' }}</span>
+        <form class="retest-form" @submit.prevent="submitQuiz">
+          <article v-for="(question, index) in questions" :key="question.id" class="retest-question">
+            <div class="retest-question__meta">
+              <span>第 {{ index + 1 }} 题</span>
+              <span v-if="question.skillTag || question.difficulty">{{ [question.skillTag, question.difficulty].filter(Boolean).join(" · ") }}</span>
             </div>
-          </Transition>
-        </article>
-      </TransitionGroup>
+            <h3>{{ question.prompt }}</h3>
+            <div class="retest-options" role="radiogroup" :aria-label="`第 ${index + 1} 题选项`">
+              <button
+                v-for="(option, optionIndex) in question.options"
+                :key="`${question.id}-${optionIndex}`"
+                type="button"
+                class="retest-option focus-ring"
+                :class="optionClass(question, optionIndex)"
+                :disabled="submitting || submitted"
+                role="radio"
+                :aria-checked="answers[question.id] === optionIndex"
+                @click="selectAnswer(question.id, optionIndex)"
+              >
+                <span class="retest-option__mark">{{ optionLetter(optionIndex) }}</span>
+                <span>{{ option }}</span>
+              </button>
+            </div>
+            <div v-if="submitted && resultFor(question.id)" class="retest-feedback" :class="resultFor(question.id).correct ? 'retest-feedback--correct' : 'retest-feedback--wrong'">
+              <strong>{{ resultFor(question.id).correct ? "回答正确" : "需要复习" }}</strong>
+              <span v-if="!resultFor(question.id).correct">正确答案：{{ resultFor(question.id).correct_answer || "请查看解析" }}</span>
+              <span v-if="resultFor(question.id).explanation">{{ resultFor(question.id).explanation }}</span>
+            </div>
+          </article>
 
-      <div v-if="allQuestions.length && visibleCount === 0" class="text-center py-8">
-        <p class="text-text-muted text-sm">全部完成</p>
-      </div>
+          <section v-if="submitted" class="retest-result" aria-live="polite">
+            <div>
+              <span class="retest-result__label">本次得分</span>
+              <strong>{{ correctCount }} / {{ questions.length }}</strong>
+            </div>
+            <p>{{ correctCount === questions.length ? "本次复测已通过，错题状态已更新。" : "部分题目仍需巩固，错题会保留在复习清单中。" }}</p>
+          </section>
+
+          <div class="retest-submit-row">
+            <p v-if="submitError" class="retest-submit-error" role="alert">{{ submitError }}</p>
+            <button type="submit" class="retest-submit focus-ring" :disabled="submitting || submitted || answeredCount !== questions.length">
+              {{ submitting ? "正在判分..." : submitted ? "已提交" : "提交答案" }}
+            </button>
+          </div>
+        </form>
+      </template>
+
+      <section v-else class="retest-state">
+        <h2>暂时没有可刷的题目</h2>
+        <p>返回错题本后可以选择其他复习任务。</p>
+        <button type="button" class="retest-submit focus-ring" @click="goBack">返回错题本</button>
+      </section>
     </main>
-
-    <!-- 右侧固定辅导面板 -->
-    <aside class="tutor-sidebar hidden lg:flex flex-col shrink-0 border-l border-subtle" style="width:360px">
-      <div class="px-4 pt-3 pb-2 shrink-0">
-        <p class="text-xs font-semibold text-text-muted">错题辅导</p>
-      </div>
-      <div class="flex-1 min-h-0">
-        <ChatArea :messages="tutorMessages" :busy="tutorBusy" :node-title="'错题复习'" :boot-mode="'ready'" session-id="student:data_structures" node-id="N01" :suggestions="tutorSuggestions" @send="onTutorSend" />
-      </div>
-    </aside>
-    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, ref } from "vue";
-import { useRouter, useRoute } from "vue-router";
-import apiClient from "../services/apiClient";
-import ChatArea from "../components/ChatArea.vue";
+import { computed, onMounted, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import {
+  fetchSessionReviewDashboard,
+  fetchSessionResources,
+  submitSessionLearningEvent,
+} from "../services/eduAgentApi";
 
 const router = useRouter();
 const route = useRoute();
-const allQuestions = ref([]);
+const sessionId = "student:data_structures";
+const loading = ref(true);
+const error = ref("");
+const submitError = ref("");
+const item = ref(null);
+const questions = ref([]);
+const answers = ref({});
+const results = ref([]);
+const submitting = ref(false);
+const submitted = ref(false);
+const resourceId = ref("");
+const nodeId = ref(String(route.query.nodeId || ""));
 
-function errorLabel(type) {
-  if (!type) return "其他";
-  const key = String(type).toLowerCase().replace(/[\s-]+/g, "_");
-  const map = {
-    definition: "概念不清", understanding: "理解有误", application: "不会应用",
-    concept: "概念错误", concept_understanding: "概念理解", concept_application: "概念应用",
-    syntax_error: "语法错误", wrong_answer: "答案错误", runtime_error: "运行错误",
-    time_limit: "超时", internal_error: "系统错误", code_error: "代码错误",
-    logic_error: "逻辑错误", memory_limit: "内存超限", output_error: "输出错误",
-    compilation_error: "编译错误", semantic_error: "语义错误", incomplete: "未完成",
-    boundary: "边界条件", boundary_condition: "边界条件", edge_case: "边界情况",
-    design_error: "设计错误", type_error: "类型错误", null_pointer: "空值错误",
-    off_by_one: "差一错误", infinite_loop: "死循环", stack_overflow: "栈溢出",
-    index_error: "索引错误", key_error: "键值错误", value_error: "数值错误",
-    timeout: "超时", resource_error: "资源错误", network_error: "网络错误",
-    assertion_error: "断言失败", arithmetic_error: "算术错误", overflow: "溢出",
-    underflow: "下溢", precision: "精度问题", rounding: "舍入错误",
-  };
-  return map[key] || "其他错误";
-}
-const labelMap = new Proxy({}, { get: (_, key) => errorLabel(key) });
+const answeredCount = computed(() => Object.keys(answers.value).length);
+const progressPercent = computed(() => questions.value.length ? Math.round(answeredCount.value / questions.value.length * 100) : 0);
+const correctCount = computed(() => results.value.filter((result) => result.correct).length);
 
-const visibleQuestions = computed(() => allQuestions.value.filter(q => !q._skipped));
-const visibleCount = computed(() => visibleQuestions.value.length);
-const progressPercent = computed(() => allQuestions.value.length ? Math.round((allQuestions.value.length - visibleQuestions.value.length) / allQuestions.value.length * 100) : 0);
-
-// 辅导面板
-const tutorMessages = ref([]);
-const tutorBusy = ref(false);
-const tutorSuggestions = [
-  "这道题考察了什么知识点？",
-  "帮我分析一下错题的错误原因",
-  "请出一道类似的题目让我巩固一下",
-];
-
-function onTutorSend({ text }) {
-  const userMsg = { id: `u-${Date.now()}`, role: "user", content: text };
-  tutorMessages.value = [...tutorMessages.value, userMsg];
-  const aid = `a-${Date.now()}`;
-  tutorMessages.value = [...tutorMessages.value, { id: aid, role: "assistant", content: "", isStreaming: true }];
-  tutorBusy.value = true;
-  apiClient.post(`/sessions/${encodeURIComponent("student:data_structures")}/tutor-stream`, { question: text }, {
-    responseType: "stream",
-    onDownloadProgress(e) {
-      const chunk = e?.event?.target?.response || e?.currentTarget?.response || "";
-      chunk.split("\n").filter(l => l.startsWith("data: ")).forEach(line => {
-        try {
-          const d = JSON.parse(line.slice(6));
-          if (d.token) {
-            const idx = tutorMessages.value.findIndex(m => m.id === aid);
-            if (idx >= 0) { const msgs = [...tutorMessages.value]; msgs[idx] = { ...msgs[idx], content: msgs[idx].content + d.token }; tutorMessages.value = msgs; }
-          }
-        } catch (_) {}
-      });
-    },
-  }).then(() => {
-    const idx = tutorMessages.value.findIndex(m => m.id === aid);
-    if (idx >= 0) { const msgs = [...tutorMessages.value]; msgs[idx] = { ...msgs[idx], isStreaming: false }; tutorMessages.value = msgs; }
-  }).catch(() => {
-    const idx = tutorMessages.value.findIndex(m => m.id === aid);
-    if (idx >= 0) { const msgs = [...tutorMessages.value]; msgs[idx] = { ...msgs[idx], isStreaming: false, content: msgs[idx].content || "辅导服务暂不可用。" }; tutorMessages.value = msgs; }
-  }).finally(() => { tutorBusy.value = false; });
+function optionLetter(index) {
+  return String.fromCharCode(65 + index);
 }
 
-async function loadQuestions() {
-  const mode = route.query.mode || "all";
+function selectAnswer(questionId, optionIndex) {
+  answers.value = { ...answers.value, [questionId]: optionIndex };
+}
+
+function optionClass(question, optionIndex) {
+  if (!submitted.value) return answers.value[question.id] === optionIndex ? "retest-option--selected" : "";
+  const result = resultFor(question.id);
+  if (!result) return answers.value[question.id] === optionIndex ? "retest-option--selected" : "";
+  if (result.correct_index === optionIndex) return "retest-option--correct";
+  if (!result.correct && answers.value[question.id] === optionIndex) return "retest-option--wrong";
+  return "";
+}
+
+function resultFor(questionId) {
+  return results.value.find((result) => String(result.question_id) === String(questionId));
+}
+
+function resourceList(response) {
+  return response?.resources || response?.existing_resources || response?.data?.resources || response?.data?.existing_resources || [];
+}
+
+function questionList(card) {
+  const payload = card?.structured_payload || card?.metadata?.structured_payload || card?.metadata || {};
+  const raw = Array.isArray(payload.questions) ? payload.questions : [];
+  return raw
+    .map((question, index) => ({
+      id: String(question.id || question.question_id || `question-${index + 1}`),
+      prompt: String(question.prompt || question.question || "").trim(),
+      options: Array.isArray(question.options) ? question.options.map((option) => String(option)) : [],
+      skillTag: question.skill_tag || question.skillTag || "",
+      difficulty: question.difficulty || "",
+    }))
+    .filter((question) => question.prompt && question.options.length >= 2);
+}
+
+async function loadQuiz() {
+  loading.value = true;
+  error.value = "";
+  submitError.value = "";
+  submitted.value = false;
+  results.value = [];
+  answers.value = {};
   try {
-    const sessionId = "student:data_structures";
-    const { data } = await apiClient.get(`/sessions/${encodeURIComponent(sessionId)}/review`);
-    if (data && data.status === "ok") {
-      const raw = mode === "today" ? (data.today_queue || []) : [...(data.mistakes || []), ...(data.reinforcement_tasks || [])];
-      allQuestions.value = raw.map(q => ({ ...q, _revealed: false, _skipped: false }));
-    }
-  } catch (e) {}
+    const dashboard = await fetchSessionReviewDashboard(sessionId);
+    const allItems = [
+      ...(Array.isArray(dashboard?.mistakes) ? dashboard.mistakes : []),
+    ];
+    const requestedItemId = String(route.query.reviewItem || "");
+    item.value = allItems.find((candidate) => candidate.review_item_id === requestedItemId)
+      || allItems.find((candidate) => candidate.status !== "completed")
+      || null;
+    nodeId.value = String(route.query.nodeId || item.value?.node_id || "");
+    if (!nodeId.value) throw new Error("缺少复测知识点，请返回错题本重新进入。");
+
+    const response = await fetchSessionResources(sessionId, nodeId.value);
+    const cards = resourceList(response).filter((card) => (
+      String(card?.resource_type || card?.card_type || card?.type || "") === "diagnostic_quiz"
+    ));
+    const requestedResourceId = String(route.query.resourceId || item.value?.retest_resource_id || "");
+    const card = cards.find((candidate) => String(candidate.resource_id || "") === requestedResourceId) || cards[0];
+    if (!card) throw new Error("新的复测题暂未准备好，请返回后重新点击重刷。");
+    resourceId.value = String(card.resource_id || requestedResourceId);
+    questions.value = questionList(card);
+    if (!questions.value.length) throw new Error("复测题暂时没有可作答的选项，请稍后重试。");
+  } catch (requestError) {
+    error.value = requestError?.response?.data?.detail || requestError?.message || "复测题加载失败，请稍后重试。";
+  } finally {
+    loading.value = false;
+  }
 }
 
-function skipQuestion(q) { q._skipped = true; }
-function resetAll() { allQuestions.value.forEach(q => { q._revealed = false; q._skipped = false; }); }
-function goBack() { router.push("/review"); }
+async function submitQuiz() {
+  if (answeredCount.value !== questions.value.length || submitting.value || submitted.value) return;
+  submitting.value = true;
+  submitError.value = "";
+  try {
+    const response = await submitSessionLearningEvent(sessionId, {
+      event_type: "review_completed",
+      node_id: nodeId.value,
+      resource_id: resourceId.value,
+      attempt_number: 1,
+      result: {
+        evidence_type: "diagnostic_quiz",
+        answers: questions.value.map((question) => ({
+          question_id: question.id,
+          answer_index: answers.value[question.id],
+        })),
+      },
+    });
+    const evidence = response?.verified_evidence || response?.event?.verified_evidence || {};
+    results.value = Array.isArray(evidence.question_results) ? evidence.question_results : [];
+    submitted.value = true;
+  } catch (requestError) {
+    submitError.value = requestError?.response?.data?.detail || requestError?.message || "提交失败，请稍后重试。";
+  } finally {
+    submitting.value = false;
+  }
+}
 
-loadQuestions();
+function goBack() {
+  router.push({ name: "review" });
+}
+
+onMounted(loadQuiz);
 </script>
 
 <style scoped>
-.question-enter-active { transition: all 400ms cubic-bezier(0.16, 1, 0.3, 1); }
-.question-leave-active { transition: all 300ms cubic-bezier(0.16, 1, 0.3, 1); }
-.question-enter-from { opacity: 0; transform: translateY(12px) scale(0.98); }
-.question-leave-to { opacity: 0; transform: translateX(-20px); }
+.retest-page {
+  min-height: 100vh;
+  color: var(--text-primary);
+  background: var(--space-bg);
+}
 
-.reveal-enter-active { transition: all 350ms cubic-bezier(0.16, 1, 0.3, 1); }
-.reveal-leave-active { transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1); }
-.reveal-enter-from { opacity: 0; max-height: 0; overflow: hidden; }
-.reveal-enter-to { opacity: 1; max-height: 200px; }
-.reveal-leave-from { opacity: 1; max-height: 200px; }
-.reveal-leave-to { opacity: 0; max-height: 0; overflow: hidden; }
+.retest-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  border-bottom: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--space-panel) 96%, transparent);
+  backdrop-filter: blur(18px);
+}
 
-@media (max-width: 1023px) {
-  aside { display: none !important; }
+.retest-topbar__inner,
+.retest-progress,
+.retest-main {
+  width: min(100% - 40px, 820px);
+  margin: 0 auto;
+}
+
+.retest-topbar__inner {
+  min-height: 76px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.retest-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  color: var(--text-secondary);
+  background: transparent;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.retest-back svg {
+  width: 17px;
+  height: 17px;
+}
+
+.retest-heading {
+  flex: 1;
+  text-align: center;
+}
+
+.retest-heading__eyebrow {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.retest-heading h1 {
+  margin: 3px 0 0;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.retest-counter {
+  min-width: 94px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+.retest-progress {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--card-bg-hover);
+}
+
+.retest-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-primary);
+  transition: width 220ms ease;
+}
+
+.retest-main {
+  padding: 48px 0 72px;
+}
+
+.retest-intro {
+  margin-bottom: 28px;
+}
+
+.retest-intro__eyebrow {
+  margin: 0 0 8px;
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.retest-intro h2 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 800;
+}
+
+.retest-intro > p:last-child {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.retest-form {
+  display: grid;
+  gap: 16px;
+}
+
+.retest-question {
+  padding: 24px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--space-surface);
+}
+
+.retest-question__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.retest-question__meta span:first-child {
+  color: var(--color-primary);
+  font-weight: 700;
+}
+
+.retest-question h3 {
+  margin: 14px 0 20px;
+  color: var(--text-primary);
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.7;
+}
+
+.retest-options {
+  display: grid;
+  gap: 10px;
+}
+
+.retest-option {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 13px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  color: var(--text-secondary);
+  background: var(--space-panel);
+  font-size: 14px;
+  line-height: 1.6;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, color 160ms ease;
+}
+
+.retest-option:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--color-primary) 55%, var(--border-subtle));
+  background: var(--card-bg-hover);
+}
+
+.retest-option__mark {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.retest-option--selected {
+  border-color: var(--color-primary);
+  color: var(--color-primary-dark);
+  background: var(--color-primary-soft);
+}
+
+.retest-option--correct {
+  border-color: var(--color-success);
+  color: var(--color-success-dark);
+  background: var(--color-success-soft);
+}
+
+.retest-option--wrong {
+  border-color: var(--color-error);
+  color: var(--color-error-dark);
+  background: var(--color-error-soft);
+}
+
+.retest-feedback {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.retest-feedback--correct {
+  color: var(--color-success-dark);
+  background: var(--color-success-soft);
+}
+
+.retest-feedback--wrong {
+  color: var(--color-error-dark);
+  background: var(--color-error-soft);
+}
+
+.retest-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px 24px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 30%, var(--border-subtle));
+  border-radius: 12px;
+  background: var(--color-primary-soft);
+}
+
+.retest-result__label {
+  display: block;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.retest-result strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--color-primary-dark);
+  font-size: 24px;
+}
+
+.retest-result p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.retest-submit-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  min-height: 48px;
+}
+
+.retest-submit-error {
+  flex: 1;
+  margin: 0;
+  color: var(--color-error-dark);
+  font-size: 12px;
+}
+
+.retest-submit {
+  min-width: 126px;
+  min-height: 42px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 9px;
+  color: var(--color-primary-text);
+  background: var(--color-primary);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.retest-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.retest-state {
+  min-height: 360px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.retest-state h2,
+.retest-state p {
+  margin: 0;
+}
+
+.retest-state h2 {
+  font-size: 20px;
+}
+
+.retest-state p {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.retest-state__icon {
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--color-error-dark);
+  background: var(--color-error-soft);
+  font-weight: 800;
+}
+
+.retest-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--border-subtle);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: retest-spin 800ms linear infinite;
+}
+
+@keyframes retest-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 640px) {
+  .retest-topbar__inner,
+  .retest-progress,
+  .retest-main {
+    width: min(100% - 28px, 820px);
+  }
+
+  .retest-topbar__inner {
+    min-height: 68px;
+    gap: 10px;
+  }
+
+  .retest-back {
+    font-size: 0;
+  }
+
+  .retest-back svg {
+    width: 19px;
+    height: 19px;
+  }
+
+  .retest-counter {
+    min-width: 80px;
+    font-size: 11px;
+  }
+
+  .retest-main {
+    padding-top: 32px;
+  }
+
+  .retest-intro h2 {
+    font-size: 24px;
+  }
+
+  .retest-question {
+    padding: 18px;
+  }
+
+  .retest-question h3 {
+    font-size: 16px;
+  }
+
+  .retest-result {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .retest-submit-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .retest-submit-error {
+    flex: initial;
+  }
 }
 </style>

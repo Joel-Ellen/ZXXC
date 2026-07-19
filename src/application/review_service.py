@@ -21,6 +21,7 @@ from ._common import MASTERY_ADVANCE_THRESHOLD, get_node_title, get_session, per
 REVIEW_ITEMS_KEY = "review_items"
 MAX_REVIEW_ITEMS = 500
 MAX_TREND_POINTS = 120
+MASTERY_REINFORCEMENT_ENABLED = False
 
 _REVIEW_LOCKS_GUARD = Lock()
 _REVIEW_LOCKS: dict[tuple[str, str], RLock] = {}
@@ -529,7 +530,7 @@ def record_verified_diagnostic(
         item for item in items
         if item.get("node_id") == node_id and item.get("status") in {"due", "in_progress"}
     ]
-    if mastery_after < MASTERY_ADVANCE_THRESHOLD and not outstanding:
+    if MASTERY_REINFORCEMENT_ENABLED and mastery_after < MASTERY_ADVANCE_THRESHOLD and not outstanding:
         reinforcement_id = _review_item_id(node_id, "__mastery_evidence_gap__")
         reinforcement = _find_item(items, reinforcement_id)
         materials = _recommended_materials(state, node_id)
@@ -981,9 +982,14 @@ def _latest_diagnostic(state: AgentState) -> dict[str, Any] | None:
 
 def get_review_dashboard(user_id: str, course_id: str = "data_structures") -> dict[str, Any]:
     """Return the learner's review queue and its evidence-backed context."""
-    state = get_session(user_id, course_id).agent_state
+    session = get_session(user_id, course_id)
+    state = session.agent_state
     now = _utcnow()
     items = _review_items(state)
+    legacy_items = [item for item in items if item.get("review_kind") == "mastery_reinforcement"]
+    if legacy_items:
+        items[:] = [item for item in items if item.get("review_kind") != "mastery_reinforcement"]
+        persist_session(session)
     active_items = [item for item in items if item.get("status") in {"due", "in_progress"}]
     today = [item for item in active_items if _is_due_today(item, now)]
     diagnostic_snapshot = state.internal_state.get("latest_verified_diagnostic_report")
@@ -1020,6 +1026,23 @@ def get_review_dashboard(user_id: str, course_id: str = "data_structures") -> di
 def start_review_item(user_id: str, course_id: str, review_item_id: str) -> dict[str, Any]:
     with _review_lock(user_id, course_id):
         return _start_review_item_unlocked(user_id, course_id, review_item_id)
+
+
+def delete_review_item(user_id: str, course_id: str, review_item_id: str) -> dict[str, Any]:
+    """Permanently remove one learner-owned review record."""
+    normalized_id = _as_text(review_item_id)
+    if not normalized_id:
+        return {"status": "invalid_review_item_id", "status_code": 422}
+
+    with _review_lock(user_id, course_id):
+        session = get_session(user_id, course_id)
+        items = _review_items(session.agent_state)
+        item = _find_item(items, normalized_id)
+        if item is None:
+            return {"status": "review_item_not_found", "status_code": 404}
+        items[:] = [candidate for candidate in items if candidate is not item]
+        persist_session(session)
+        return {"status": "deleted", "review_item_id": normalized_id}
 
 
 def _start_review_item_unlocked(
@@ -1146,6 +1169,104 @@ def _start_review_item_unlocked(
             "focus_resource_type": "code_snippet" if is_code_review else "interactive_exercise",
             "review_kind": review_kind,
             "phase": item["phase"],
+        },
+    }
+
+
+def start_direct_review_retest(user_id: str, course_id: str, review_item_id: str) -> dict[str, Any]:
+    """Issue a fresh diagnostic quiz for the explicit quick-retest action."""
+    with _review_lock(user_id, course_id):
+        return _start_direct_review_retest_unlocked(user_id, course_id, review_item_id)
+
+
+def _start_direct_review_retest_unlocked(
+    user_id: str,
+    course_id: str,
+    review_item_id: str,
+) -> dict[str, Any]:
+    normalized_id = _as_text(review_item_id)
+    if not normalized_id:
+        return {"status": "invalid_review_item_id", "status_code": 422}
+
+    session = get_session(user_id, course_id)
+    item = _find_item(_review_items(session.agent_state), normalized_id)
+    if item is None:
+        return {"status": "review_item_not_found", "status_code": 404}
+    if item.get("status") == "completed":
+        return {"status": "review_item_completed", "status_code": 409, "review_item": _serialize_item(item)}
+    if item.get("review_kind") == "code_practice":
+        return {
+            "status": "code_review_requires_submission",
+            "status_code": 409,
+            "detail": "代码错题需要进入代码练习后重新提交。",
+        }
+
+    node_id = _as_text(item.get("node_id"))
+    if not node_id:
+        return {"status": "review_item_invalid_node", "status_code": 422}
+
+    if item.get("status") == "in_progress" and item.get("phase") == "retest":
+        retest_resource_id = _as_text(item.get("retest_resource_id"))
+        retest_exists = any(
+            _as_text(getattr(card, "resource_id", "")) == retest_resource_id
+            and _as_text(getattr(card, "card_type", "")) == "diagnostic_quiz"
+            for card in session.agent_state.generated_resources.get(node_id, [])
+        )
+        if retest_resource_id and retest_exists:
+            return {
+                "status": "ok",
+                "idempotent": True,
+                "review_item": _serialize_item(item),
+                "learning_task": {
+                    "node_id": node_id,
+                    "focus_resource_type": "diagnostic_quiz",
+                    "phase": "retest",
+                    "retest_resource_id": retest_resource_id,
+                },
+            }
+
+    quiz_card = _resource_cards_by_type(session.agent_state, node_id).get("diagnostic_quiz")
+    if quiz_card is None:
+        from . import resource_service
+
+        generated = resource_service.generate_current_node_resources(
+            user_id,
+            course_id,
+            node_id,
+            force=False,
+            card_type="diagnostic_quiz",
+        )
+        if generated.get("status") not in {"generated", "already_exists", "repaired_fallback"}:
+            return {
+                "status": "review_retest_generation_failed",
+                "status_code": int(generated.get("status_code") or 500),
+                "detail": generated.get("error") or "暂时无法准备复测题，请稍后重试。",
+            }
+        refreshed_session = get_session(user_id, course_id)
+        quiz_card = _resource_cards_by_type(refreshed_session.agent_state, node_id).get("diagnostic_quiz")
+    else:
+        refreshed_session = session
+    if quiz_card is None:
+        return {"status": "review_retest_generation_failed", "status_code": 500, "detail": "新的复测题暂未准备好。"}
+
+    item = _find_item(_review_items(refreshed_session.agent_state), normalized_id)
+    if item is None:
+        return {"status": "review_item_not_found", "status_code": 404}
+    now = _utcnow()
+    item["status"] = "in_progress"
+    item["phase"] = "retest"
+    item["retest_resource_id"] = _as_text(getattr(quiz_card, "resource_id", ""))
+    item["started_at"] = item.get("started_at") or _iso(now)
+    item["updated_at"] = _iso(now)
+    persist_session(refreshed_session)
+    return {
+        "status": "ok",
+        "review_item": _serialize_item(item),
+        "learning_task": {
+            "node_id": node_id,
+            "focus_resource_type": "diagnostic_quiz",
+            "phase": "retest",
+            "retest_resource_id": item["retest_resource_id"],
         },
     }
 

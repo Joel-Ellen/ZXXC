@@ -51,12 +51,12 @@ export async function renderMermaidDiagram({ source = "", element, isLight = fal
   }
 
   const mermaid = await getMermaidApi(isLight);
+  const diagramId = createDiagramId("mermaid");
+  const { svg, bindFunctions } = await mermaid.render(diagramId, normalizedSource);
 
-  await nextMicrotask();
-  element.innerHTML = normalizedSource;
-  element.classList.add("mermaid");
-  element.removeAttribute("data-processed");
-  await mermaid.run({ nodes: [element] });
+  element.replaceChildren();
+  element.innerHTML = svg;
+  bindFunctions?.(element);
 }
 
 export async function renderMermaidSvg({ source = "", isLight = false, id } = {}) {
@@ -69,8 +69,4 @@ export async function renderMermaidSvg({ source = "", isLight = false, id } = {}
   const diagramId = id || createDiagramId("mermaid-svg");
   const { svg } = await mermaid.render(diagramId, normalizedSource);
   return svg;
-}
-
-function nextMicrotask() {
-  return Promise.resolve();
 }

@@ -203,11 +203,22 @@
                 <span class="text-xs font-semibold text-text-muted">{{ slot.label }}</span>
                 <span class="h-px flex-1 bg-subtle" />
               </div>
-              <ConceptMapLearning
-                v-if="resourceType(card) === 'concept_map'"
-                :card="card"
-                :node-title="nodeTitle"
-              />
+              <article v-if="resourceType(card) === 'concept_map'" class="text-sm leading-7 text-text-secondary">
+                <div class="rounded-lg border-l-2 border-primary pl-4 py-1 mb-8">
+                  <p class="text-text-primary font-medium">{{ conceptSummary(card) }}</p>
+                </div>
+                <template v-if="conceptSections(card).length">
+                  <section v-for="(section, index) in conceptSections(card)" :key="'sec-'+index" class="mt-8 first:mt-0">
+                    <h3 class="text-base font-semibold text-text-primary">{{ section.heading }}</h3>
+                    <p class="mt-2 border-l border-subtle pl-4">{{ section.body }}</p>
+                  </section>
+                </template>
+                <ul v-if="conceptObjectives(card).length" class="mt-8 rounded-lg bg-[#FAFCFB] py-3 px-4 space-y-2"><li v-for="(item, index) in conceptObjectives(card)" :key="'obj-'+index" class="flex gap-2"><span class="text-primary font-medium shrink-0 text-xs">{{ index + 1 }}.</span><span>{{ item }}</span></li></ul>
+                <ul v-if="conceptBullets(card).length" class="mt-8 space-y-2 pl-1"><li v-for="item in conceptBullets(card)" :key="'b-'+item" class="flex gap-2"><span class="text-text-muted shrink-0">&bull;</span><span>{{ item }}</span></li></ul>
+                <MarkdownContent v-if="conceptMermaidSource(card)" class="mt-8" :content="''" :mermaid-source="conceptMermaidSource(card)" />
+                <div v-if="conceptMisconceptions(card).length" class="mt-8 rounded-lg border border-warning-soft bg-warning-soft/30 py-3 px-4 space-y-1.5"><p class="text-xs font-semibold text-warning-dark mb-2">常见误区</p><ul class="space-y-1.5"><li v-for="item in conceptMisconceptions(card)" :key="'mis-'+item" class="text-xs flex gap-2"><span class="text-warning shrink-0">&times;</span><span>{{ item }}</span></li></ul></div>
+                <ul v-if="conceptReviewPrompts(card).length" class="mt-8 space-y-2 bg-[#FAFCFB] rounded-lg py-3 px-4"><li v-for="(item, index) in conceptReviewPrompts(card)" :key="'rev-'+index" class="flex gap-2"><span class="text-primary font-medium shrink-0 text-xs">{{ index + 1 }}.</span><span>{{ item }}</span></li></ul>
+              </article>
               <article v-else-if="resourceType(card) === 'code_snippet'" class="text-sm leading-7 text-text-secondary">
                 <div class="rounded-lg border-l-2 border-primary pl-4 py-1 mb-8">
                   <p>{{ codeScenario(card) }}</p>
@@ -310,10 +321,34 @@
                 {{ quizOverlayMasteryDelta > 0 ? '+' : '' }}{{ Math.round(quizOverlayMasteryDelta * 100) }}%
               </span>
             </div>
+            <div v-if="quizOverlayQuestionResults.length" class="quiz-result-summary">
+              <div>
+                <span>答题情况</span>
+                <strong>{{ quizOverlayCorrectCount }}/{{ quizOverlayQuestionResults.length }} 题正确</strong>
+              </div>
+              <div v-if="quizOverlayMasteryBefore !== null && quizOverlayMasteryAfter !== null">
+                <span>学习进度</span>
+                <strong>{{ quizOverlayMasteryDeltaLabel }}</strong>
+              </div>
+            </div>
             <ul v-if="quizOverlayQuestionResults.length" class="quiz-result-questions">
               <li v-for="(qr, idx) in quizOverlayQuestionResults" :key="idx" class="quiz-result-question" :class="{ correct: qr.correct, incorrect: !qr.correct }">
-                <span class="q-icon">{{ qr.correct ? '✓' : '✗' }}</span>
-                <span class="q-prompt">{{ qr.prompt }}</span>
+                <div class="quiz-result-question__header">
+                  <span class="q-number">第 {{ idx + 1 }} 题</span>
+                  <span class="q-status">{{ qr.correct ? "回答正确" : "需要复习" }}</span>
+                </div>
+                <p class="q-prompt">{{ qr.prompt }}</p>
+                <div class="q-answers">
+                  <div>
+                    <span>你的答案</span>
+                    <strong>{{ qr.selectedAnswer || "未作答" }}</strong>
+                  </div>
+                  <div>
+                    <span>正确答案</span>
+                    <strong>{{ qr.correctAnswer || "暂无答案" }}</strong>
+                  </div>
+                </div>
+                <p v-if="qr.explanation" class="q-explanation"><strong>解析</strong>{{ qr.explanation }}</p>
               </li>
             </ul>
             <p v-if="quizNextNode" class="quiz-result-advanced">已完成本章，可继续学习「{{ quizNextNode.title }}」</p>
@@ -678,6 +713,17 @@ const quizOverlayMasteryDelta = computed(() => {
   return quizOverlayMasteryAfter.value - quizOverlayMasteryBefore.value;
 });
 
+const quizOverlayCorrectCount = computed(() =>
+  quizOverlayQuestionResults.value.filter((result) => result.correct).length,
+);
+
+const quizOverlayMasteryDeltaLabel = computed(() => {
+  const delta = Math.round(quizOverlayMasteryDelta.value * 100);
+  if (delta > 0) return `提升 ${delta}%`;
+  if (delta < 0) return `下降 ${Math.abs(delta)}%`;
+  return "暂时持平";
+});
+
 const quizNextNode = computed(() => {
   const diagnostic = props.lastDiagnostic || submittedDiagnostic.value;
   const evaluatedNodeId = diagnostic?.evaluatedNodeId || props.currentNode;
@@ -700,7 +746,11 @@ const quizOverlayQuestionResults = computed(() => {
   if (diag && Array.isArray(diag.questionResults) && diag.questionResults.length) {
     return diag.questionResults.map((qr) => ({
       prompt: qr.prompt || qr.question_text || qr.question_id || "",
-      correct: qr.correct === true || qr.is_correct === true,
+      correct: qr.correct === true || qr.correct === 1 || qr.correct === "true"
+        || qr.is_correct === true || qr.is_correct === 1 || qr.is_correct === "true",
+      selectedAnswer: qr.selectedAnswer || qr.selected_answer || "",
+      correctAnswer: qr.correctAnswer || qr.correct_answer || "",
+      explanation: qr.explanation || qr.answer_explanation || "",
     }));
   }
   return [];
@@ -725,7 +775,17 @@ function bodyMarkdown(card) {
 }
 
 function structuredPayload(card) {
-  return card?.structured_payload || card?.metadata || {};
+  const directPayload = card?.structured_payload && typeof card.structured_payload === "object"
+    ? card.structured_payload
+    : {};
+  const metadata = card?.metadata && typeof card.metadata === "object"
+    ? card.metadata
+    : {};
+  const nestedPayload = metadata.structured_payload && typeof metadata.structured_payload === "object"
+    ? metadata.structured_payload
+    : {};
+
+  return { ...metadata, ...nestedPayload, ...directPayload };
 }
 function cardMetadata(card) {
   return structuredPayload(card);
@@ -751,6 +811,62 @@ function previewText(card) {
 function previewCode(card) {
   const metadata = cardMetadata(card);
   return metadata.code ? extractCodePreview(`\`\`\`\n${metadata.code}\n\`\`\``, 8) : codePreview(bodyMarkdown(card));
+}
+
+function conceptMarkdown(card) {
+  const metadata = cardMetadata(card);
+  if (!metadata.title && !metadata.summary && !Array.isArray(metadata.bullets)) {
+    return bodyMarkdown(card);
+  }
+
+  const sections = Array.isArray(metadata.sections)
+    ? `\n\n${metadata.sections.map((section) => `### ${section.heading}\n${section.body}`).join("\n\n")}`
+    : "";
+  const bullets = Array.isArray(metadata.bullets) && metadata.bullets.length
+    ? `\n\n${metadata.bullets.map((bullet) => `- ${bullet}`).join("\n")}`
+    : "";
+  return `## ${metadata.title || cardLabel(resourceType(card))}\n\n${metadata.summary || ""}${sections}${bullets}`.trim();
+}
+
+function conceptMermaidSource(card) {
+  const metadata = cardMetadata(card);
+  return metadata.mermaid_source
+    || metadata.learning_blueprint?.mermaid_source
+    || card?.artifacts?.mermaid_source
+    || card?.artifacts?.mermaid_src
+    || card?.mermaid_source
+    || card?.mermaid_src
+    || extractMermaidSource(bodyMarkdown(card))
+    || "";
+}
+
+function extractMermaidSource(markdown) {
+  const match = String(markdown || "").match(/```mermaid\s*([\s\S]*?)```/i);
+  return match?.[1]?.trim() || "";
+}
+
+function conceptSummary(card) {
+  return cardMetadata(card).summary || textPreview(bodyMarkdown(card));
+}
+
+function conceptObjectives(card) {
+  return Array.isArray(cardMetadata(card).learning_objectives) ? cardMetadata(card).learning_objectives : [];
+}
+
+function conceptSections(card) {
+  return Array.isArray(cardMetadata(card).sections) ? cardMetadata(card).sections : [];
+}
+
+function conceptBullets(card) {
+  return Array.isArray(cardMetadata(card).bullets) ? cardMetadata(card).bullets : [];
+}
+
+function conceptMisconceptions(card) {
+  return Array.isArray(cardMetadata(card).common_misconceptions) ? cardMetadata(card).common_misconceptions : [];
+}
+
+function conceptReviewPrompts(card) {
+  return Array.isArray(cardMetadata(card).review_prompts) ? cardMetadata(card).review_prompts : [];
 }
 
 function codeLanguage(card) {
@@ -1466,7 +1582,7 @@ function forwardWheelToContent(event) {
 }
 .quiz-result-card {
   position: relative;
-  width: min(420px, 92vw);
+  width: min(560px, 92vw);
   max-height: 88vh;
   overflow-y: auto;
   background: var(--bg-card, #fff);
@@ -1510,19 +1626,66 @@ function forwardWheelToContent(event) {
 .mastery-up   { color: #16a34a; background: #f0fdf4; }
 .mastery-down { color: #dc2626; background: #fef2f2; }
 
+.quiz-result-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.quiz-result-summary > div {
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle, #e0e0e0);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-primary-soft, #eff6ff) 42%, transparent);
+  text-align: left;
+}
+
+.quiz-result-summary span,
+.quiz-result-summary strong {
+  display: block;
+}
+
+.quiz-result-summary span {
+  color: var(--text-muted, #999);
+  font-size: 11px;
+}
+
+.quiz-result-summary strong {
+  margin-top: 4px;
+  color: var(--text-primary, #333);
+  font-size: 14px;
+}
+
 .quiz-result-questions {
   list-style: none; padding: 0; margin: 0 0 16px;
   text-align: left; max-height: 200px; overflow-y: auto;
 }
 .quiz-result-question {
-  display: flex; align-items: flex-start; gap: 8px;
+  display: block;
   padding: 8px 10px; border-radius: 10px; margin-bottom: 4px;
   font-size: 13px; line-height: 1.5;
 }
 .quiz-result-question.correct   { background: #f0fdf4; color: #15803d; }
 .quiz-result-question.incorrect { background: #fef2f2; color: #b91c1c; }
-.q-icon { font-size: 15px; font-weight: 700; flex-shrink: 0; margin-top: 1px; }
-.q-prompt { word-break: break-word; }
+.quiz-result-question__header,
+.q-answers {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.q-number { font-size: 11px; font-weight: 700; }
+.q-status { font-size: 11px; font-weight: 700; }
+.q-prompt { margin: 6px 0 0; color: inherit; word-break: break-word; }
+.q-answers { align-items: stretch; margin-top: 8px; }
+.q-answers > div { min-width: 0; flex: 1; padding: 7px 8px; border-radius: 6px; background: color-mix(in srgb, currentColor 6%, transparent); }
+.q-answers span,
+.q-answers strong { display: block; }
+.q-answers span { font-size: 10px; opacity: 0.72; }
+.q-answers strong { margin-top: 2px; color: inherit; font-size: 11px; overflow-wrap: anywhere; }
+.q-explanation { margin: 8px 0 0; color: inherit; font-size: 11px; opacity: 0.86; text-align: left; }
+.q-explanation strong { margin-right: 4px; }
 
 .quiz-result-advanced {
   color: #16a34a; font-weight: 700; font-size: 14px; margin-bottom: 12px;
@@ -1566,4 +1729,9 @@ function forwardWheelToContent(event) {
 .result-overlay-leave-to { opacity: 0; }
 .result-overlay-enter-from .quiz-result-card { transform: scale(0.94) translateY(12px); }
 .result-overlay-leave-to .quiz-result-card   { transform: scale(0.94) translateY(12px); }
+
+@media (max-width: 480px) {
+  .quiz-result-summary { grid-template-columns: 1fr; }
+  .q-answers { flex-direction: column; }
+}
 </style>

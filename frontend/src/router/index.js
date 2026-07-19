@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from "vue-router";
 
 const LandingView = () => import("../components/LandingView.vue");
 const AppWorkspaceView = () => import("../views/AppWorkspaceView.vue");
+const LearnView = () => import("../views/LearnView.vue");
 const ReviewView = () => import("../views/ReviewView.vue");
 const RetestView = () => import("../views/RetestView.vue");
 
@@ -22,6 +23,12 @@ const router = createRouter({
       path: "/review",
       name: "review",
       component: ReviewView,
+    },
+    {
+      path: "/learn/:courseId/:nodeId",
+      name: "learn",
+      component: LearnView,
+      props: true,
     },
     {
       path: "/review/retest",

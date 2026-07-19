@@ -333,6 +333,29 @@ def test_expired_worker_owner_is_fenced_after_memory_reclaim() -> None:
     ]) == 1
 
 
+def test_compatibility_claim_gets_a_recovery_lease() -> None:
+    repo = MemoryResourceGenerationRepo(_MemoryGenerationStore())
+    job, _created = repo.create_or_get_active_job(
+        "learner",
+        "course-a",
+        "N01",
+        "compatibility-lease",
+        card_types=["diagnostic_quiz"],
+        max_retries=1,
+    )
+
+    claimed = repo.claim_job(
+        job["job_id"],
+        owner_id="compat:worker",
+        lease_seconds=60,
+    )
+
+    assert claimed is not None
+    assert claimed["lease_owner"] == "compat:worker"
+    assert claimed["lease_expires_at"]
+    assert repo.recover_stale_running_jobs(stale_after_seconds=0) == []
+
+
 def test_metrics_drop_learner_identifiers_from_labels() -> None:
     reset_metrics()
     incr_metric(

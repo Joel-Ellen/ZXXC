@@ -54,6 +54,7 @@ function mountCanvas(overrides = {}) {
 
 describe("ResourceCanvas PPT export", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     HTMLElement.prototype.scrollTo = vi.fn();
   });
 

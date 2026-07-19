@@ -599,7 +599,13 @@ class _MemoryGenerationStore:
             record["updated_at"] = now
             return copy.deepcopy(record)
 
-    def claim_job(self, job_id: str) -> Optional[Dict[str, Any]]:
+    def claim_job(
+        self,
+        job_id: str,
+        *,
+        owner_id: Optional[str] = None,
+        lease_seconds: int = DEFAULT_LEASE_SECONDS,
+    ) -> Optional[Dict[str, Any]]:
         with self.lock:
             record = self.jobs.get(job_id)
             if record is None or record.get("status") not in {"queued", "retrying"}:
@@ -609,7 +615,15 @@ class _MemoryGenerationStore:
             record["pipeline_state"] = "retrieving"
             record["started_at"] = record.get("started_at") or now
             record["updated_at"] = now
-            self._append_event_locked(job_id, "running", {"status": "running"})
+            record["lease_owner"] = owner_id
+            record["lease_expires_at"] = (
+                datetime.now(timezone.utc) + timedelta(seconds=max(1, int(lease_seconds)))
+            ).isoformat() if owner_id else None
+            record["heartbeat_at"] = now if owner_id else None
+            payload = {"status": "running"}
+            if owner_id:
+                payload["lease_owner"] = owner_id
+            self._append_event_locked(job_id, "running", payload)
             return copy.deepcopy(record)
 
     def claim_next_job(
@@ -806,13 +820,38 @@ class _ResourceGenerationRepositoryMixin:
             return None
         return job
 
-    def claim_job(self, job_id: str) -> Optional[Dict[str, Any]]:
+    def claim_job(
+        self,
+        job_id: str,
+        *,
+        owner_id: Optional[str] = None,
+        lease_seconds: int = DEFAULT_LEASE_SECONDS,
+    ) -> Optional[Dict[str, Any]]:
         job = self.get_job(job_id)
         if job is None or job.get("status") not in {"queued", "retrying"}:
             return None
-        updated = self.update_job(job_id, status="running")
+        now = _now()
+        updated = self.update_job(
+            job_id,
+            status="running",
+            owner_id=None,
+        )
+        if updated is not None and owner_id:
+            with self._store.lock:
+                record = self._store.jobs.get(job_id)
+                if record is not None and record.get("status") == "running":
+                    record["lease_owner"] = owner_id
+                    record["lease_expires_at"] = (
+                        datetime.now(timezone.utc)
+                        + timedelta(seconds=max(1, int(lease_seconds)))
+                    ).isoformat()
+                    record["heartbeat_at"] = now
+                    updated = copy.deepcopy(record)
         if updated is not None:
-            self.append_event(job_id, "running", {"status": "running"})
+            payload = {"status": "running"}
+            if owner_id:
+                payload["lease_owner"] = owner_id
+            self.append_event(job_id, "running", payload)
         return updated
 
     def claim_next_job(
@@ -1912,25 +1951,48 @@ class ResourceGenerationRepo(_ResourceGenerationRepositoryMixin):
 
         return self._database_or_memory(expire_database, expire_memory)
 
-    def claim_job(self, job_id: str) -> Optional[Dict[str, Any]]:
+    def claim_job(
+        self,
+        job_id: str,
+        *,
+        owner_id: Optional[str] = None,
+        lease_seconds: int = DEFAULT_LEASE_SECONDS,
+    ) -> Optional[Dict[str, Any]]:
         def claim_database() -> Optional[Dict[str, Any]]:
             now = _now()
+            safe_lease = max(1, int(lease_seconds))
+            lease_expires_at = (
+                datetime.now(timezone.utc) + timedelta(seconds=safe_lease)
+            ).isoformat() if owner_id else None
             row = self._fetchone(
                 """UPDATE resource_generation_jobs
                    SET status = 'running',
                        pipeline_state = 'retrieving',
                        started_at = COALESCE(started_at, %s),
-                       updated_at = %s
+                       updated_at = %s,
+                       lease_owner = %s,
+                       lease_expires_at = %s,
+                       heartbeat_at = %s
                    WHERE job_id = %s AND status IN ('queued', 'retrying')
                    RETURNING *""",
-                (now, now, job_id),
+                (now, now, owner_id, lease_expires_at, now if owner_id else None, job_id),
             )
             result = _normalise_job(row)
             if result is not None:
-                self.append_event(job_id, "running", {"status": "running"})
+                payload = {"status": "running"}
+                if owner_id:
+                    payload["lease_owner"] = owner_id
+                self.append_event(job_id, "running", payload)
             return result
 
-        return self._database_or_memory(claim_database, lambda: self._store.claim_job(job_id))
+        return self._database_or_memory(
+            claim_database,
+            lambda: self._store.claim_job(
+                job_id,
+                owner_id=owner_id,
+                lease_seconds=lease_seconds,
+            ),
+        )
 
     def claim_next_job(
         self,

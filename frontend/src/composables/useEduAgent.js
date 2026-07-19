@@ -241,6 +241,7 @@ function createEduAgent() {
       resourceTimingStartedAt: monotonicNow(),
       cacheReadReported: false,
       conceptReadyReported: false,
+      expectedCardTypes: [...RESOURCE_CARD_TYPES],
     };
   }
 
@@ -253,6 +254,7 @@ function createEduAgent() {
       resourceTimingStartedAt: monotonicNow(),
       cacheReadReported: false,
       conceptReadyReported: false,
+      expectedCardTypes: [],
     };
   }
 
@@ -266,8 +268,20 @@ function createEduAgent() {
     );
   }
 
-  function finishRouteEnhancement(context) {
+  function resourceTypesReady(context) {
+    const expectedTypes = normalizeCardTypes(context?.expectedCardTypes);
+    if (!expectedTypes.length) return true;
+    const nodeCards = resources.value[context.nodeId] ?? [];
+    const readyTypes = new Set(nodeCards.map(resourceCardType).filter(Boolean));
+    const cardStates = resourceGenerationStates.value[context.nodeId]?.cards ?? {};
+    return expectedTypes.every((cardType) => (
+      readyTypes.has(cardType) || cardStates[cardType]?.status === "failed"
+    ));
+  }
+
+  function finishRouteEnhancement(context, { force = false } = {}) {
     if (!context || context.generation !== routeEnhancementGeneration) return;
+    if (!force && !resourceTypesReady(context)) return;
     isLoadingNode.value = false;
     if (isCurrentRouteEnhancement(context)) refreshStatuses();
   }
@@ -631,15 +645,20 @@ function createEduAgent() {
     if (unresolvedTypes.includes("concept_map")) finishConceptLoading(entry, { notifyReady: false });
   }
 
-  function scheduleResourceGenerationReconnect(entry, error) {
+  function scheduleResourceGenerationReconnect(entry, _error) {
     if (!isActiveResourceGenerationStream(entry)) {
       releaseResourceGenerationStream(entry);
       return;
     }
     if (entry.reconnectAttempts >= RESOURCE_STREAM_MAX_RECONNECTS) {
-      failUnresolvedGenerationCards(entry, error);
-      setResourceGenerationJob(entry.context.nodeId, { status: "failed" });
-      releaseResourceGenerationStream(entry);
+      // An SSE disconnect does not mean the durable generation job failed.
+      // Continue through the resource endpoint so late cards do not flash as failed.
+      entry.transport = "poll";
+      entry.pollAttempts = 0;
+      entry.retryTimer = setTimeout(() => {
+        entry.retryTimer = null;
+        void consumeResourceGenerationPoll(entry);
+      }, RESOURCE_STREAM_RECONNECT_DELAY_MS);
       return;
     }
 
@@ -740,14 +759,26 @@ function createEduAgent() {
         onCompleted: (data) => {
           if (!isActiveResourceGenerationStream(entry)) return;
           entry.terminal = true;
-          failUnresolvedGenerationCards(entry, "The generation job completed without a card payload.");
-          setResourceGenerationJob(entry.context.nodeId, { status: "completed", jobId: entry.jobId });
 
           // The backend owns the concept-map -> supporting-bundle handoff so
           // a page close or SSE disconnect cannot suppress the remaining
           // cards. Subscribe to the durable child job when this page is live.
           const followUpJobId = String(data?.follow_up_job_id || "");
           const followUpCardTypes = normalizeCardTypes(data?.follow_up_card_types);
+          const unresolvedTypes = entry.cardTypes.filter((cardType) => (
+            resourceCardState(entry.context.nodeId, cardType)?.status !== "ready"
+          ));
+          const unresolvedWithoutFollowUp = unresolvedTypes.filter((cardType) => (
+            !followUpCardTypes.includes(cardType)
+          ));
+          if (unresolvedWithoutFollowUp.length) {
+            markResourceCardsFailed(
+              entry.context.nodeId,
+              unresolvedWithoutFollowUp,
+              "The generation job completed without a card payload.",
+            );
+          }
+          setResourceGenerationJob(entry.context.nodeId, { status: "completed", jobId: entry.jobId });
           const pendingFollowUpCardTypes = followUpCardTypes.filter((cardType) => (
             resourceCardState(entry.context.nodeId, cardType)?.status !== "ready"
           ));
@@ -1660,8 +1691,8 @@ function createEduAgent() {
         });
       } else {
         reportConceptReady(context, { cacheHit: true });
-        finishRouteEnhancement(context);
         requestSupportingCards();
+        finishRouteEnhancement(context);
       }
 
       const diagnostic = await diagnosticPromise;
@@ -1681,7 +1712,7 @@ function createEduAgent() {
         );
         setInfo(`资源生成失败：${message}`, 10000);
       }
-      finishRouteEnhancement(context);
+      finishRouteEnhancement(context, { force: true });
       return { nodeId: context.nodeId, error };
     }
   }
@@ -1992,10 +2023,12 @@ function createEduAgent() {
       ? cardTypes
       : (cardType ? normalizeCardTypes(cardType) : RESOURCE_CARD_TYPES);
     const context = createCurrentResourceContext(nodeId);
+    context.expectedCardTypes = [...requestedCardTypes];
     if (!isCurrentRouteEnhancement(context)) {
       return { ok: false, error: new Error("学习节点已切换，本次资源生成未开始。") };
     }
 
+    isLoadingNode.value = true;
     setInfo(
       force
         ? `正在重新生成「${nodeLabel}」的学习资源...`
@@ -2016,6 +2049,7 @@ function createEduAgent() {
         : requestedCardTypes.filter((type) => !existingTypes.has(type));
       if (!cardTypesToGenerate.length) {
         setInfo(`「${nodeLabel}」资源已就绪，无需重新生成。`);
+        finishRouteEnhancement(context);
         return { ok: true, result: readResult, resources: existingResources, status: "already_exists" };
       }
 
@@ -2043,6 +2077,7 @@ function createEduAgent() {
         "请稍后重试。",
       );
       setInfo(`资源生成失败：${message}`, 10000);
+      finishRouteEnhancement(context, { force: true });
       return { ok: false, error: e };
     } finally {
       refreshStatuses();

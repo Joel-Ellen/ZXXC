@@ -139,6 +139,21 @@ export async function startSessionReviewItem(sessionId, reviewItemId) {
   return data;
 }
 
+export async function deleteSessionReviewItem(sessionId, reviewItemId) {
+  const { data } = await apiClient.delete(
+    `/sessions/${sessionPath(sessionId)}/review/items/${encodeURIComponent(reviewItemId)}`,
+  );
+  return data;
+}
+
+export async function startSessionDirectReviewRetest(sessionId, reviewItemId) {
+  const { data } = await apiClient.post(
+    `/sessions/${sessionPath(sessionId)}/review/items/${encodeURIComponent(reviewItemId)}/direct-retest`,
+    {},
+  );
+  return data;
+}
+
 export async function prepareSessionReviewRetest(sessionId, reviewItemId, practiceEventId) {
   const { data } = await apiClient.post(
     `/sessions/${sessionPath(sessionId)}/review/items/${encodeURIComponent(reviewItemId)}/prepare-retest`,

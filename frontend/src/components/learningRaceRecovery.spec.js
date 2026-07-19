@@ -186,14 +186,25 @@ describe("ResourceCanvas quiz interaction", () => {
     const firstSubmission = wrapper.emitted("submit-quiz")[0][0];
     firstSubmission.onRecorded({
       score: 0.5,
+      masteryBefore: 0.3,
+      masteryAfter: 0.45,
       evaluatedNodeId: "N01",
       nextNodeId: "N02",
       nextNodeTitle: "Node 02",
-      questionResults: [{ prompt: "N01 question", correct: false }],
+      questionResults: [{
+        prompt: "N01 question",
+        correct: false,
+        selected_answer: "N01 option A",
+        correct_answer: "N01 option B",
+        explanation: "Check the governing condition.",
+      }],
     });
     await settleUi();
 
-    expect(document.body.querySelector('[role="dialog"]')?.textContent).toContain("诊断结果");
+    const resultText = document.body.querySelector('[role="dialog"]')?.textContent;
+    expect(resultText).toContain("诊断结果");
+    expect(resultText).toContain("需要复习");
+    expect(resultText).toContain("提升 15%");
     document.body.querySelector(".quiz-result-btn--secondary").click();
     await settleUi();
 
@@ -237,6 +248,28 @@ describe("ResourceCanvas card rendering", () => {
     await settleUi();
     expect(wrapper.text()).toContain("概念导图");
     expect(wrapper.text()).toContain("Concept summary");
+    wrapper.unmount();
+  });
+
+  it("renders a Mermaid container for legacy concept markdown", async () => {
+    const wrapper = mount(ResourceCanvas, {
+      props: {
+        cards: [{
+          resource_id: "legacy-concept",
+          resource_type: "concept_map",
+          title: "Legacy concept",
+          body_markdown: "## Legacy concept\n\n```mermaid\ngraph TD\nA[Start] --> B[End]\n```",
+          structured_payload: {},
+        }],
+        currentNode: "N01", nodeTitle: "Node 01", pathNodes: [],
+        filterType: "concept", loading: false,
+        getCardLabel: () => "Concept", getAgentLabel: () => "Agent",
+        buildQuiz: () => [],
+      },
+    });
+    await settleUi();
+
+    expect(wrapper.find(".mermaid-canvas").exists()).toBe(true);
     wrapper.unmount();
   });
 

@@ -94,7 +94,8 @@ async function renderMermaid() {
         await renderMermaidDiagram({ source, element, isLight });
         element.setAttribute("role", "img");
         element.setAttribute("aria-label", "概念关系图");
-      } catch (_error) {
+      } catch (error) {
+        console.error("[Mermaid render failed]", error, source);
         if (!mermaidRenderQueued && source === props.mermaidSource) {
           element.replaceChildren();
           element.removeAttribute("role");

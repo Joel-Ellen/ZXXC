@@ -25,6 +25,7 @@ from src.adapters.state_to_domain import (
     resource_contract_from_card,
 )
 from src.database.resource_generation_repo import (
+    DEFAULT_LEASE_SECONDS,
     ResourceAdmissionError,
     ResourceGenerationRepo,
 )
@@ -2716,7 +2717,16 @@ def _run_claimed_generation_job(
 ) -> Optional[Dict[str, Any]]:
     """Claim a slot-admitted job, then persist and publish each card."""
     repository = repo or get_resource_generation_repo()
-    job = claimed_job or repository.claim_job(str(job_id))
+    compatibility_owner = (
+        f"compat:{os.getpid()}:{uuid.uuid4().hex}"
+        if claimed_job is None
+        else None
+    )
+    job = claimed_job or repository.claim_job(
+        str(job_id),
+        owner_id=compatibility_owner,
+        lease_seconds=DEFAULT_LEASE_SECONDS,
+    )
     if job is None:
         return repository.get_job(str(job_id))
     lease_owner = str(job.get("lease_owner") or "") or None

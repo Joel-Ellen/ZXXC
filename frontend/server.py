@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import sys
 import os
+import mimetypes
 
 # 将项目根目录加入 sys.path，确保 src 包可被导入
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -35,6 +36,11 @@ from pydantic import ValidationError
 # 新增 API 路由 (合并自 backend/)
 from src.routes.new_api_routes import new_routes
 from starlette.requests import Request
+
+# Windows does not always register the JavaScript MIME type for `.mjs`.
+# Mermaid is loaded as a browser module, so serving it as text/plain makes the
+# browser reject the module before the diagram renderer can run.
+mimetypes.add_type("application/javascript", ".mjs")
 
 # --- Course System ---
 from src.courses import CourseStore
@@ -2222,6 +2228,34 @@ async def api_session_review_start(request: Request) -> JSONResponse:
     return _session_event_response(result)
 
 
+async def api_session_review_delete(request: Request) -> JSONResponse:
+    """Delete one review record for the authenticated learner."""
+    user_id, course_id = _session_ids(request.path_params.get("session_id", ""))
+    auth_error = _event_session_auth_error(request, user_id)
+    if auth_error is not None:
+        return auth_error
+    result = review_service.delete_review_item(
+        user_id,
+        course_id,
+        request.path_params.get("review_item_id", ""),
+    )
+    return _session_event_response(result)
+
+
+async def api_session_review_direct_retest(request: Request) -> JSONResponse:
+    """Issue a fresh quiz for the review page's explicit quick-retest action."""
+    user_id, course_id = _session_ids(request.path_params.get("session_id", ""))
+    auth_error = _event_session_auth_error(request, user_id)
+    if auth_error is not None:
+        return auth_error
+    result = review_service.start_direct_review_retest(
+        user_id,
+        course_id,
+        request.path_params.get("review_item_id", ""),
+    )
+    return _session_event_response(result)
+
+
 async def api_session_review_prepare_retest(request: Request) -> JSONResponse:
     """Issue a new server-owned diagnostic quiz after directed practice."""
     user_id, course_id = _session_ids(request.path_params.get("session_id", ""))
@@ -2945,6 +2979,8 @@ app = Starlette(
         Route("/api/sessions/{session_id}/assets", api_session_assets_patch, methods=["PATCH"]),
         Route("/api/sessions/{session_id}/review", api_session_review_dashboard, methods=["GET"]),
         Route("/api/sessions/{session_id}/review/items/{review_item_id}/start", api_session_review_start, methods=["POST"]),
+        Route("/api/sessions/{session_id}/review/items/{review_item_id}", api_session_review_delete, methods=["DELETE"]),
+        Route("/api/sessions/{session_id}/review/items/{review_item_id}/direct-retest", api_session_review_direct_retest, methods=["POST"]),
         Route("/api/sessions/{session_id}/review/items/{review_item_id}/prepare-retest", api_session_review_prepare_retest, methods=["POST"]),
         Route("/api/sessions/{session_id}/practice/problems/{problem_or_resource_id}", api_session_practice_problem, methods=["GET"]),
         Route("/api/sessions/{session_id}/practice/run", api_session_practice_run, methods=["POST"]),

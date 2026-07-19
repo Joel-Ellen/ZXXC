@@ -6,7 +6,7 @@
           <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">智能体反馈</p>
           <h3 class="mt-2 text-lg font-black tracking-tight text-text-primary">当前节点反馈面板</h3>
           <p class="mt-2 text-sm leading-6 text-text-secondary">
-            {{ summaryText }}
+            {{ panelSummaryText }}
           </p>
         </div>
         <div class="workspace-shell-card-soft rounded-2xl px-4 py-3 text-right">
@@ -34,8 +34,8 @@
                 {{ statusLabel(item.status) }}
               </span>
             </div>
-            <p class="mt-2 text-sm font-semibold text-text-primary">{{ item.headline || agentLabel(item.agent) }}</p>
-            <p v-if="item.summary" class="mt-2 text-sm leading-6 text-text-secondary">{{ item.summary }}</p>
+            <p class="mt-2 text-sm font-semibold text-text-primary">{{ headlineText(item) }}</p>
+            <p v-if="summaryText(item)" class="mt-2 text-sm leading-6 text-text-secondary">{{ summaryText(item) }}</p>
           </div>
         </div>
 
@@ -51,9 +51,9 @@
         </div>
 
         <MarkdownContent
-          v-if="item.details_md"
+          v-if="detailsMarkdown(item)"
           class="mt-4"
-          :content="item.details_md"
+          :content="detailsMarkdown(item)"
           :mermaid-source="item.artifacts?.mermaid_src || ''"
         />
       </article>
@@ -77,7 +77,7 @@ const props = defineProps({
   currentNodeTitle: { type: String, default: "" },
 });
 
-const summaryText = computed(() => {
+const panelSummaryText = computed(() => {
   if (props.lastDiagnostic) {
     return `当前节点 ${props.currentNodeTitle || "未命名节点"} 的诊断、推进结论和资源装配反馈已经汇总到这里，方便你按顺序复盘。`;
   }
@@ -150,7 +150,15 @@ const FIELD_VALUE_LABELS = {
   warning: "需关注",
   error: "执行失败",
   skipped: "已跳过",
+  Tutor: "智能辅导",
+  Evaluator: "学习评估智能体",
+  Profiler: "画像分析智能体",
+  Planner: "路径规划智能体",
+  Assessment: "综合评估智能体",
+  Validator: "内容校验智能体",
 };
+
+const ENGLISH_TEXT_PATTERN = /[A-Za-z]{2,}/u;
 
 function statusLabel(status) {
   return STATUS_LABELS[status] || "处理中";
@@ -158,6 +166,24 @@ function statusLabel(status) {
 
 function agentLabel(agent) {
   return AGENT_LABELS[agent] || (/[㐀-鿿]/u.test(String(agent || "")) ? agent : "学习智能体");
+}
+
+function chineseText(value, fallback) {
+  const text = String(value || "").trim();
+  if (!text) return fallback;
+  return ENGLISH_TEXT_PATTERN.test(text) ? fallback : text;
+}
+
+function headlineText(item) {
+  return chineseText(item?.headline, `${agentLabel(item?.agent)}已完成本轮处理`);
+}
+
+function summaryText(item) {
+  return chineseText(item?.summary, `${agentLabel(item?.agent)}已完成当前阶段处理。`);
+}
+
+function detailsMarkdown(item) {
+  return chineseText(item?.details_md, "本轮协同处理结果已记录，可查看上方状态和结构化信息。");
 }
 
 function stageLabel(item) {
@@ -170,9 +196,9 @@ function stageLabel(item) {
 function structuredValue(key, value) {
   if (typeof value === "number") return String(value);
   if (FIELD_VALUE_LABELS[value]) return FIELD_VALUE_LABELS[value];
-  if (["query", "学生问题"].includes(key)) return value;
+  if (["query", "学生问题"].includes(key)) return chineseText(value, "学生问题已记录");
   const text = String(value || "");
-  if (/[㐀-鿿]/u.test(text) || /^[A-Z0-9_.:/+-]{1,64}$/u.test(text)) return text;
+  if (/[㐀-鿿]/u.test(text) && !ENGLISH_TEXT_PATTERN.test(text)) return text;
   return "已记录";
 }
 
