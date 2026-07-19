@@ -274,9 +274,14 @@ function createEduAgent() {
     const nodeCards = resources.value[context.nodeId] ?? [];
     const readyTypes = new Set(nodeCards.map(resourceCardType).filter(Boolean));
     const cardStates = resourceGenerationStates.value[context.nodeId]?.cards ?? {};
-    return expectedTypes.every((cardType) => (
+    const resolved = (cardType) => (
       readyTypes.has(cardType) || cardStates[cardType]?.status === "failed"
-    ));
+    );
+    // Concept-first contract: the workspace overlay lifts as soon as the
+    // concept map resolves; the remaining cards stream into the canvas with
+    // per-card generation states instead of blocking the whole node.
+    if (expectedTypes.includes("concept_map")) return resolved("concept_map");
+    return expectedTypes.every(resolved);
   }
 
   function finishRouteEnhancement(context, { force = false } = {}) {
