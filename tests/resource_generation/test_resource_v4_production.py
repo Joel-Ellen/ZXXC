@@ -169,6 +169,138 @@ def test_nli_outage_can_only_produce_degraded_quality() -> None:
     assert "critical_nli_unavailable" in evaluation.issue_codes
 
 
+class _OfflineSidecar:
+    """A sidecar stub that always raises, tracking calls and configuration."""
+
+    def __init__(self, configured: bool) -> None:
+        self.configured = configured
+        self.calls = 0
+
+    def verify(self, *_args, **_kwargs):
+        self.calls += 1
+        raise ServiceUnavailable("offline")
+
+
+def _llm_code_payload():
+    payload = ResourceGenerator().template(_v4_context(), "code_snippet").structured_payload
+    payload["quality_profile"] = {**payload.get("quality_profile", {}), "generation_source": "llm"}
+    payload["verification"] = {"status": "generated"}
+    return payload
+
+
+def _llm_quiz_payload():
+    payload = ResourceGenerator().template(_v4_context(), "diagnostic_quiz").structured_payload
+    payload["quality_profile"] = {**payload.get("quality_profile", {}), "generation_source": "llm"}
+    return payload
+
+
+def test_unconfigured_sandbox_degrades_llm_code_cards_instead_of_hard_failing() -> None:
+    sandbox = _OfflineSidecar(configured=False)
+
+    evaluation = evaluate_resource_quality(
+        "code_snippet",
+        _llm_code_payload(),
+        _v4_context(),
+        sandbox=sandbox,
+    )
+
+    assert evaluation.hard_fail is False
+    assert evaluation.gate_status == "degraded"
+    assert "sandbox_not_configured" in evaluation.issue_codes
+    assert "sandbox_unavailable" not in evaluation.issue_codes
+    # An unconfigured sidecar must not be retried: the outcome is identical.
+    assert sandbox.calls == 1
+
+
+def test_configured_sandbox_outage_still_hard_fails_llm_code_cards() -> None:
+    sandbox = _OfflineSidecar(configured=True)
+
+    evaluation = evaluate_resource_quality(
+        "code_snippet",
+        _llm_code_payload(),
+        _v4_context(),
+        sandbox=sandbox,
+    )
+
+    assert evaluation.hard_fail is True
+    assert "sandbox_unavailable" in evaluation.issue_codes
+    # A configured sidecar gets exactly one retry before failing the card.
+    assert sandbox.calls == 2
+
+
+def test_sandbox_blip_recovers_on_the_single_retry() -> None:
+    class FlakySandbox:
+        configured = True
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def verify(self, *_args, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise ServiceUnavailable("blip")
+            return {"status": "verified"}
+
+    sandbox = FlakySandbox()
+    evaluation = evaluate_resource_quality(
+        "code_snippet",
+        _llm_code_payload(),
+        _v4_context(),
+        sandbox=sandbox,
+    )
+
+    assert sandbox.calls == 2
+    assert evaluation.hard_fail is False
+    assert "sandbox_unavailable" not in evaluation.issue_codes
+    assert "sandbox_not_configured" not in evaluation.issue_codes
+
+
+def test_unconfigured_blind_verifier_degrades_llm_quizzes_instead_of_hard_failing() -> None:
+    verifier = _OfflineSidecar(configured=False)
+
+    evaluation = evaluate_resource_quality(
+        "diagnostic_quiz",
+        _llm_quiz_payload(),
+        _v4_context(),
+        diagnostic_verifier=verifier,
+    )
+
+    assert evaluation.hard_fail is False
+    assert evaluation.gate_status == "degraded"
+    assert "diagnostic_blind_verifier_not_configured" in evaluation.issue_codes
+    assert verifier.calls == 1
+
+
+def test_configured_blind_verifier_outage_still_hard_fails_llm_quizzes() -> None:
+    verifier = _OfflineSidecar(configured=True)
+
+    evaluation = evaluate_resource_quality(
+        "diagnostic_quiz",
+        _llm_quiz_payload(),
+        _v4_context(),
+        diagnostic_verifier=verifier,
+    )
+
+    assert evaluation.hard_fail is True
+    assert "diagnostic_blind_verifier_unavailable" in evaluation.issue_codes
+    assert verifier.calls == 2
+
+
+def test_blind_verifier_outage_keeps_template_quizzes_soft() -> None:
+    verifier = _OfflineSidecar(configured=True)
+    payload = ResourceGenerator().template(_v4_context(), "diagnostic_quiz").structured_payload
+
+    evaluation = evaluate_resource_quality(
+        "diagnostic_quiz",
+        payload,
+        _v4_context(),
+        diagnostic_verifier=verifier,
+    )
+
+    assert evaluation.hard_fail is False
+    assert "diagnostic_blind_verifier_unavailable" in evaluation.issue_codes
+
+
 def test_scoped_evidence_pack_drops_cross_course_and_wrong_node_hits() -> None:
     valid = [
         {

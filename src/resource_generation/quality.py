@@ -49,6 +49,29 @@ class QualityEvaluation:
         }
 
 
+def _client_configured(client: Any) -> bool:
+    """Whether a sidecar client belongs to a deployment that provides it."""
+    configured = getattr(client, "configured", None)
+    if configured is not None:
+        return bool(configured)
+    return bool(getattr(client, "base_url", ""))
+
+
+def _sidecar_call_with_retry(call, *, configured: bool):
+    """Retry a configured sidecar once so a single blip cannot fail a card.
+
+    An unconfigured sidecar is not retried: the second call would fail
+    identically and the caller degrades instead. Repeated real outages stay
+    bounded by the client circuit breaker.
+    """
+    try:
+        return call()
+    except ServiceUnavailable:
+        if not configured:
+            raise
+        return call()
+
+
 def _evidence_text(context: ResourceContext, ids: set[str]) -> str:
     return "\n".join(
         str(ref.get("excerpt") or "")
@@ -242,15 +265,20 @@ def evaluate_resource_quality(
             and verification.get("status") == "prevalidated_template"
         )
         if verification.get("status") != "verified":
+            sandbox_client = sandbox or SandboxRunnerClient()
+            sandbox_configured = _client_configured(sandbox_client)
             try:
-                result = (sandbox or SandboxRunnerClient()).verify(
-                    source_code=str(payload.get("code") or ""),
-                    public_tests=[
-                        dict(value)
-                        for value in payload.get("boundary_tests", [])
-                        if isinstance(value, dict)
-                    ],
-                    hidden_test_set_id=str(payload.get("example_binding") or ""),
+                result = _sidecar_call_with_retry(
+                    lambda: sandbox_client.verify(
+                        source_code=str(payload.get("code") or ""),
+                        public_tests=[
+                            dict(value)
+                            for value in payload.get("boundary_tests", [])
+                            if isinstance(value, dict)
+                        ],
+                        hidden_test_set_id=str(payload.get("example_binding") or ""),
+                    ),
+                    configured=sandbox_configured,
                 )
                 if result.get("status") != "verified":
                     issues.append("code_verification_failed")
@@ -258,6 +286,11 @@ def evaluate_resource_quality(
             except ServiceUnavailable:
                 if is_server_template:
                     issues.append("sandbox_unavailable_prevalidated_template")
+                elif not sandbox_configured:
+                    # This deployment has no sandbox sidecar at all. Degrade
+                    # with an explicit marker instead of templating every LLM
+                    # code card; static C11 validation has already run.
+                    issues.append("sandbox_not_configured")
                 else:
                     issues.append("sandbox_unavailable")
                     hard_fail = True
@@ -292,8 +325,11 @@ def evaluate_resource_quality(
         ):
             issues.append("diagnostic_coverage_incomplete")
         try:
-            blind = (diagnostic_verifier or DiagnosticBlindVerifierClient()).verify(
-                questions
+            verifier_client = diagnostic_verifier or DiagnosticBlindVerifierClient()
+            verifier_configured = _client_configured(verifier_client)
+            blind = _sidecar_call_with_retry(
+                lambda: verifier_client.verify(questions),
+                configured=verifier_configured,
             )
             blind_answers = blind.get("answers") if isinstance(blind, dict) else None
             blind_by_id: dict[str, int] = {}
@@ -349,8 +385,13 @@ def evaluate_resource_quality(
                 payload.get("quality_profile", {}).get("generation_source")
                 == "template"
             )
-            issues.append("diagnostic_blind_verifier_unavailable")
-            hard_fail = hard_fail or not is_server_template
+            if not is_server_template and not verifier_configured:
+                # No blind verifier in this deployment: degrade with a marker
+                # instead of hard-failing every LLM quiz.
+                issues.append("diagnostic_blind_verifier_not_configured")
+            else:
+                issues.append("diagnostic_blind_verifier_unavailable")
+                hard_fail = hard_fail or not is_server_template
 
         # Detect generic / meta-cognitive distractors.
         _GENERIC_DISTRACTOR_RE = re.compile(
@@ -418,7 +459,9 @@ def evaluate_resource_quality(
         code in issues
         for code in (
             "sandbox_unavailable",
+            "sandbox_not_configured",
             "diagnostic_blind_verifier_unavailable",
+            "diagnostic_blind_verifier_not_configured",
             "diagnostic_blind_verifier_protocol_unsupported",
             "critical_nli_unavailable",
         )
@@ -448,7 +491,10 @@ def evaluate_resource_quality(
     elif (
         context.evidence_status == "degraded"
         or "diagnostic_blind_verifier_protocol_unsupported" in issues
-        or any(code.endswith("_unavailable") for code in issues)
+        or any(
+            code.endswith("_unavailable") or code.endswith("_not_configured")
+            for code in issues
+        )
     ):
         gate_status = "degraded"
     elif score < 85:

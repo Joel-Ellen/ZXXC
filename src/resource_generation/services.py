@@ -71,6 +71,15 @@ class _JsonServiceClient:
         self.breaker = CircuitBreaker()
 
     @property
+    def configured(self) -> bool:
+        """Whether this deployment provides the sidecar at all.
+
+        Distinguishes "no sidecar in this environment" (callers may degrade)
+        from "sidecar exists but is failing" (callers should stay strict).
+        """
+        return bool(self.base_url)
+
+    @property
     def available(self) -> bool:
         return bool(self.base_url) and self.breaker.allow()
 
