@@ -115,6 +115,10 @@ export default defineConfig({
             return "vendor-markdown";
           }
 
+          if (id.includes("pptxgenjs")) {
+            return "vendor-pptx";
+          }
+
           return "vendor";
         },
       },

@@ -18,6 +18,27 @@
 
         <div class="resource-canvas__actions">
           <button
+            ref="pptPreviewTrigger"
+            type="button"
+            class="workspace-shell-btn workspace-shell-btn--secondary focus-ring inline-flex items-center gap-2 px-3 py-2 text-[11px] font-semibold"
+            :disabled="!canExportPpt"
+            :title="canExportPpt ? '在工作台预览当前节点学习 PPT' : '当前节点暂无可预览的学习资料'"
+            @click="openPptPreview"
+          >
+            <IconPresentation :size="15" />
+            <span>预览 PPT</span>
+          </button>
+          <button
+            type="button"
+            class="workspace-shell-btn workspace-shell-btn--accent focus-ring inline-flex items-center gap-2 px-3 py-2 text-[11px] font-semibold"
+            :disabled="!canExportPpt || exportingPpt"
+            :title="canExportPpt ? '下载当前节点学习 PPT' : '当前节点暂无可导出的学习资料'"
+            @click="exportPpt"
+          >
+            <IconPresentation :size="15" />
+            <span>{{ exportingPpt ? "正在生成..." : "生成 PPT" }}</span>
+          </button>
+          <button
             type="button"
             class="workspace-shell-btn workspace-shell-btn--accent focus-ring px-3 py-2 text-[11px] font-semibold"
             @click="focusMode = !focusMode"
@@ -34,6 +55,10 @@
           </button>
         </div>
       </div>
+
+      <p v-if="pptStatus" class="resource-canvas__export-status" role="status" aria-live="polite">
+        {{ pptStatus }}
+      </p>
 
       <div class="resource-canvas__status" aria-label="当前节点学习状态">
         <div class="resource-canvas__metric">
@@ -89,6 +114,15 @@
         </div>
       </div>
     </header>
+
+    <PptPreview
+      :open="showPptPreview"
+      :model="pptPreviewModel"
+      :downloading="exportingPpt"
+      :status="pptStatus"
+      @close="closePptPreview"
+      @download="exportPpt"
+    />
 
     <div class="relative pb-4">
         <div v-if="!cards.length && !loading" class="flex h-full min-h-[420px] items-center justify-center">
@@ -298,9 +332,12 @@
 <script setup>
 import { computed, nextTick, ref, watch } from "vue";
 import ConceptMapLearning from "./ConceptMapLearning.vue";
+import IconPresentation from "./icons/IconPresentation.vue";
 import MarkdownContent from "./MarkdownContent.vue";
+import PptPreview from "./PptPreview.vue";
 import ResourceCard from "./ResourceCard.vue";
 import { extractCodePreview, extractTextPreview } from "../utils/markdownPreview.js";
+import { buildNodePresentationModel, createNodePptBlob, downloadBlob } from "../utils/pptGenerator.js";
 
 const props = defineProps({
   cards: { type: Array, default: () => [] },
@@ -329,6 +366,10 @@ const submittedScore = ref(null);
 const submittedDiagnostic = ref(null);
 const quizSubmitting = ref(false);
 const showQuizOverlay = ref(false);
+const exportingPpt = ref(false);
+const pptStatus = ref("");
+const showPptPreview = ref(false);
+const pptPreviewTrigger = ref(null);
 const quizAttemptNumber = ref(1);
 const quizStartedAt = ref(Date.now());
 const quizEventId = ref("");
@@ -336,6 +377,19 @@ const scrollViewport = ref(null);
 const nodeScroller = ref(null);
 const nodeButtonRefs = new Map();
 const selectedNodeId = ref(props.currentNode);
+let pptExportGeneration = 0;
+
+const canExportPpt = computed(() => Boolean(
+  props.currentNode
+  && props.cards.length
+  && !props.loading,
+));
+
+const pptPreviewModel = computed(() => buildNodePresentationModel({
+  nodeTitle: props.nodeTitle,
+  nodeId: props.currentNode,
+  cards: props.cards,
+}));
 
 watch(
   [() => props.currentNode, () => props.loading, () => props.pathNodes.length],
@@ -430,6 +484,16 @@ watch(
     focusMode.value = false;
   },
   { immediate: true },
+);
+
+watch(
+  [() => props.currentNode, () => props.cards, () => props.cards.length],
+  () => {
+    pptExportGeneration += 1;
+    exportingPpt.value = false;
+    pptStatus.value = "";
+    showPptPreview.value = false;
+  },
 );
 
 watch(
@@ -849,6 +913,51 @@ function selectNode(nodeId) {
   emit("select-node", nodeId);
 }
 
+function openPptPreview() {
+  if (!canExportPpt.value) return;
+  showPptPreview.value = true;
+}
+
+function closePptPreview() {
+  showPptPreview.value = false;
+  nextTick(() => pptPreviewTrigger.value?.focus());
+}
+
+async function exportPpt() {
+  if (!canExportPpt.value || exportingPpt.value) {
+    return;
+  }
+
+  const exportGeneration = ++pptExportGeneration;
+  const nodeId = props.currentNode;
+  const nodeTitle = props.nodeTitle;
+  const cards = [...props.cards];
+  exportingPpt.value = true;
+  pptStatus.value = "正在整理当前节点的学习内容...";
+  try {
+    const result = await createNodePptBlob({
+      nodeTitle,
+      nodeId,
+      cards,
+    });
+    if (exportGeneration !== pptExportGeneration || props.currentNode !== nodeId) {
+      return;
+    }
+    downloadBlob(result.blob, result.filename);
+    pptStatus.value = `已下载 ${result.slideCount} 页 PPT：${result.filename}`;
+  } catch (error) {
+    if (exportGeneration !== pptExportGeneration || props.currentNode !== nodeId) {
+      return;
+    }
+    console.error("Unable to generate node PPT:", error);
+    pptStatus.value = "PPT 生成失败，请稍后重试。";
+  } finally {
+    if (exportGeneration === pptExportGeneration) {
+      exportingPpt.value = false;
+    }
+  }
+}
+
 function alignNodeToLeft(nodeId) {
   const scroller = nodeScroller.value;
   const button = nodeButtonRefs.get(nodeId);
@@ -1152,8 +1261,20 @@ function forwardWheelToContent(event) {
 .resource-canvas__actions {
   display: flex;
   flex-shrink: 0;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.5rem;
+}
+
+.resource-canvas__export-status {
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 22%, var(--border-subtle));
+  background: var(--color-primary-soft);
+  padding: 0.45rem 0.65rem;
+  color: var(--color-primary-dark);
+  font-size: 0.72rem;
+  line-height: 1.4;
 }
 
 .resource-canvas__status {
