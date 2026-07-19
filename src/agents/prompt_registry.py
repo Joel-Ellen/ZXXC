@@ -403,6 +403,7 @@ def _build_tutor_prompt(
 
 请严格返回 JSON：
 {{
+  "text_explanation": "",
   "core_definition": "",
   "analogy": "",
   "detailed_explanation": "",
@@ -422,6 +423,7 @@ def _build_tutor_prompt(
 
 请严格返回 JSON：
 {{
+  "text_explanation": "",
   "hints": [],
   "solution_approach": "",
   "common_mistakes": [],
@@ -441,6 +443,7 @@ def _build_tutor_prompt(
 
 请严格返回 JSON：
 {{
+  "text_explanation": "",
   "error_analysis": "",
   "root_cause": "",
   "fix_guidance": "",
@@ -457,6 +460,7 @@ def _build_tutor_prompt(
 
 请严格返回 JSON：
 {{
+  "text_explanation": "",
   "key_topics": [],
   "review_strategy": "",
   "practice_questions": [],
@@ -472,7 +476,7 @@ def _build_tutor_prompt(
 
 请严格返回 JSON：
 {{
-  "response": "",
+  "text_explanation": "",
   "diagram": "",
   "code_example": "",
   "follow_up_questions": []

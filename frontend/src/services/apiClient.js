@@ -10,6 +10,13 @@ export function createRequestId() {
 
 export { tokenStore };
 
+export function forceLogout() {
+  tokenStore.clear();
+  if (typeof window !== "undefined") {
+    window.location.assign("/?reason=SECURITY_BREACH_FORCED_OUT");
+  }
+}
+
 let refreshPromise = null;
 
 export function refreshStoredTokens() {
@@ -67,8 +74,7 @@ apiClient.interceptors.response.use(
         originalRequest.headers.Authorization = `Bearer ${accessToken}`;
         return apiClient(originalRequest);
       } catch (refreshError) {
-        tokenStore.clear();
-        window.location.assign("/?reason=SECURITY_BREACH_FORCED_OUT");
+        forceLogout();
       }
     }
 

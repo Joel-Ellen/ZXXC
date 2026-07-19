@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import hashlib
 import json
 import os
 import threading
 import time
+import uuid
+from collections import OrderedDict
 from typing import Any, AsyncIterator, Dict, Optional
 
 from src.agents.tutor_node import TutorInput
@@ -69,6 +72,144 @@ _TUTOR_STREAM_CAPACITY = threading.BoundedSemaphore(
     _read_int_env("EDUAGENT_TUTOR_STREAM_MAX_CONCURRENT", 2)
 )
 _TUTOR_STREAM_USER_CAPACITY = KeyedConcurrencyLimiter(1)
+
+# A canonical Tutor stream is a POST, so the browser cannot use EventSource's
+# built-in reconnect semantics.  Keep a short-lived, bounded copy of completed
+# streams keyed by the caller's X-EduAgent-Stream-ID.  This is deliberately a replay
+# buffer rather than durable conversation state: the validated response is
+# still persisted through the normal session path below.
+_TUTOR_STREAM_REPLAY_CACHE: OrderedDict[str, Dict[str, Any]] = OrderedDict()
+_TUTOR_STREAM_REPLAY_LOCK = threading.RLock()
+
+
+def _tutor_stream_replay_ttl_sec() -> float:
+    return _read_float_env("EDUAGENT_TUTOR_STREAM_REPLAY_TTL_SEC", 600.0)
+
+
+def _tutor_stream_replay_max_events() -> int:
+    configured = _read_int_env("EDUAGENT_TUTOR_STREAM_REPLAY_MAX_EVENTS", 2048)
+    # A provider may yield one SSE event per requested model token.  Keep room
+    # for reset/validation/warning/done and the validated fallback chunks too.
+    return max(configured, _tutor_max_tokens() + 64)
+
+
+def _tutor_stream_key(
+    user_id: str,
+    course_id: str,
+    stream_id: str,
+    request: TutorRequest,
+) -> str:
+    # Scope request IDs by the authenticated session; a client-controlled ID
+    # must never allow replaying another learner's stream.  Bind the cache key
+    # to the normalized body as well, so accidental request-ID reuse cannot
+    # return an answer for a different question.
+    request_json = json.dumps(
+        request.model_dump(mode="json"),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    request_digest = hashlib.sha256(request_json.encode("utf-8")).hexdigest()[:20]
+    return f"{user_id}:{course_id}:{str(stream_id or '')[:160]}:{request_digest}"
+
+
+def _parse_last_event_id(value: object) -> Optional[int]:
+    if value in (None, ""):
+        return None
+    try:
+        return max(0, int(str(value).strip()))
+    except (TypeError, ValueError):
+        return None
+
+
+def _prune_tutor_stream_replay_cache(now: Optional[float] = None) -> None:
+    now = now if now is not None else time.monotonic()
+    ttl = _tutor_stream_replay_ttl_sec()
+    with _TUTOR_STREAM_REPLAY_LOCK:
+        expired = [
+            key
+            for key, entry in _TUTOR_STREAM_REPLAY_CACHE.items()
+            if now - float(entry.get("created_at", now)) > ttl
+        ]
+        for key in expired:
+            _TUTOR_STREAM_REPLAY_CACHE.pop(key, None)
+        max_entries = max(1, _read_int_env("EDUAGENT_TUTOR_STREAM_REPLAY_MAX_STREAMS", 256))
+        while len(_TUTOR_STREAM_REPLAY_CACHE) > max_entries:
+            _TUTOR_STREAM_REPLAY_CACHE.popitem(last=False)
+
+
+def _begin_tutor_stream_replay(stream_key: str) -> str:
+    now = time.monotonic()
+    generation_epoch = uuid.uuid4().hex
+    with _TUTOR_STREAM_REPLAY_LOCK:
+        _prune_tutor_stream_replay_cache(now)
+        _TUTOR_STREAM_REPLAY_CACHE[stream_key] = {
+            "created_at": now,
+            "events": [],
+            "complete": False,
+            "generation_epoch": generation_epoch,
+        }
+        _TUTOR_STREAM_REPLAY_CACHE.move_to_end(stream_key)
+    return generation_epoch
+
+
+def _read_tutor_stream_replay(
+    stream_key: str,
+    last_event_id: Optional[int],
+) -> tuple[list[Dict[str, str]], bool]:
+    now = time.monotonic()
+    with _TUTOR_STREAM_REPLAY_LOCK:
+        _prune_tutor_stream_replay_cache(now)
+        entry = _TUTOR_STREAM_REPLAY_CACHE.get(stream_key)
+        if not entry:
+            return [], False
+        _TUTOR_STREAM_REPLAY_CACHE.move_to_end(stream_key)
+        cursor = last_event_id if last_event_id is not None else 0
+        events = [
+            dict(event)
+            for event in entry.get("events", [])
+            if _parse_last_event_id(event.get("id")) is not None
+            and int(event["id"]) > cursor
+        ]
+        return events, bool(entry.get("complete"))
+
+
+def _append_tutor_stream_events(
+    stream_key: str,
+    events: list[Dict[str, str]],
+    *,
+    generation_epoch: str,
+    complete: bool = False,
+) -> bool:
+    now = time.monotonic()
+    with _TUTOR_STREAM_REPLAY_LOCK:
+        entry = _TUTOR_STREAM_REPLAY_CACHE.get(stream_key)
+        if entry is None or entry.get("generation_epoch") != generation_epoch:
+            return False
+        entry["events"].extend(dict(event) for event in events)
+        max_events = _tutor_stream_replay_max_events()
+        if len(entry["events"]) > max_events:
+            del entry["events"][:-max_events]
+        entry["created_at"] = now
+        if complete:
+            entry["complete"] = True
+        _TUTOR_STREAM_REPLAY_CACHE.move_to_end(stream_key)
+        return True
+
+
+def _append_tutor_stream_event(
+    stream_key: str,
+    event: Dict[str, str],
+    *,
+    generation_epoch: str,
+    complete: bool = False,
+) -> bool:
+    return _append_tutor_stream_events(
+        stream_key,
+        [event],
+        generation_epoch=generation_epoch,
+        complete=complete,
+    )
 
 
 def _chinese_tutor_mermaid() -> str:
@@ -305,6 +446,68 @@ def _parse_structured_stream_output(text: str) -> tuple[bool, Any]:
         return False, None
 
 
+def _extract_streamed_text_explanation(text: str) -> str:
+    """Decode the complete prefix of a JSON ``text_explanation`` string.
+
+    Tutor prompts ask the model for JSON, but the answer field itself can be
+    displayed while the object is still arriving.  This small state machine
+    intentionally returns only a valid JSON string prefix; malformed/incomplete
+    escape sequences are held until the next model token instead of leaking the
+    JSON envelope to the learner.
+    """
+    marker = '"text_explanation"'
+    marker_index = text.find(marker)
+    if marker_index < 0:
+        return ""
+    colon_index = text.find(":", marker_index + len(marker))
+    if colon_index < 0:
+        return ""
+    value_start = colon_index + 1
+    while value_start < len(text) and text[value_start].isspace():
+        value_start += 1
+    if value_start >= len(text) or text[value_start] != '"':
+        return ""
+    fragment_start = value_start + 1
+    escaped = False
+    fragment_end = len(text)
+    for index in range(fragment_start, len(text)):
+        char = text[index]
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if char == '"':
+            fragment_end = index
+            break
+    fragment = text[fragment_start:fragment_end]
+    # Add a synthetic closing quote so complete escape sequences can be
+    # decoded before the model emits the real closing quote.
+    try:
+        return str(json.loads('"' + fragment + '"'))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return ""
+
+
+def _stream_candidate_passes_validation(pipeline: Any, text: str) -> bool:
+    """Fail closed until a learner-visible stream prefix passes output guards."""
+    if not is_chinese_explanatory_text(text):
+        return False
+    try:
+        validate_text = getattr(pipeline, "validate_output_text", None)
+        if callable(validate_text):
+            validation = validate_text(text, output_type="tutor_response")
+        else:
+            _, validation = pipeline.validate_tutor_response(
+                {"text_explanation": text, "mermaid_src": ""}
+            )
+    except Exception:
+        return False
+    refined_text = str(getattr(validation, "refined_text", "") or "")
+    return bool(validation.passed and (not refined_text or refined_text == text))
+
+
 def _render_tutor_stream_value(value: Any) -> str:
     if isinstance(value, str):
         return value.strip()
@@ -533,6 +736,8 @@ async def _stream_tutor_unlimited(
     context_type: str = "general",
     code_snippet: str = "",
     error_message: str = "",
+    stream_id: Optional[str] = None,
+    last_event_id: Optional[str | int] = None,
 ) -> AsyncIterator[Dict[str, str]]:
     from src.orchestration_runtime import get_runtime
 
@@ -547,20 +752,63 @@ async def _stream_tutor_unlimited(
             error_message=error_message,
         )
         request, input_validation = _validate_tutor_request(request)
+        stream_identifier = str(stream_id or "").strip() or uuid.uuid4().hex
+        stream_key = _tutor_stream_key(user_id, course_id, stream_identifier, request)
+        replay_cursor = _parse_last_event_id(last_event_id)
+        replay_events, replay_complete = _read_tutor_stream_replay(stream_key, replay_cursor)
+        if replay_complete:
+            for replay_event in replay_events:
+                yield replay_event
+            return
+        # A partial buffer belongs to a disconnected request.  Re-run the
+        # model from a clean sequence; completed streams are the only ones
+        # replayed, so a reconnect never receives a silently truncated answer.
+        generation_epoch = _begin_tutor_stream_replay(stream_key)
+        event_sequence = replay_cursor or 0
+
+        def build_event(event_name: str, payload: Dict[str, Any]) -> Dict[str, str]:
+            nonlocal event_sequence
+            event_sequence += 1
+            return {
+                "id": str(event_sequence),
+                "event": event_name,
+                "data": json.dumps(payload, ensure_ascii=False),
+            }
+
+        def make_event(
+            event_name: str,
+            payload: Dict[str, Any],
+            *,
+            complete: bool = False,
+        ) -> Dict[str, str]:
+            event = build_event(event_name, payload)
+            _append_tutor_stream_event(
+                stream_key,
+                event,
+                generation_epoch=generation_epoch,
+                complete=complete,
+            )
+            return event
+
+        if replay_cursor:
+            # A prior connection ended before a terminal event (or its replay
+            # buffer expired).  Start over with IDs above the client's cursor
+            # and tell the UI to replace, rather than append to, partial text.
+            yield make_event("reset", {"reason": "stream_restarted"})
         if not input_validation.passed:
             incr_metric("tutor.block_total", reason="stream_input_validation")
-            yield {
-                "event": "error",
-                "data": json.dumps(
-                    {"validation": input_validation.to_contract_validation()},
-                    ensure_ascii=False,
-                ),
-            }
+            yield make_event(
+                "error",
+                {"validation": input_validation.to_contract_validation()},
+                complete=True,
+            )
             return
 
         llm = get_runtime().get_llm()
         final_response: Dict[str, object]
         warning_message = ""
+        streamed_text = ""
+        validation_event_payload: Optional[Dict[str, Any]] = None
         if llm is None:
             incr_metric("llm.fallback_total", operation="tutor_stream", fallback="run_tutor")
             final_response = run_tutor(
@@ -573,6 +821,7 @@ async def _stream_tutor_unlimited(
             messages = _stream_messages(request)
             raw_tokens: list[str] = []
             stream_fallback = False
+            stream_mode: Optional[bool] = None
             try:
                 async with asyncio.timeout(_tutor_timeout_sec()):
                     async for token in llm.chat_stream(messages, max_tokens=_tutor_max_tokens()):
@@ -581,6 +830,28 @@ async def _stream_tutor_unlimited(
                         if token.strip().startswith("[Stream error:"):
                             raise RuntimeError(token.strip())
                         raw_tokens.append(token)
+                        raw_text = "".join(raw_tokens)
+                        prefix_state = _structured_stream_prefix_state(raw_text)
+                        if stream_mode is None and prefix_state is not None:
+                            stream_mode = prefix_state
+                        candidate = ""
+                        if stream_mode is False:
+                            candidate = raw_text
+                        elif stream_mode is True:
+                            candidate = _extract_streamed_text_explanation(raw_text)
+                        # Do not expose a short/English prefix before the
+                        # language guard can classify it.  Once a valid
+                        # Chinese prefix exists, emit only its new suffix.
+                        if candidate and _stream_candidate_passes_validation(pipeline, candidate):
+                            if not streamed_text:
+                                delta = candidate
+                            elif candidate.startswith(streamed_text):
+                                delta = candidate[len(streamed_text):]
+                            else:
+                                delta = ""
+                            if delta:
+                                streamed_text += delta
+                                yield make_event("token", {"token": delta})
             except Exception as exc:
                 incr_metric("llm.timeout_total", operation="tutor_stream")
                 incr_metric("llm.fallback_total", operation="tutor_stream", fallback="local_template")
@@ -639,12 +910,8 @@ async def _stream_tutor_unlimited(
                     "tutor_validation_rejected:"
                     + ";".join(issue.message for issue in validation.issues)
                 )
-                yield {
-                    "event": "validation_error",
-                    "data": json.dumps(
-                        {"validation": validation.to_contract_validation()},
-                        ensure_ascii=False,
-                    ),
+                validation_event_payload = {
+                    "validation": validation.to_contract_validation()
                 }
             try:
                 from . import learning_assets_service
@@ -669,19 +936,46 @@ async def _stream_tutor_unlimited(
                 operation="tutor_stream",
             )
             text = str(final_response.get("text_explanation") or "")
-        for chunk in [text[i:i + 80] for i in range(0, len(text), 80)]:
-            yield {"event": "token", "data": json.dumps({"token": chunk}, ensure_ascii=False)}
-            await asyncio.sleep(0.02)
+        # Validation can replace an invalid model answer with a local fallback.
+        # Reset the client buffer before sending that replacement so it never
+        # renders both the provisional stream and the validated answer.
+        terminal_events: list[Dict[str, str]] = []
+        if validation_event_payload is not None:
+            terminal_events.append(build_event("validation_error", validation_event_payload))
+        if streamed_text and not text.startswith(streamed_text):
+            terminal_events.append(
+                build_event("reset", {"reason": "validated_response_changed"})
+            )
+            streamed_text = ""
+        remainder = text[len(streamed_text):] if text.startswith(streamed_text) else text
+        for chunk in [remainder[i:i + 80] for i in range(0, len(remainder), 80)]:
+            terminal_events.append(build_event("token", {"token": chunk}))
         if warning_message:
-            yield {
-                "event": "warning",
-                "data": json.dumps({"message": warning_message}, ensure_ascii=False),
-            }
+            terminal_events.append(build_event("warning", {"message": warning_message}))
+
+        terminal_events.append(
+            build_event(
+                "done",
+                {"reference_count": 0, "stream_id": stream_identifier},
+            )
+        )
+        # Persistence is complete and there are no more model-dependent
+        # events.  Publish the whole terminal suffix to the replay cache in one
+        # critical section before yielding any part of it to the network.
+        _append_tutor_stream_events(
+            stream_key,
+            terminal_events,
+            generation_epoch=generation_epoch,
+            complete=True,
+        )
 
         duration_ms = round((time.perf_counter() - started) * 1000, 3)
         observe_metric("tutor.stream.duration_ms", duration_ms)
         log_event("tutor.stream.complete", duration_ms=duration_ms)
-        yield {"event": "done", "data": json.dumps({"reference_count": 0}, ensure_ascii=False)}
+        for event in terminal_events:
+            yield event
+            if event["event"] == "token":
+                await asyncio.sleep(0.02)
 
 
 async def stream_tutor(
@@ -693,7 +987,10 @@ async def stream_tutor(
     context_type: str = "general",
     code_snippet: str = "",
     error_message: str = "",
+    stream_id: Optional[str] = None,
+    last_event_id: Optional[str | int] = None,
 ) -> AsyncIterator[Dict[str, str]]:
+    stream_identifier = str(stream_id or "").strip() or uuid.uuid4().hex
     global_acquired = _TUTOR_STREAM_CAPACITY.acquire(blocking=False)
     user_acquired = global_acquired and _TUTOR_STREAM_USER_CAPACITY.acquire(user_id)
     if not global_acquired or not user_acquired:
@@ -703,7 +1000,11 @@ async def stream_tutor(
         yield {
             "event": "error",
             "data": json.dumps(
-                {"detail": "TUTOR_STREAM_CAPACITY_EXCEEDED", "retry_after": 1},
+                {
+                    "detail": "TUTOR_STREAM_CAPACITY_EXCEEDED",
+                    "retry_after": 1,
+                    "stream_id": stream_identifier,
+                },
                 ensure_ascii=False,
             ),
         }
@@ -717,6 +1018,8 @@ async def stream_tutor(
             context_type=context_type,
             code_snippet=code_snippet,
             error_message=error_message,
+            stream_id=stream_identifier,
+            last_event_id=last_event_id,
         ):
             yield event
     finally:

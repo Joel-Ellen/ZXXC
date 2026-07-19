@@ -1783,12 +1783,27 @@ def _without_client_mastery_claims(payload: Dict[str, Any]) -> Dict[str, Any]:
     return clean
 
 
+def _tutor_service_kwargs(tutor_request: TutorRequest) -> Dict[str, Any]:
+    """Pass optional request context without breaking legacy service bridges."""
+    if any(
+        (
+            tutor_request.context_type != "general",
+            bool(tutor_request.code_snippet),
+            bool(tutor_request.error_message),
+        )
+    ):
+        return {"tutor_request": tutor_request}
+    return {}
+
+
 def _session_tutor_response(
     user_id: str,
     course_id: str,
     body: Dict[str, Any],
     accept_header: str = "",
     headers: Optional[Dict[str, str]] = None,
+    stream_id: Optional[str] = None,
+    last_event_id: Optional[str] = None,
 ) -> JSONResponse | EventSourceResponse:
     try:
         tutor_request = TutorRequest.model_validate(body)
@@ -1806,12 +1821,22 @@ def _session_tutor_response(
     wants_stream = tutor_request.stream or "text/event-stream" in accept_header.lower()
     if wants_stream:
         stream_headers = {"X-Accel-Buffering": "no", **(headers or {})}
+        # Tutor streaming uses POST, so reconnects carry a stable stream ID
+        # and cursor explicitly instead of relying on EventSource state.
+        stream_kwargs: Dict[str, Any] = {}
+        request_id = str(stream_id or "").strip()
+        last_event_id = str(last_event_id or "").strip()
+        if request_id:
+            stream_kwargs["stream_id"] = request_id
+        if last_event_id:
+            stream_kwargs["last_event_id"] = last_event_id
         return EventSourceResponse(
             tutor_service.stream_tutor(
                 user_id,
                 course_id,
                 tutor_request.question,
-                tutor_request=tutor_request,
+                **_tutor_service_kwargs(tutor_request),
+                **stream_kwargs,
             ),
             headers=stream_headers,
         )
@@ -1819,7 +1844,7 @@ def _session_tutor_response(
         user_id,
         course_id,
         tutor_request.question,
-        tutor_request=tutor_request,
+        **_tutor_service_kwargs(tutor_request),
     )
     if result.get("status") == "capacity_exceeded":
         return JSONResponse(
@@ -2490,7 +2515,20 @@ async def api_session_tutor(request: Request):
     if auth_error is not None:
         return auth_error
     body = await request.json()
-    return _session_tutor_response(user_id, course_id, body, request.headers.get("accept", ""))
+    return _session_tutor_response(
+        user_id,
+        course_id,
+        body,
+        request.headers.get("accept", ""),
+        # Reverse proxies commonly replace X-Request-ID for tracing.  Keep
+        # replay identity on a dedicated header, with the old header as a
+        # compatibility fallback for existing clients.
+        stream_id=(
+            request.headers.get("x-eduagent-stream-id")
+            or request.headers.get("x-request-id")
+        ),
+        last_event_id=request.headers.get("last-event-id"),
+    )
 
 
 async def api_session_tutor_stream(request: Request) -> EventSourceResponse | JSONResponse:

@@ -30,7 +30,7 @@
 
       <TransitionGroup name="question" tag="div" class="mx-auto max-w-2xl px-5 py-6 space-y-4">
         <article
-          v-for="(q, idx) in visibleQuestions"
+          v-for="q in visibleQuestions"
           :key="q.review_item_id"
           class="rounded-xl border border-subtle bg-card p-5 transition-all duration-300"
         >
@@ -76,14 +76,19 @@
 </template>
 
 <script setup>
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, ref } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import apiClient from "../services/apiClient";
+import { streamSessionTutorWithReconnect } from "../services/eduAgentApi";
 import ChatArea from "../components/ChatArea.vue";
 
+const REVIEW_SESSION_ID = "student:data_structures";
 const router = useRouter();
 const route = useRoute();
 const allQuestions = ref([]);
+let tutorAbortController = null;
+
+onBeforeUnmount(() => tutorAbortController?.abort());
 
 function errorLabel(type) {
   if (!type) return "其他";
@@ -120,33 +125,53 @@ const tutorSuggestions = [
   "请出一道类似的题目让我巩固一下",
 ];
 
-function onTutorSend({ text }) {
-  const userMsg = { id: `u-${Date.now()}`, role: "user", content: text };
+function patchTutorMessage(messageId, fields) {
+  const index = tutorMessages.value.findIndex((message) => message.id === messageId);
+  if (index < 0) return;
+  const messages = [...tutorMessages.value];
+  messages[index] = { ...messages[index], ...fields };
+  tutorMessages.value = messages;
+}
+
+async function onTutorSend({ text }) {
+  const question = String(text || "").trim();
+  if (!question || tutorBusy.value) return;
+  const userMsg = { id: `u-${Date.now()}`, role: "user", content: question };
   tutorMessages.value = [...tutorMessages.value, userMsg];
   const aid = `a-${Date.now()}`;
   tutorMessages.value = [...tutorMessages.value, { id: aid, role: "assistant", content: "", isStreaming: true }];
   tutorBusy.value = true;
-  apiClient.post(`/sessions/${encodeURIComponent("student:data_structures")}/tutor-stream`, { question: text }, {
-    responseType: "stream",
-    onDownloadProgress(e) {
-      const chunk = e?.event?.target?.response || e?.currentTarget?.response || "";
-      chunk.split("\n").filter(l => l.startsWith("data: ")).forEach(line => {
-        try {
-          const d = JSON.parse(line.slice(6));
-          if (d.token) {
-            const idx = tutorMessages.value.findIndex(m => m.id === aid);
-            if (idx >= 0) { const msgs = [...tutorMessages.value]; msgs[idx] = { ...msgs[idx], content: msgs[idx].content + d.token }; tutorMessages.value = msgs; }
-          }
-        } catch (_) {}
-      });
-    },
-  }).then(() => {
-    const idx = tutorMessages.value.findIndex(m => m.id === aid);
-    if (idx >= 0) { const msgs = [...tutorMessages.value]; msgs[idx] = { ...msgs[idx], isStreaming: false }; tutorMessages.value = msgs; }
-  }).catch(() => {
-    const idx = tutorMessages.value.findIndex(m => m.id === aid);
-    if (idx >= 0) { const msgs = [...tutorMessages.value]; msgs[idx] = { ...msgs[idx], isStreaming: false, content: msgs[idx].content || "辅导服务暂不可用。" }; tutorMessages.value = msgs; }
-  }).finally(() => { tutorBusy.value = false; });
+  const controller = new AbortController();
+  tutorAbortController = controller;
+  let accumulated = "";
+  const fail = (error) => patchTutorMessage(aid, {
+    content: accumulated || (error?.status === 401 ? "登录状态已失效，请重新登录。" : "辅导服务暂不可用。"),
+    isStreaming: false,
+    streamStatus: "error",
+  });
+
+  try {
+    await streamSessionTutorWithReconnect(REVIEW_SESSION_ID, { question }, {
+      signal: controller.signal,
+      onToken(token) {
+        accumulated += token;
+        patchTutorMessage(aid, { content: accumulated });
+      },
+      onReset() {
+        accumulated = "";
+        patchTutorMessage(aid, { content: "" });
+      },
+      onDone() {
+        patchTutorMessage(aid, { isStreaming: false, streamStatus: "complete" });
+      },
+      onError: fail,
+    });
+  } catch (error) {
+    fail(error);
+  } finally {
+    if (tutorAbortController === controller) tutorAbortController = null;
+    tutorBusy.value = false;
+  }
 }
 
 async function loadQuestions() {
@@ -158,7 +183,9 @@ async function loadQuestions() {
       const raw = mode === "today" ? (data.today_queue || []) : [...(data.mistakes || []), ...(data.reinforcement_tasks || [])];
       allQuestions.value = raw.map(q => ({ ...q, _revealed: false, _skipped: false }));
     }
-  } catch (e) {}
+  } catch {
+    allQuestions.value = [];
+  }
 }
 
 function skipQuestion(q) { q._skipped = true; }

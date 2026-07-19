@@ -32,7 +32,7 @@ vi.mock("../services/eduAgentApi", () => ({
   register: vi.fn(),
   requestResourceGeneration: vi.fn(),
   streamResourceGeneration: vi.fn(),
-  streamSessionTutor: serviceMocks.streamSessionTutor,
+  streamSessionTutorWithReconnect: serviceMocks.streamSessionTutor,
   submitSessionLearningEvent: serviceMocks.submitSessionLearningEvent,
   submitSessionProfileInput: vi.fn(),
   switchCourse: vi.fn(),
@@ -99,6 +99,41 @@ describe("Tutor stream transport hardening", () => {
     expect(assistant.isStreaming).toBe(false);
     expect(assistant.streamStatus).toBe("error");
     expect(serviceMocks.streamSessionTutor.mock.calls[0][2].signal.aborted).toBe(true);
+  });
+
+  it("replaces partial text when a resumed stream emits reset", async () => {
+    serviceMocks.streamSessionTutor.mockImplementationOnce(async (sessionId, payload, handlers) => {
+      handlers.onEvent({ event: "token", id: "1", data: { token: "A" } });
+      handlers.onToken("A");
+      handlers.onEvent({ event: "reset", id: "2", data: { reason: "stream_restarted" } });
+      handlers.onReset({ reason: "stream_restarted" });
+      handlers.onEvent({ event: "token", id: "3", data: { token: "B" } });
+      handlers.onToken("B");
+      handlers.onDone({ status: "ok" });
+    });
+
+    await expect(agent.sendTutorMessage("resume tutor stream")).resolves.toEqual({ status: "ok" });
+    expect(serviceMocks.streamSessionTutor).toHaveBeenCalledOnce();
+    expect(agent.messages.value.at(-1)).toMatchObject({
+      role: "assistant",
+      content: "B",
+      isStreaming: false,
+      streamStatus: "complete",
+    });
+  });
+
+  it("surfaces a recoverable error after the service exhausts its retry budget", async () => {
+    serviceMocks.streamSessionTutor.mockImplementationOnce(async (sessionId, payload, handlers) => {
+      const error = new Error("network unavailable");
+      error.retryable = true;
+      handlers.onError(error);
+    });
+
+    await expect(agent.sendTutorMessage("retry tutor stream")).rejects.toThrow("network unavailable");
+    expect(agent.messages.value.at(-1)).toMatchObject({
+      content: "发送失败，输入内容已保留，请稍后重试。",
+      streamStatus: "error",
+    });
   });
 
   it("restores persisted tutor history and exposes the latest answer in agent collaboration", async () => {

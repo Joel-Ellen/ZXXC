@@ -1,4 +1,9 @@
-import apiClient, { createRequestId, refreshStoredTokens, tokenStore } from "./apiClient";
+import apiClient, {
+  createRequestId,
+  forceLogout,
+  refreshStoredTokens,
+  tokenStore,
+} from "./apiClient";
 import { normalizeLearningEvent } from "../contracts/learning";
 import { normalizeTutorRequest } from "../contracts/tutor";
 import { createRefreshRecoveryReporter } from "./clientTelemetry";
@@ -156,11 +161,121 @@ export async function askSessionTutor(sessionId, payload = {}) {
 }
 
 export async function streamSessionTutor(sessionId, payload, handlers = {}) {
+  // Keep the request id and replay cursor on the caller-owned handler bag so
+  // reconnects can resume the same server-side stream.
+  if (!handlers.requestId) handlers.requestId = createRequestId();
+  const callerOnEvent = handlers.onEvent;
   return streamSsePost(
     `/api/sessions/${sessionPath(sessionId)}/tutor`,
     normalizeTutorRequest({ ...payload, stream: true }),
-    handlers,
+    {
+      ...handlers,
+      onEvent(event) {
+        if (event?.id) handlers.lastEventId = event.id;
+        callerOnEvent?.(event);
+      },
+    },
   );
+}
+
+const TUTOR_STREAM_MAX_RECONNECTS = 2;
+const TUTOR_STREAM_RECONNECT_DELAY_MS = 500;
+
+function abortableDelay(delayMs, signal) {
+  if (delayMs <= 0 || signal?.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timeoutId = setTimeout(finish, delayMs);
+    function finish() {
+      clearTimeout(timeoutId);
+      signal?.removeEventListener("abort", finish);
+      resolve();
+    }
+    signal?.addEventListener("abort", finish, { once: true });
+  });
+}
+
+/**
+ * Reconnect a POST-based Tutor SSE stream while preserving its stream ID and
+ * replay cursor. Recoverable transport errors are only surfaced after the
+ * bounded retry budget is exhausted.
+ */
+export async function streamSessionTutorWithReconnect(
+  sessionId,
+  payload,
+  handlers = {},
+  {
+    maxReconnects = TUTOR_STREAM_MAX_RECONNECTS,
+    reconnectDelayMs = TUTOR_STREAM_RECONNECT_DELAY_MS,
+  } = {},
+) {
+  const callerOnEvent = handlers.onEvent;
+  const callerOnDone = handlers.onDone;
+  const callerOnError = handlers.onError;
+  const signal = handlers.signal;
+  let terminal = false;
+  let latestError = null;
+  let latestErrorEvent;
+  let reconnectAttempts = 0;
+
+  handlers.requestId ||= createRequestId();
+  handlers.lastEventId = String(handlers.lastEventId || "");
+  const managedHandlers = {
+    ...handlers,
+    onEvent(event) {
+      if (event?.id) {
+        managedHandlers.lastEventId = event.id;
+        handlers.lastEventId = event.id;
+      }
+      callerOnEvent?.(event);
+    },
+    onDone(data) {
+      terminal = true;
+      callerOnDone?.(data);
+    },
+    onError(error, event) {
+      latestError = error instanceof Error ? error : new Error("辅导连接失败，请重试。");
+      latestErrorEvent = event;
+      if (!latestError.retryable || latestError.sseTerminal) {
+        terminal = true;
+        callerOnError?.(latestError, event);
+      }
+    },
+  };
+
+  while (!terminal && !signal?.aborted) {
+    latestError = null;
+    latestErrorEvent = undefined;
+    managedHandlers.requestId = handlers.requestId;
+    managedHandlers.lastEventId = handlers.lastEventId;
+
+    try {
+      await streamSessionTutor(sessionId, payload, managedHandlers);
+    } catch (error) {
+      latestError = error instanceof Error ? error : new Error("辅导连接失败，请重试。");
+    }
+    handlers.lastEventId = managedHandlers.lastEventId;
+
+    if (terminal || signal?.aborted) return;
+    const error = latestError || Object.assign(
+      new Error("辅导连接意外结束，输入已保留，请重试。"),
+      { retryable: true },
+    );
+    if (!error.retryable || reconnectAttempts >= Math.max(0, Number(maxReconnects) || 0)) {
+      callerOnError?.(error, latestErrorEvent);
+      return;
+    }
+
+    reconnectAttempts += 1;
+    const retryAfterMs = Number.isFinite(Number(error.retryAfterMs))
+      ? Math.max(0, Number(error.retryAfterMs))
+      : 0;
+    const delayMs = Math.max(
+      Math.max(0, Number(reconnectDelayMs) || 0) * reconnectAttempts,
+      retryAfterMs,
+    );
+    handlers.onReconnect?.({ attempt: reconnectAttempts, delayMs, error });
+    await abortableDelay(delayMs, signal);
+  }
 }
 
 export async function replanSession(sessionId, payload = {}) {
@@ -245,13 +360,28 @@ export async function resetSession(userId, courseId = "data_structures") {
  * @returns {Promise<void>}
  */
 // Shared transport for session tutor streaming.
-async function streamSsePost(url, payload, { onToken, onDone, onReset, onError, signal } = {}) {
+async function streamSsePost(url, payload, {
+  onEvent,
+  onToken,
+  onDone,
+  onReset,
+  onWarning,
+  onValidationError,
+  onError,
+  signal,
+  lastEventId = "",
+  requestId = "",
+} = {}) {
+  const streamRequestId = requestId || createRequestId();
+  let cursor = String(lastEventId || "");
   const request = (token) => fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Accept: "text/event-stream",
         "X-Request-ID": createRequestId(),
+        "X-EduAgent-Stream-ID": streamRequestId,
+        ...(cursor ? { "Last-Event-ID": cursor } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify(payload),
@@ -263,27 +393,32 @@ async function streamSsePost(url, payload, { onToken, onDone, onReset, onError, 
   try {
     response = await request(tokenStore.getAccessToken());
     if (response.status === 401 && !signal?.aborted) {
-      try {
-        const accessToken = await refreshStoredTokens();
-        response = await request(accessToken);
-      } catch {
+      const accessToken = await refreshStoredTokens().catch(() => null);
+      if (!accessToken) {
+        forceLogout();
         const authError = new Error("登录状态已失效，请重新登录。");
         authError.status = 401;
+        authError.retryable = false;
         throw authError;
       }
+      response = await request(accessToken);
     }
   } catch (err) {
+    if (err?.name === "AbortError" || signal?.aborted) return;
     const error = err instanceof Error ? err : new Error("辅导连接失败，请重试。");
     if (/401|登录状态|refresh/i.test(error.message)) error.status = 401;
+    error.retryable = !error.status;
     onError?.(error);
     return;
   }
 
   if (!response.ok || !response.body) {
+    if (response.status === 401) forceLogout();
     const error = new Error(response.status === 401
       ? "登录状态已失效，请重新登录。"
       : `SSE 请求失败：HTTP ${response.status}`);
     error.status = response.status;
+    error.retryable = response.status >= 500 || response.status === 408 || response.status === 429;
     onError?.(error);
     return;
   }
@@ -296,10 +431,13 @@ async function streamSsePost(url, payload, { onToken, onDone, onReset, onError, 
   const dispatch = (rawEvent) => {
     // 单个 SSE 事件块可能包含多行 event:/data:
     let eventName = "message";
+    let eventId = "";
     const dataLines = [];
     for (const line of rawEvent.split("\n")) {
       if (line.startsWith("event:")) {
         eventName = line.slice(6).trim();
+      } else if (line.startsWith("id:")) {
+        eventId = line.slice(3).trim();
       } else if (line.startsWith("data:")) {
         dataLines.push(line.slice(5).trimStart());
       }
@@ -312,16 +450,33 @@ async function streamSsePost(url, payload, { onToken, onDone, onReset, onError, 
     } catch {
       return;
     }
+    const event = { event: eventName, data: parsed, id: eventId };
+    if (eventId) cursor = eventId;
+    onEvent?.(event);
     if (eventName === "token") {
       if (parsed.token) onToken?.(parsed.token);
     } else if (eventName === "reset") {
       onReset?.(parsed);
+    } else if (eventName === "warning") {
+      onWarning?.(parsed);
+    } else if (eventName === "validation_error") {
+      onValidationError?.(parsed);
     } else if (eventName === "done") {
       receivedTerminalEvent = true;
       onDone?.(parsed);
     } else if (eventName === "error") {
       receivedTerminalEvent = true;
-      onError?.(new Error(parsed.error || "流式辅导出错"));
+      const errorCode = parsed.error || parsed.detail || "";
+      const capacityExceeded = errorCode === "TUTOR_STREAM_CAPACITY_EXCEEDED";
+      const error = new Error(capacityExceeded ? "辅导请求较多，请稍后重试。" : errorCode || "流式辅导出错");
+      error.code = errorCode;
+      error.sseTerminal = !capacityExceeded;
+      error.retryable = capacityExceeded;
+      const retryAfterSeconds = Number(parsed.retry_after);
+      if (capacityExceeded && Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0) {
+        error.retryAfterMs = retryAfterSeconds * 1000;
+      }
+      onError?.(error, event);
     }
   };
 
@@ -343,11 +498,17 @@ async function streamSsePost(url, payload, { onToken, onDone, onReset, onError, 
     buffer = buffer.replace(/\r\n/g, "\n");
     // 冲刷残余
     if (buffer.trim()) dispatch(buffer);
-    if (!receivedTerminalEvent) {
-      onError?.(new Error("辅导连接意外结束，输入已保留，请重试。"));
+    if (!receivedTerminalEvent && !signal?.aborted) {
+      const error = new Error("辅导连接意外结束，输入已保留，请重试。");
+      error.retryable = true;
+      onError?.(error);
     }
   } catch (err) {
-    if (err?.name !== "AbortError") onError?.(err);
+    if (err?.name !== "AbortError" && !signal?.aborted) {
+      const error = err instanceof Error ? err : new Error("Tutor stream disconnected.");
+      error.retryable = true;
+      onError?.(error);
+    }
   }
 }
 
@@ -358,31 +519,57 @@ async function streamSseGet(url, {
   onCardFailed,
   onCompleted,
   onFailed,
+  onCancelled,
   onError,
   signal,
   lastEventId = "",
+  requestId = "",
 } = {}) {
-  const token = tokenStore.getAccessToken();
+  const streamRequestId = requestId || createRequestId();
+  const request = (token) => fetch(url, {
+    method: "GET",
+    headers: {
+      Accept: "text/event-stream",
+      "X-Request-ID": streamRequestId,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(lastEventId ? { "Last-Event-ID": String(lastEventId) } : {}),
+    },
+    credentials: "include",
+    signal,
+  });
+
   let response;
   try {
-    response = await fetch(url, {
-      method: "GET",
-      headers: {
-        Accept: "text/event-stream",
-        "X-Request-ID": createRequestId(),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(lastEventId ? { "Last-Event-ID": lastEventId } : {}),
-      },
-      credentials: "include",
-      signal,
-    });
+    response = await request(tokenStore.getAccessToken());
+    if (response.status === 401 && !signal?.aborted) {
+      const accessToken = await refreshStoredTokens().catch(() => null);
+      if (!accessToken) {
+        forceLogout();
+        const authError = new Error("登录状态已失效，请重新登录。");
+        authError.status = 401;
+        authError.retryable = false;
+        throw authError;
+      }
+      response = await request(accessToken);
+    }
   } catch (error) {
-    if (error?.name !== "AbortError") onError?.(error);
+    if (error?.name !== "AbortError" && !signal?.aborted) {
+      const normalized = error instanceof Error ? error : new Error("SSE 请求失败。");
+      if (normalized.status === undefined && /401/.test(String(normalized.message))) normalized.status = 401;
+      normalized.retryable = !normalized.status;
+      onError?.(normalized);
+    }
     return;
   }
 
   if (!response.ok || !response.body) {
-    onError?.(new Error(`SSE request failed: HTTP ${response.status}`));
+    if (response.status === 401) forceLogout();
+    const error = new Error(response.status === 401
+      ? "登录状态已失效，请重新登录。"
+      : `SSE request failed: HTTP ${response.status}`);
+    error.status = response.status;
+    error.retryable = response.status >= 500 || response.status === 408 || response.status === 429;
+    onError?.(error);
     return;
   }
 
@@ -426,6 +613,10 @@ async function streamSseGet(url, {
       receivedTerminalEvent = true;
       onFailed?.(data, event);
     }
+    if (eventName === "cancelled") {
+      receivedTerminalEvent = true;
+      onCancelled?.(data, event);
+    }
   };
 
   try {
@@ -444,10 +635,18 @@ async function streamSseGet(url, {
     buffer = buffer.replace(/\r\n/g, "\n");
     if (buffer.trim()) dispatch(buffer);
     if (!receivedTerminalEvent && !signal?.aborted) {
-      onError?.(new Error("Resource generation stream ended before completion."));
+      const error = new Error("Resource generation stream ended before completion.");
+      error.retryable = true;
+      onError?.(error);
     }
   } catch (error) {
-    if (error?.name !== "AbortError") onError?.(error);
+    if (error?.name !== "AbortError" && !signal?.aborted) {
+      const normalized = error instanceof Error
+        ? error
+        : new Error("Resource generation stream disconnected.");
+      normalized.retryable = true;
+      onError?.(normalized);
+    }
   }
 }
 

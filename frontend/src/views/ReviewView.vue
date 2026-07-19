@@ -172,17 +172,23 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import ChatArea from "../components/ChatArea.vue";
 import apiClient from "../services/apiClient";
+import { streamSessionTutorWithReconnect } from "../services/eduAgentApi";
 
+const REVIEW_SESSION_ID = "student:data_structures";
 const router = useRouter();
 const loading = ref(true);
 const error = ref("");
 const dashboard = ref({ mistakes: [], today_queue: [], reinforcement_tasks: [] });
 const removingIds = ref([]);
 const retestOpen = ref(false);
+let tutorAbortController = null;
 
 function onDocClick() { retestOpen.value = false; }
 onMounted(() => document.addEventListener("click", onDocClick));
-onBeforeUnmount(() => document.removeEventListener("click", onDocClick));
+onBeforeUnmount(() => {
+  document.removeEventListener("click", onDocClick);
+  tutorAbortController?.abort();
+});
 
 const mistakes = computed(() => dashboard.value.mistakes || []);
 const todayQueue = computed(() => dashboard.value.today_queue || []);
@@ -197,33 +203,53 @@ const tutorSuggestions = [
   "请出一道类似的题目让我巩固一下",
 ];
 
-function onTutorSend({ text }) {
-  const userMsg = { id: `u-${Date.now()}`, role: "user", content: text };
+function patchTutorMessage(messageId, fields) {
+  const index = tutorMessages.value.findIndex((message) => message.id === messageId);
+  if (index < 0) return;
+  const messages = [...tutorMessages.value];
+  messages[index] = { ...messages[index], ...fields };
+  tutorMessages.value = messages;
+}
+
+async function onTutorSend({ text }) {
+  const question = String(text || "").trim();
+  if (!question || tutorBusy.value) return;
+  const userMsg = { id: `u-${Date.now()}`, role: "user", content: question };
   tutorMessages.value = [...tutorMessages.value, userMsg];
   const aid = `a-${Date.now()}`;
   tutorMessages.value = [...tutorMessages.value, { id: aid, role: "assistant", content: "", isStreaming: true }];
   tutorBusy.value = true;
-  apiClient.post(`/sessions/${encodeURIComponent("student:data_structures")}/tutor-stream`, { question: text }, {
-    responseType: "stream",
-    onDownloadProgress(e) {
-      const chunk = e?.event?.target?.response || e?.currentTarget?.response || "";
-      chunk.split("\n").filter(l => l.startsWith("data: ")).forEach(line => {
-        try {
-          const d = JSON.parse(line.slice(6));
-          if (d.token) {
-            const idx = tutorMessages.value.findIndex(m => m.id === aid);
-            if (idx >= 0) { const msgs = [...tutorMessages.value]; msgs[idx] = { ...msgs[idx], content: msgs[idx].content + d.token }; tutorMessages.value = msgs; }
-          }
-        } catch (_) {}
-      });
-    },
-  }).then(() => {
-    const idx = tutorMessages.value.findIndex(m => m.id === aid);
-    if (idx >= 0) { const msgs = [...tutorMessages.value]; msgs[idx] = { ...msgs[idx], isStreaming: false }; tutorMessages.value = msgs; }
-  }).catch(() => {
-    const idx = tutorMessages.value.findIndex(m => m.id === aid);
-    if (idx >= 0) { const msgs = [...tutorMessages.value]; msgs[idx] = { ...msgs[idx], isStreaming: false, content: msgs[idx].content || "辅导服务暂不可用。" }; tutorMessages.value = msgs; }
-  }).finally(() => { tutorBusy.value = false; });
+  const controller = new AbortController();
+  tutorAbortController = controller;
+  let accumulated = "";
+  const fail = (error) => patchTutorMessage(aid, {
+    content: accumulated || (error?.status === 401 ? "登录状态已失效，请重新登录。" : "辅导服务暂不可用。"),
+    isStreaming: false,
+    streamStatus: "error",
+  });
+
+  try {
+    await streamSessionTutorWithReconnect(REVIEW_SESSION_ID, { question }, {
+      signal: controller.signal,
+      onToken(token) {
+        accumulated += token;
+        patchTutorMessage(aid, { content: accumulated });
+      },
+      onReset() {
+        accumulated = "";
+        patchTutorMessage(aid, { content: "" });
+      },
+      onDone() {
+        patchTutorMessage(aid, { isStreaming: false, streamStatus: "complete" });
+      },
+      onError: fail,
+    });
+  } catch (error) {
+    fail(error);
+  } finally {
+    if (tutorAbortController === controller) tutorAbortController = null;
+    tutorBusy.value = false;
+  }
 }
 
 function goBack() { router.push("/app"); }
