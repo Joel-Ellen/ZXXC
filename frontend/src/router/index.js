@@ -2,6 +2,8 @@ import { createRouter, createWebHistory } from "vue-router";
 
 const LandingView = () => import("../components/LandingView.vue");
 const AppWorkspaceView = () => import("../views/AppWorkspaceView.vue");
+const ReviewView = () => import("../views/ReviewView.vue");
+const RetestView = () => import("../views/RetestView.vue");
 
 const router = createRouter({
   history: createWebHistory(),
@@ -15,6 +17,16 @@ const router = createRouter({
       path: "/app",
       name: "app-workspace",
       component: AppWorkspaceView,
+    },
+    {
+      path: "/review",
+      name: "review",
+      component: ReviewView,
+    },
+    {
+      path: "/review/retest",
+      name: "retest",
+      component: RetestView,
     },
     {
       path: "/:pathMatch(.*)*",

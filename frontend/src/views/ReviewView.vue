@@ -1,361 +1,290 @@
 <template>
-  <AppPageFrame>
-    <main class="px-4 py-6 sm:px-6 lg:px-8" :aria-busy="viewState === 'loading' ? 'true' : 'false'">
-      <div class="mx-auto flex w-full max-w-6xl flex-col gap-6">
-        <header class="border-b border-subtle pb-6">
-          <p class="text-xs font-semibold text-text-muted">复习中心</p>
-          <div class="mt-2 flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <h1 class="text-2xl font-black text-text-primary">今天的补救任务</h1>
-              <p class="mt-2 max-w-2xl text-sm leading-7 text-text-secondary">每一项均来自服务端已验证的学习结果，完成复测后才会关闭。</p>
+  <div class="h-screen flex flex-col" :style="{ background: 'var(--space-bg)', color: 'var(--text-primary)' }">
+    <header class="sticky top-0 z-20 border-b border-subtle backdrop-blur-lg shrink-0" style="background:color-mix(in srgb, var(--space-panel) 96%, transparent);min-height:4rem">
+      <div class="mx-auto flex h-16 max-w-6xl items-center justify-between px-5">
+        <div class="flex items-center gap-4">
+          <button type="button" class="focus-ring rounded-lg px-3 py-1.5 text-sm font-medium text-text-secondary hover:text-text-primary transition-colors" @click="goBack">&larr; 返回工作台</button>
+          <div class="flex items-center gap-2">
+            <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-[10px] font-black text-primary-text">错</span>
+            <h1 class="text-base font-bold text-text-primary">错题本</h1>
+          </div>
+        </div>
+        <div class="flex items-center gap-3">
+          <div v-if="totalCount" class="relative">
+            <button type="button" class="focus-ring flex items-center gap-1 rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-primary-text transition-colors hover:bg-primary-dark" @click.stop="retestOpen = !retestOpen">重新刷题<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></button>
+            <div v-if="retestOpen" class="absolute right-0 top-full mt-1 rounded-xl border border-subtle bg-card shadow-lg py-1 min-w-[160px] z-50" @click.stop>
+              <button type="button" class="focus-ring w-full px-4 py-2 text-left text-xs text-text-secondary hover:text-text-primary hover:bg-card-hover transition-colors" @click="goRetest('today')">重刷今日错题</button>
+              <button type="button" class="focus-ring w-full px-4 py-2 text-left text-xs text-text-secondary hover:text-text-primary hover:bg-card-hover transition-colors" @click="goRetest('all')">重刷全部错题</button>
             </div>
-            <button
-              type="button"
-              class="workspace-shell-btn focus-ring min-h-[44px] px-4 py-2 text-sm font-semibold"
-              :disabled="viewState === 'loading' || viewState === 'not_loaded' || viewState === 'missing_session'"
-              @click="loadDashboard({ announce: true })"
+          </div>
+          <span class="text-xs text-text-muted">数据结构与算法</span>
+        </div>
+      </div>
+    </header>
+
+    <div class="flex-1 flex min-h-0">
+    <main class="flex-1 overflow-y-auto mx-auto max-w-3xl px-5 py-8">
+      <div v-if="loading" class="flex items-center justify-center py-20">
+        <div class="flex items-center gap-2 text-text-muted">
+          <span class="h-4 w-4 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+          加载错题数据...
+        </div>
+      </div>
+
+      <div v-else-if="error" class="rounded-xl border border-error-soft bg-error-soft/30 p-6 text-center">
+        <p class="text-sm text-error">{{ error }}</p>
+        <button type="button" class="focus-ring mt-3 rounded-lg bg-primary px-4 py-2 text-xs font-medium text-primary-text" @click="fetchData">重试</button>
+      </div>
+
+      <template v-else>
+        <!-- 今日错题 -->
+        <section v-if="todayQueue.length" class="mb-8">
+          <h2 class="mb-4 flex items-center gap-2 text-sm font-semibold">
+            <span class="h-2 w-2 rounded-full bg-warning" />
+            今日错题
+            <span class="rounded-full bg-warning-soft px-2 py-0.5 text-xs text-warning-dark">{{ todayQueue.length }}</span>
+          </h2>
+          <div class="space-y-3">
+            <article
+              v-for="item in todayQueue"
+              :key="item.review_item_id"
+              class="rounded-xl border border-subtle bg-card p-4 transition-all duration-300"
+              :class="removingIds.includes(item.review_item_id) ? 'opacity-0 translate-x-4 scale-95' : 'hover:border-warning/30'"
             >
-              {{ viewState === 'loading' ? '刷新中...' : '刷新队列' }}
-            </button>
-          </div>
-        </header>
-
-        <section v-if="viewState === 'not_loaded'" class="workspace-shell-card px-5 py-8 text-center sm:px-6" role="status">
-          <h2 class="text-lg font-black text-text-primary">复习数据尚未加载</h2>
-          <p class="mt-2 text-sm leading-6 text-text-secondary">正在确认当前课程和学习会话，完成后再显示真实复习记录。</p>
-        </section>
-
-        <section v-else-if="viewState === 'loading'" class="workspace-shell-card px-5 py-6 sm:px-6" role="status" aria-live="polite">
-          <p class="text-sm font-semibold text-text-primary">正在从服务端同步复习队列</p>
-          <div class="mt-4 grid gap-3">
-            <span class="h-16 animate-pulse bg-card-hover" />
-            <span class="h-16 animate-pulse bg-card-hover" />
-          </div>
-        </section>
-
-        <section v-else-if="viewState === 'missing_session'" class="workspace-shell-card px-5 py-8 text-center sm:px-6" role="alert">
-          <h2 class="text-lg font-black text-text-primary">尚未建立可读取的学习会话</h2>
-          <p class="mx-auto mt-2 max-w-xl text-sm leading-6 text-text-secondary">{{ missingSessionMessage }}</p>
-          <button type="button" class="workspace-shell-btn workspace-shell-btn--accent focus-ring mt-5 min-h-[44px] px-4 py-2 text-sm font-semibold" @click="continueLearning">
-            {{ activeCourse?.course_id ? '进入当前学习任务' : '前往课程中心' }}
-          </button>
-        </section>
-
-        <section v-else-if="viewState === 'error'" class="workspace-shell-card px-5 py-8 text-center sm:px-6" role="alert">
-          <h2 class="text-lg font-black text-text-primary">复习队列加载失败</h2>
-          <p class="mx-auto mt-2 max-w-xl text-sm leading-6 text-error">{{ loadError }}</p>
-          <button type="button" class="workspace-shell-btn workspace-shell-btn--accent focus-ring mt-5 min-h-[44px] px-4 py-2 text-sm font-semibold" @click="loadDashboard({ announce: true })">
-            重新加载
-          </button>
-        </section>
-
-        <p v-if="refreshNotice" class="border border-success/30 bg-success-soft px-4 py-3 text-sm text-text-primary" role="status" aria-live="polite">
-          {{ refreshNotice }}
-        </p>
-
-        <p v-if="actionError" class="border border-error/30 bg-error-soft px-4 py-3 text-sm text-text-primary" role="alert">
-          {{ actionError }}
-        </p>
-
-        <template v-if="viewState === 'ready'">
-        <section class="workspace-shell-card px-5 py-5 sm:px-6" aria-labelledby="today-review-heading">
-          <div class="flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <p class="text-xs font-semibold text-text-muted">今日队列</p>
-              <h2 id="today-review-heading" class="mt-1 text-lg font-black text-text-primary">{{ todayQueue.length ? `${todayQueue.length} 项需要处理` : '没有到期复习' }}</h2>
-            </div>
-            <p class="text-sm text-text-secondary">{{ dueSummary }}</p>
-          </div>
-
-          <div v-if="todayQueue.length" class="mt-5 divide-y divide-subtle">
-            <article v-for="item in todayQueue" :key="item.review_item_id" class="grid gap-4 py-4 first:pt-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-              <div class="min-w-0">
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="text-xs font-bold text-warning">{{ errorTypeLabel(item.error_type) }}</span>
-                  <span class="text-xs text-text-muted">{{ item.node_title || item.related_node }}</span>
-                  <span class="text-xs text-text-muted">{{ statusLabel(item.status) }}</span>
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-center gap-2 mb-2">
+                    <span class="rounded-full bg-warning-soft px-2 py-0.5 text-xs font-semibold text-warning-dark">{{ errorLabel(item.error_type) }}</span>
+                    <span class="text-sm text-text-muted">{{ item.node_title || item.node_id }}</span>
+                  </div>
+                  <p class="text-sm leading-6 text-text-primary">{{ item.question_prompt }}</p>
+                  <div class="mt-3 space-y-1.5 text-sm">
+                    <div class="text-text-muted">你的答案：<span class="text-error font-medium">{{ item.original_answer || '未作答' }}</span></div>
+                    <div class="text-text-muted">正确答案：<span class="text-success font-medium">{{ item.correct_answer }}</span></div>
+                  </div>
+                  <p v-if="item.explanation" class="mt-2 rounded-lg bg-[#FAFCFB] px-3 py-2 text-sm leading-6 text-text-secondary">
+                    <span class="font-semibold text-text-muted">解析：</span>{{ item.explanation }}
+                  </p>
                 </div>
-                <p class="mt-2 text-sm font-semibold leading-6 text-text-primary">{{ item.question_prompt || '需要复盘的诊断题' }}</p>
-                <p class="mt-1 text-sm leading-6 text-text-secondary">{{ item.explanation || '先核对答案，再完成定向练习。' }}</p>
+                <button type="button" class="focus-ring shrink-0 rounded-lg p-1.5 text-text-muted hover:text-error hover:bg-error-soft transition-colors" title="删除" @click="removeItem(item.review_item_id)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+                </button>
               </div>
-              <button
-                type="button"
-                class="workspace-shell-btn workspace-shell-btn--accent focus-ring min-h-[44px] px-4 py-2 text-sm font-semibold"
-                :disabled="Boolean(actionItemId)"
-                @click="startReview(item)"
-              >
-                {{ actionItemId === item.review_item_id ? '准备中...' : item.status === 'in_progress' ? '继续补救' : '开始补救' }}
-              </button>
             </article>
           </div>
-
-          <div v-else class="mt-5 flex flex-col items-start gap-3 border-t border-subtle pt-5 sm:flex-row sm:items-center sm:justify-between">
-            <p class="text-sm leading-6 text-text-secondary">服务端已确认当前没有到期复习任务。继续完成当前节点的学习材料，新的真实错误会自动进入这里。</p>
-            <button type="button" class="workspace-shell-btn workspace-shell-btn--secondary focus-ring min-h-[44px] px-4 py-2 text-sm font-semibold" @click="continueLearning">
-              返回当前学习任务
-            </button>
-          </div>
         </section>
 
-        <section class="workspace-shell-card px-5 py-5 sm:px-6" aria-labelledby="mistake-book-heading">
-          <div class="flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <p class="text-xs font-semibold text-text-muted">错题本</p>
-              <h2 id="mistake-book-heading" class="mt-1 text-lg font-black text-text-primary">逐题复盘</h2>
-            </div>
-            <p class="text-sm text-text-secondary">{{ mistakes.length }} 条记录</p>
-          </div>
-
-          <div v-if="!loading && !mistakes.length" class="mt-5 border-t border-subtle pt-5 text-sm leading-6 text-text-secondary">
-            尚未形成可复盘的错题记录。
-          </div>
-
-          <div v-else class="mt-5 divide-y divide-subtle">
-            <details v-for="item in mistakes" :key="item.review_item_id" class="group py-4 first:pt-0">
-              <summary class="min-h-11 cursor-pointer list-none py-2 pr-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-                <div class="flex flex-wrap items-center justify-between gap-3">
-                  <div class="min-w-0">
-                    <p class="text-sm font-semibold text-text-primary">{{ item.question_prompt || item.question_id }}</p>
-                    <p class="mt-1 text-xs text-text-muted">{{ item.node_title || item.related_node }} · {{ errorTypeLabel(item.error_type) }} · {{ statusLabel(item.status) }}</p>
+        <!-- 全部错题 -->
+        <section v-if="mistakes.length">
+          <h2 class="mb-4 flex items-center gap-2 text-sm font-semibold">
+            <span class="h-2 w-2 rounded-full bg-error" />
+            全部错题
+            <span class="rounded-full bg-error-soft px-2 py-0.5 text-xs text-error">{{ mistakes.length }}</span>
+          </h2>
+          <TransitionGroup name="mistake" tag="div" class="space-y-3">
+            <article
+              v-for="item in mistakes"
+              :key="item.review_item_id"
+              class="rounded-xl border border-subtle bg-card p-4 transition-all duration-200"
+              :class="item.status === 'due' ? 'border-l-2 border-l-warning' : ''"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-center gap-2 mb-2">
+                    <span class="rounded-full bg-error-soft px-2 py-0.5 text-xs font-semibold text-error">{{ errorLabel(item.error_type) }}</span>
+                    <span class="text-sm text-text-muted">{{ item.node_title || item.node_id }}</span>
+                    <span class="ml-auto text-[10px] text-text-muted">{{ statusLabel(item.status) }}</span>
                   </div>
-                  <span class="text-xs text-text-muted">{{ formatDate(item.updated_at) }}</span>
+                  <p class="text-sm leading-6 text-text-primary">{{ item.question_prompt }}</p>
+                  <div class="mt-3 space-y-1.5 text-sm">
+                    <div class="text-text-muted">你的答案：<span class="text-error font-medium">{{ item.original_answer || '未作答' }}</span></div>
+                    <div class="text-text-muted">正确答案：<span class="text-success font-medium">{{ item.correct_answer }}</span></div>
+                  </div>
+                  <p v-if="item.explanation" class="mt-2 rounded-lg bg-[#FAFCFB] px-3 py-2 text-sm leading-6 text-text-secondary">
+                    <span class="font-semibold text-text-muted">解析：</span>{{ item.explanation }}
+                  </p>
                 </div>
-              </summary>
-              <div class="mt-4 grid gap-4 border-t border-subtle pt-4 text-sm leading-6 sm:grid-cols-2">
-                <div><p class="text-xs text-text-muted">原答案</p><p class="mt-1 text-text-secondary">{{ item.original_answer || '未作答' }}</p></div>
-                <div><p class="text-xs text-text-muted">正确答案</p><p class="mt-1 text-success">{{ item.correct_answer || '以服务端判定为准' }}</p></div>
-                <div class="sm:col-span-2"><p class="text-xs text-text-muted">解析</p><p class="mt-1 text-text-secondary">{{ item.explanation || '暂无解析。' }}</p></div>
-                <div class="sm:col-span-2"><p class="text-xs text-text-muted">下次复习</p><p class="mt-1 text-text-secondary">{{ item.status === 'completed' ? '已完成复测' : formatDate(item.next_review_at) }}</p></div>
+                <button type="button" class="focus-ring shrink-0 rounded-lg p-1.5 text-text-muted hover:text-error hover:bg-error-soft transition-colors" title="删除" @click="removeItem(item.review_item_id)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+                </button>
               </div>
-            </details>
+            </article>
+          </TransitionGroup>
+        </section>
+
+        <!-- 强化任务 -->
+        <section v-if="reinforcementTasks.length" class="mt-8">
+          <h2 class="mb-4 flex items-center gap-2 text-sm font-semibold">
+            <span class="h-2 w-2 rounded-full bg-info" />
+            掌握强化
+            <span class="rounded-full bg-info-soft px-2 py-0.5 text-xs text-info-dark">{{ reinforcementTasks.length }}</span>
+          </h2>
+          <div class="space-y-3">
+            <article
+              v-for="item in reinforcementTasks"
+              :key="item.review_item_id"
+              class="rounded-xl border border-subtle bg-card p-4 transition-all duration-300"
+              :class="removingIds.includes(item.review_item_id) ? 'opacity-0 translate-x-4 scale-95' : ''"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-center gap-2 mb-2">
+                    <span class="rounded-full bg-info-soft px-2 py-0.5 text-[10px] font-semibold text-info-dark">强化</span>
+                    <span class="text-sm text-text-muted">{{ item.node_title || item.node_id }}</span>
+                  </div>
+                  <p class="text-sm leading-6 text-text-primary">{{ item.question_prompt }}</p>
+                </div>
+                <button type="button" class="focus-ring shrink-0 rounded-lg p-1.5 text-text-muted hover:text-error hover:bg-error-soft transition-colors" title="删除" @click="removeItem(item.review_item_id)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+                </button>
+              </div>
+            </article>
           </div>
         </section>
 
-        <div class="grid gap-6 lg:grid-cols-2">
-          <section class="workspace-shell-card px-5 py-5 sm:px-6" aria-labelledby="weak-nodes-heading">
-            <p class="text-xs font-semibold text-text-muted">薄弱知识点</p>
-            <h2 id="weak-nodes-heading" class="mt-1 text-lg font-black text-text-primary">优先处理的节点</h2>
-            <div v-if="weakNodes.length" class="mt-5 divide-y divide-subtle">
-              <article v-for="node in weakNodes" :key="node.node_id" class="py-3 first:pt-0">
-                <div class="flex items-center justify-between gap-3">
-                  <p class="min-w-0 truncate text-sm font-semibold text-text-primary">{{ node.node_title }}</p>
-                  <p class="shrink-0 text-sm font-bold text-warning">{{ toPercent(node.mastery) }}</p>
-                </div>
-                <div class="mt-2 h-2 overflow-hidden bg-card-hover" aria-hidden="true"><span class="block h-full bg-warning" :style="{ width: `${Math.max(0, Math.min(100, node.mastery * 100))}%` }" /></div>
-                <p class="mt-2 text-xs leading-5 text-text-muted">{{ node.outstanding_count }} 条待处理错题 · {{ node.error_types.map(errorTypeLabel).join('、') || '已由真实诊断识别' }}</p>
-              </article>
-            </div>
-            <p v-else class="mt-5 text-sm leading-6 text-text-secondary">当前没有由掌握度或错题记录识别出的薄弱节点。</p>
-          </section>
-
-          <section class="workspace-shell-card px-5 py-5 sm:px-6" aria-labelledby="mastery-trend-heading">
-            <p class="text-xs font-semibold text-text-muted">掌握度变化趋势</p>
-            <h2 id="mastery-trend-heading" class="mt-1 text-lg font-black text-text-primary">每次真实证据带来的变化</h2>
-            <div v-if="masteryTrend.length" class="mt-5 divide-y divide-subtle">
-              <article v-for="point in masteryTrend" :key="`${point.event_id}-${point.recorded_at}`" class="py-3 first:pt-0">
-                <div class="flex items-center justify-between gap-3 text-sm">
-                  <p class="min-w-0 truncate font-semibold text-text-primary">{{ point.node_title }}</p>
-                  <p class="shrink-0 font-bold" :class="point.mastery_delta >= 0 ? 'text-success' : 'text-error'">{{ signedPercent(point.mastery_delta) }}</p>
-                </div>
-                <div class="mt-2 h-2 overflow-hidden bg-card-hover" aria-hidden="true"><span class="block h-full bg-primary" :style="{ width: `${Math.max(0, Math.min(100, point.mastery_after * 100))}%` }" /></div>
-                <p class="mt-2 text-xs text-text-muted">{{ toPercent(point.mastery_before) }} → {{ toPercent(point.mastery_after) }} · {{ formatDate(point.recorded_at) }}</p>
-                <p class="mt-1 text-xs leading-5 text-text-secondary">{{ masteryReasonLabel(point.reason) }}<span v-if="point.evidence_summary"> · {{ point.evidence_summary }}</span></p>
-                <details class="mt-2 text-xs text-text-muted">
-                  <summary class="focus-ring flex min-h-11 cursor-pointer items-center py-2">查看归因凭据</summary>
-                  <dl class="grid gap-2 border-t border-subtle py-3">
-                    <div><dt class="inline font-semibold text-text-secondary">事件 ID：</dt><dd class="inline break-all">{{ point.event_id || '未记录' }}</dd></div>
-                    <div><dt class="inline font-semibold text-text-secondary">事件类型：</dt><dd class="inline">{{ point.event_type || '未知' }}</dd></div>
-                    <div><dt class="inline font-semibold text-text-secondary">资源 ID：</dt><dd class="inline break-all">{{ point.resource_id || '未记录' }}</dd></div>
-                  </dl>
-                </details>
-              </article>
-            </div>
-            <p v-else class="mt-5 text-sm leading-6 text-text-secondary">完成一次服务端可验证的诊断或代码提交后，这里会显示掌握度变化。</p>
-          </section>
+        <!-- 空 -->
+        <div v-if="!mistakes.length && !todayQueue.length && !reinforcementTasks.length" class="flex flex-col items-center justify-center py-20 text-center">
+          <div class="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-success-soft">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--color-success)" stroke-width="1.5" stroke-linecap="round">
+              <path d="M20 6L9 17l-5-5" />
+            </svg>
+          </div>
+          <h2 class="text-base font-bold text-text-primary">没有错题记录</h2>
+          <p class="mt-2 text-sm text-text-muted">继续学习，提交诊断测验后会在这里看到需要复习的题目。</p>
         </div>
-
-        <section class="workspace-shell-card px-5 py-5 sm:px-6" aria-labelledby="diagnostic-report-heading">
-          <p class="text-xs font-semibold text-text-muted">诊断报告详情</p>
-          <h2 id="diagnostic-report-heading" class="mt-1 text-lg font-black text-text-primary">{{ latestDiagnosticTitle }}</h2>
-          <div v-if="latestDiagnostic" class="mt-4 grid gap-3 border-y border-subtle py-4 text-sm sm:grid-cols-3">
-            <div><p class="text-xs text-text-muted">节点</p><p class="mt-1 font-semibold text-text-primary">{{ latestDiagnostic.node_title }}</p></div>
-            <div><p class="text-xs text-text-muted">正确率</p><p class="mt-1 font-semibold text-text-primary">{{ toPercent(latestDiagnostic.correctness) }}</p></div>
-            <div><p class="text-xs text-text-muted">题目结果</p><p class="mt-1 font-semibold text-text-primary">{{ latestDiagnostic.correct_count }}/{{ latestDiagnostic.question_count }}</p></div>
-          </div>
-          <pre v-if="diagnosticMarkdown" class="mt-4 max-h-80 overflow-auto whitespace-pre-wrap font-sans text-sm leading-7 text-text-secondary">{{ diagnosticMarkdown }}</pre>
-          <p v-else class="mt-4 text-sm leading-6 text-text-secondary">完成诊断后会显示服务端生成的报告详情。</p>
-        </section>
-        </template>
-      </div>
+      </template>
     </main>
-  </AppPageFrame>
+
+    <aside class="hidden lg:flex flex-col shrink-0 border-l border-subtle" style="width:360px">
+      <div class="px-4 pt-3 pb-2 shrink-0">
+        <p class="text-xs font-semibold text-text-muted">错题辅导</p>
+      </div>
+      <div class="flex-1 min-h-0">
+        <ChatArea :messages="tutorMessages" :busy="tutorBusy" :node-title="'错题复习'" :boot-mode="'ready'" session-id="student:data_structures" node-id="N01" :suggestions="tutorSuggestions" @send="onTutorSend" />
+      </div>
+    </aside>
+    </div>
+  </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import AppPageFrame from "../components/AppPageFrame.vue";
-import { useEduAgent } from "../composables/useEduAgent";
-import { fetchSessionReviewDashboard, startSessionReviewItem } from "../services/eduAgentApi";
+import ChatArea from "../components/ChatArea.vue";
+import apiClient from "../services/apiClient";
 
 const router = useRouter();
-const dashboard = ref(null);
-const viewState = ref("not_loaded");
-const loadError = ref("");
-const actionError = ref("");
-const refreshNotice = ref("");
-const actionItemId = ref("");
-const loading = computed(() => viewState.value === "loading");
+const loading = ref(true);
+const error = ref("");
+const dashboard = ref({ mistakes: [], today_queue: [], reinforcement_tasks: [] });
+const removingIds = ref([]);
+const retestOpen = ref(false);
 
-const {
-  activeCourse,
-  bootMode,
-  bootstrap,
-  currentNode,
-  currentPathNodes,
-  sessionId,
-} = useEduAgent();
+function onDocClick() { retestOpen.value = false; }
+onMounted(() => document.addEventListener("click", onDocClick));
+onBeforeUnmount(() => document.removeEventListener("click", onDocClick));
 
-const todayQueue = computed(() => Array.isArray(dashboard.value?.today_queue) ? dashboard.value.today_queue : []);
-const mistakes = computed(() => Array.isArray(dashboard.value?.mistakes) ? dashboard.value.mistakes : []);
-const weakNodes = computed(() => Array.isArray(dashboard.value?.weak_nodes) ? dashboard.value.weak_nodes : []);
-const masteryTrend = computed(() => (
-  Array.isArray(dashboard.value?.mastery_trend) ? dashboard.value.mastery_trend.slice(-12).reverse() : []
-));
-const diagnosticMarkdown = computed(() => dashboard.value?.diagnostic_report?.markdown || "");
-const latestDiagnostic = computed(() => dashboard.value?.diagnostic_report?.latest || null);
-const latestDiagnosticTitle = computed(() => latestDiagnostic.value ? "最近一次已验证诊断" : "等待诊断记录");
-const dueSummary = computed(() => todayQueue.value.length ? "按到期时间排序" : "服务端已确认无到期任务");
-const missingSessionMessage = computed(() => {
-  if (bootMode.value === "login") return "当前登录状态无法恢复，请重新登录后再读取复习记录。";
-  if (bootMode.value === "probe") return "请先完成当前课程的入学诊断，系统建立学习会话后才能读取复习记录。";
-  return "当前课程还没有有效学习会话，请先进入一个学习节点，再返回复习中心。";
-});
+const mistakes = computed(() => dashboard.value.mistakes || []);
+const todayQueue = computed(() => dashboard.value.today_queue || []);
+const reinforcementTasks = computed(() => dashboard.value.reinforcement_tasks || []);
+const totalCount = computed(() => mistakes.value.length + reinforcementTasks.value.length);
 
-onMounted(async () => {
-  viewState.value = "loading";
-  try {
-    await bootstrap();
-    if (bootMode.value === "course_selection") {
-      await router.replace({ name: "courses" });
-      return;
-    }
-    await loadDashboard();
-  } catch (error) {
-    loadError.value = error?.response?.data?.detail || error?.message || "无法恢复当前学习会话。";
-    viewState.value = "error";
-  }
-});
+const tutorMessages = ref([]);
+const tutorBusy = ref(false);
+const tutorSuggestions = [
+  "这道题考察了什么知识点？",
+  "帮我分析一下这个错题的错误原因",
+  "请出一道类似的题目让我巩固一下",
+];
 
-async function loadDashboard({ announce = false } = {}) {
-  refreshNotice.value = "";
-  actionError.value = "";
-  if (!sessionId.value) {
-    dashboard.value = null;
-    loadError.value = "";
-    viewState.value = "missing_session";
-    return;
-  }
-  viewState.value = "loading";
-  loadError.value = "";
-  try {
-    const payload = await fetchSessionReviewDashboard(sessionId.value);
-    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-      throw new Error("服务端未返回有效的复习队列。请重试。");
-    }
-    dashboard.value = payload;
-    viewState.value = "ready";
-    if (announce) {
-      refreshNotice.value = todayQueue.value.length
-        ? `刷新完成，服务端返回 ${todayQueue.value.length} 项到期复习任务。`
-        : "刷新完成，服务端确认当前没有到期复习任务。";
-    }
-  } catch (error) {
-    loadError.value = error?.response?.data?.detail || error?.message || "无法加载复习队列，请重试。";
-    viewState.value = "error";
-  }
+function onTutorSend({ text }) {
+  const userMsg = { id: `u-${Date.now()}`, role: "user", content: text };
+  tutorMessages.value = [...tutorMessages.value, userMsg];
+  const aid = `a-${Date.now()}`;
+  tutorMessages.value = [...tutorMessages.value, { id: aid, role: "assistant", content: "", isStreaming: true }];
+  tutorBusy.value = true;
+  apiClient.post(`/sessions/${encodeURIComponent("student:data_structures")}/tutor-stream`, { question: text }, {
+    responseType: "stream",
+    onDownloadProgress(e) {
+      const chunk = e?.event?.target?.response || e?.currentTarget?.response || "";
+      chunk.split("\n").filter(l => l.startsWith("data: ")).forEach(line => {
+        try {
+          const d = JSON.parse(line.slice(6));
+          if (d.token) {
+            const idx = tutorMessages.value.findIndex(m => m.id === aid);
+            if (idx >= 0) { const msgs = [...tutorMessages.value]; msgs[idx] = { ...msgs[idx], content: msgs[idx].content + d.token }; tutorMessages.value = msgs; }
+          }
+        } catch (_) {}
+      });
+    },
+  }).then(() => {
+    const idx = tutorMessages.value.findIndex(m => m.id === aid);
+    if (idx >= 0) { const msgs = [...tutorMessages.value]; msgs[idx] = { ...msgs[idx], isStreaming: false }; tutorMessages.value = msgs; }
+  }).catch(() => {
+    const idx = tutorMessages.value.findIndex(m => m.id === aid);
+    if (idx >= 0) { const msgs = [...tutorMessages.value]; msgs[idx] = { ...msgs[idx], isStreaming: false, content: msgs[idx].content || "辅导服务暂不可用。" }; tutorMessages.value = msgs; }
+  }).finally(() => { tutorBusy.value = false; });
 }
 
-async function startReview(item) {
-  if (!item?.review_item_id || actionItemId.value) return;
-  actionItemId.value = item.review_item_id;
-  actionError.value = "";
+function goBack() { router.push("/app"); }
+
+function goRetest(mode) {
+  retestOpen.value = false;
+  router.push(`/review/retest?mode=${mode}`);
+}
+
+function removeItem(id) {
+  removingIds.value.push(id);
+  setTimeout(() => {
+    dashboard.value.mistakes = dashboard.value.mistakes.filter(item => item.review_item_id !== id);
+    dashboard.value.today_queue = dashboard.value.today_queue.filter(item => item.review_item_id !== id);
+    dashboard.value.reinforcement_tasks = dashboard.value.reinforcement_tasks.filter(item => item.review_item_id !== id);
+    removingIds.value = removingIds.value.filter(rid => rid !== id);
+  }, 300);
+}
+
+async function fetchData() {
+  loading.value = true;
+  error.value = "";
   try {
-    const result = await startSessionReviewItem(sessionId.value, item.review_item_id);
-    const task = result?.learning_task;
-    if (result?.status !== "ok" || !task?.node_id || !activeCourse.value?.course_id) {
-      throw new Error(result?.detail || "无法开始当前补救任务。");
-    }
-    await router.push({
-      name: "learn",
-      params: { courseId: activeCourse.value.course_id, nodeId: task.node_id },
-      query: { reviewItem: item.review_item_id, reviewPhase: task.phase || "material_review" },
-    });
-  } catch (error) {
-    actionError.value = error?.response?.data?.detail || error?.message || "无法开始当前补救任务。";
+    const sessionId = "student:data_structures";
+    const { data } = await apiClient.get(`/sessions/${encodeURIComponent(sessionId)}/review`);
+    if (data && data.status === "ok") dashboard.value = data;
+  } catch (e) {
+    error.value = e?.response?.data?.detail || e?.message || "加载错题数据失败";
   } finally {
-    actionItemId.value = "";
+    loading.value = false;
   }
 }
 
-function continueLearning() {
-  const nodeId = currentNode.value || currentPathNodes.value[0]?.id;
-  if (!activeCourse.value?.course_id || !nodeId) {
-    void router.push({ name: "courses" });
-    return;
-  }
-  void router.push({ name: "learn", params: { courseId: activeCourse.value.course_id, nodeId } });
+function errorLabel(type) {
+  if (!type) return "其他";
+  const key = String(type).toLowerCase().replace(/[\s-]+/g, "_");
+  const map = {
+    definition: "概念不清", understanding: "理解有误", application: "不会应用",
+    concept: "概念错误", concept_understanding: "概念理解", concept_application: "概念应用",
+    syntax_error: "语法错误", wrong_answer: "答案错误", runtime_error: "运行错误",
+    time_limit: "超时", internal_error: "系统错误", code_error: "代码错误",
+    logic_error: "逻辑错误", memory_limit: "内存超限", output_error: "输出错误",
+    compilation_error: "编译错误", semantic_error: "语义错误", incomplete: "未完成",
+    boundary: "边界条件", boundary_condition: "边界条件", edge_case: "边界情况",
+    design_error: "设计错误", type_error: "类型错误", null_pointer: "空值错误",
+    off_by_one: "差一错误", infinite_loop: "死循环", stack_overflow: "栈溢出",
+    index_error: "索引错误", key_error: "键值错误", value_error: "数值错误",
+    timeout: "超时", resource_error: "资源错误", network_error: "网络错误",
+    assertion_error: "断言失败", arithmetic_error: "算术错误", overflow: "溢出",
+    underflow: "下溢", precision: "精度问题", rounding: "舍入错误",
+  };
+  return map[key] || "其他错误";
 }
+function statusLabel(status) { return status === "due" ? "待复习" : status === "in_progress" ? "复习中" : status === "completed" ? "已完成" : status || ""; }
 
-function errorTypeLabel(errorType) {
-  return {
-    concept_understanding: "概念理解偏差",
-    application_context: "适用场景判断偏差",
-    boundary_condition: "边界条件遗漏",
-    wrong_answer: "代码答案错误",
-    syntax_error: "代码语法错误",
-    runtime_error: "代码运行错误",
-    time_limit: "代码执行超时",
-    internal_error: "代码判题服务错误",
-    insufficient_evidence: "掌握证据待补强",
-  }[errorType] || "需要复盘";
-}
-
-function statusLabel(status) {
-  return {
-    due: "待复习",
-    in_progress: "进行中",
-    completed: "已完成",
-  }[status] || "待处理";
-}
-
-function toPercent(value) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? `${Math.round(numeric * 100)}%` : "--";
-}
-
-function signedPercent(value) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return "--";
-  return `${numeric >= 0 ? "+" : ""}${Math.round(numeric * 100)}%`;
-}
-
-function masteryReasonLabel(reason) {
-  return {
-    verified_diagnostic_quiz: "服务端诊断答案验证",
-    verified_code_submission: "隔离代码测试通过",
-  }[reason] || reason || "服务端验证学习证据";
-}
-
-function formatDate(value) {
-  if (!value) return "未安排";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "未安排";
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
+onMounted(fetchData);
 </script>
+
+<style scoped>
+.mistake-enter-active { transition: all 300ms cubic-bezier(0.16, 1, 0.3, 1); }
+.mistake-leave-active { transition: all 280ms cubic-bezier(0.16, 1, 0.3, 1); }
+.mistake-enter-from { opacity: 0; transform: translateY(8px); }
+.mistake-leave-to { opacity: 0; transform: translateX(16px) scale(0.96); }
+</style>

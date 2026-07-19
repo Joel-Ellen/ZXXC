@@ -169,6 +169,7 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 import SidebarDrawer from "./SidebarDrawer.vue";
 import IconChat from "./icons/IconChat.vue";
 import LearningPane from "./workspace/LearningPane.vue";
@@ -178,6 +179,7 @@ import WorkspaceShell from "./workspace/WorkspaceShell.vue";
 
 const PREFERENCES_KEY = "eduagent-workspace-preferences";
 const LEARN_PANEL_ID = "workspace-learn-panel";
+const router = useRouter();
 const COACH_PANEL_ID = "workspace-coach-panel";
 const DRAWER_PANEL_ID = "workspace-sidebar-drawer";
 
@@ -251,6 +253,7 @@ const workspaceNav = [
   { key: "path", label: "学习路径" },
   { key: "agents", label: "智能体协同" },
   { key: "evidence", label: "学习成果" },
+  { key: "review", label: "错题复习" },
 ];
 
 const dockActions = [
@@ -448,6 +451,10 @@ async function collapseTutor() {
 }
 
 async function handleNav(key) {
+  if (key === "review") {
+    router.push("/review");
+    return;
+  }
   if (WORKSPACE_VIEWS.has(key)) {
     if (key !== "study") {
       const panelKey = WORKSPACE_DRAWER_PANELS[key];

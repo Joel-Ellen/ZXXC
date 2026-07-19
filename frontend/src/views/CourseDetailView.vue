@@ -29,8 +29,8 @@
           <main class="min-w-0">
             <header class="border-b border-subtle pb-6">
               <div class="flex items-start gap-4">
-                <span class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-space-elevated text-2xl" aria-hidden="true">
-                  {{ courseView.icon || "📘" }}
+                <span class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-space-elevated text-text-secondary" aria-hidden="true">
+                  <CourseIcon :course-id="courseView.course_id" :icon="courseView.icon" :size="24" />
                 </span>
                 <div class="min-w-0">
                   <p class="text-xs font-semibold text-text-muted">{{ courseView.category || "课程" }}</p>
@@ -193,6 +193,7 @@
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import AppPageFrame from "../components/AppPageFrame.vue";
+import CourseIcon from "../components/icons/CourseIcon.vue";
 import { courseLifecycleErrorMessage, fetchCourseById } from "../services/courseLifecycleApi";
 import { useCourseLifecycleStore } from "../stores/courseLifecycle";
 

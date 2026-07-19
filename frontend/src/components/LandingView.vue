@@ -847,7 +847,7 @@
                   </div>
                 </div>
                 <span class="text-xs font-medium text-text-secondary">资源画布</span>
-                <span class="text-[10px] text-success -mt-2">资源装配完成 ✓</span>
+                <span class="text-[10px] text-success -mt-2">资源装配完成 <svg class="inline-block align-text-bottom" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
               </div>
             </div>
 
@@ -1001,7 +1001,7 @@
         <div class="grid gap-5 md:grid-cols-3">
           <div v-for="(t, idx) in testimonials" :key="t.name" class="reveal rounded-[28px] border border-subtle bg-card p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-card" :style="{ transitionDelay: `${idx * 100}ms` }">
             <div class="mb-4 flex gap-1">
-              <span v-for="s in 5" :key="s" class="text-warning">★</span>
+              <svg v-for="s in 5" :key="s" class="inline-block text-warning" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
             </div>
             <p class="text-sm font-light leading-relaxed text-text-secondary">{{ t.quote }}</p>
             <div class="mt-6 flex items-center gap-3">

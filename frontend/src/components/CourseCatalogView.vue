@@ -56,8 +56,8 @@
         >
           <div class="flex items-start justify-between gap-3">
             <div class="flex items-center gap-3">
-              <div class="flex h-12 w-12 items-center justify-center rounded-2xl border border-subtle bg-space-elevated text-2xl">
-                {{ course.icon || "📘" }}
+              <div class="flex h-12 w-12 items-center justify-center rounded-2xl border border-subtle bg-space-elevated text-text-secondary">
+                <CourseIcon :course-id="course.course_id" :icon="course.icon" :size="24" />
               </div>
               <div class="min-w-0">
                 <h2 class="truncate text-lg font-black tracking-tight text-text-primary">{{ course.title_cn }}</h2>
@@ -110,6 +110,8 @@
 </template>
 
 <script setup>
+import CourseIcon from "./icons/CourseIcon.vue";
+
 defineProps({
   courses: { type: Array, default: () => [] },
   categories: { type: Array, default: () => [] },

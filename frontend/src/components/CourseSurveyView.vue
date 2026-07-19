@@ -69,7 +69,7 @@
           <div class="survey-bubble survey-bubble--system max-w-[88%]">
             <p class="text-[10px] font-black uppercase tracking-[0.12em] text-primary mb-1.5">EduAgent</p>
             <p class="text-sm leading-7 text-text-primary">
-              太好了！我已经了解你的学习背景 🎉 点击下方按钮开始你的个性化学习之旅。
+              太好了！我已经了解你的学习背景。点击下方按钮开始你的个性化学习之旅。
             </p>
           </div>
         </div>
@@ -167,7 +167,9 @@
           <span v-if="busy" class="flex items-center justify-center gap-2">
             <span class="generating-dot" /><span class="generating-dot" /><span class="generating-dot" />
           </span>
-          <span v-else>✦ 生成个性化学习路径</span>
+          <span v-else>
+            <svg class="inline-block mr-1 align-text-bottom" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+            生成个性化学习路径</span>
         </button>
       </div>
 

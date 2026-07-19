@@ -457,6 +457,7 @@ onMounted(() => {
   const context = assetContext.value;
   restoreDraft(context);
   void restoreScrollPosition(context);
+  nextTick(() => scrollToBottom());
 });
 
 onBeforeUnmount(() => {

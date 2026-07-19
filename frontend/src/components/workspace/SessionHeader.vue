@@ -56,15 +56,6 @@
       >
         <IconSettings :size="18" />
       </button>
-      <button
-        type="button"
-        class="session-header__icon-button focus-ring"
-        title="重新测评"
-        aria-label="重新测评"
-        @click="$emit('navigate', 'probe')"
-      >
-        <IconQuiz :size="18" />
-      </button>
       <span class="session-header__user">{{ userLabel }}</span>
       <button type="button" class="session-header__logout focus-ring" @click="$emit('logout')">
         退出
@@ -79,7 +70,6 @@
 
 <script setup>
 import { computed } from "vue";
-import IconQuiz from "../icons/IconQuiz.vue";
 import IconSettings from "../icons/IconSettings.vue";
 import CourseSwitcher from "./CourseSwitcher.vue";
 

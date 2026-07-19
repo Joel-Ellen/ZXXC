@@ -111,8 +111,8 @@
               class="course-card flex min-w-0 flex-col rounded-lg border border-subtle bg-space-panel p-5"
             >
               <div class="flex items-start gap-3">
-                <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-space-elevated text-xl" aria-hidden="true">
-                  {{ course.icon || "📘" }}
+                <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-space-elevated text-text-secondary" aria-hidden="true">
+                  <CourseIcon :course-id="course.course_id" :icon="course.icon" :size="24" />
                 </span>
                 <div class="min-w-0 flex-1">
                   <div class="flex min-w-0 flex-wrap items-center gap-2">
@@ -201,6 +201,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 import AppPageFrame from "../components/AppPageFrame.vue";
+import CourseIcon from "../components/icons/CourseIcon.vue";
 import { useCourseLifecycleStore } from "../stores/courseLifecycle";
 
 const router = useRouter();
