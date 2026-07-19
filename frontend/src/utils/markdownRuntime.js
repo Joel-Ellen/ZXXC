@@ -5,9 +5,23 @@ async function loadMarkdownRenderer() {
     markdownRendererPromise = Promise.all([
       import("dompurify"),
       import("marked"),
-    ]).then(([domPurifyModule, markedModule]) => {
+      import("marked-highlight"),
+      import("highlight.js/lib/common"),
+    ]).then(([domPurifyModule, markedModule, markedHighlightModule, hljsModule]) => {
       const DOMPurify = domPurifyModule.default;
-      const marked = markedModule.marked ?? markedModule.default ?? markedModule;
+      const { marked } = markedModule;
+      const { markedHighlight } = markedHighlightModule;
+      const hljs = hljsModule.default;
+
+      marked.use(
+        markedHighlight({
+          langPrefix: "hljs language-",
+          highlight(code, lang) {
+            const language = hljs.getLanguage(lang) ? lang : "plaintext";
+            return hljs.highlight(code, { language }).value;
+          },
+        }),
+      );
 
       marked.setOptions({
         gfm: true,
