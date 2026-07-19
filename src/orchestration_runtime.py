@@ -186,10 +186,8 @@ class OrchestrationRuntime:
         if provider == "openai":
             return cls._usable_secret(os.environ.get("OPENAI_API_KEY", ""))
         if provider == "spark":
-            return all(
-                cls._usable_secret(os.environ.get(name, ""))
-                for name in ("SPARK_API_KEY", "SPARK_APP_ID", "SPARK_API_SECRET")
-            )
+            password = os.environ.get("SPARK_API_PASSWORD") or os.environ.get("SPARK_API_KEY", "")
+            return cls._usable_secret(password)
         return False
 
     def _get_or_create_llm_for_provider(self, provider: str) -> Any:
@@ -201,7 +199,7 @@ class OrchestrationRuntime:
         try:
             # Resolve the concrete client here so optional provider-import
             # failures are handled by this runtime's fallback path directly.
-            from src.llm.client_v2 import LLMClientV2
+            from src.llm import LLMClientV2
 
             client = LLMClientV2(provider=provider)
             self._llm_clients[provider] = client

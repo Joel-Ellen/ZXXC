@@ -24,13 +24,9 @@ import os
 import re
 import json
 import time
-import hmac
-import hashlib
-import base64
 import asyncio
 import uuid
 from typing import Dict, List, Optional, Any, AsyncGenerator, Callable
-from datetime import datetime
 from enum import Enum
 
 import httpx
@@ -70,13 +66,14 @@ DEFAULT_LLM_CONFIGS = {
         "temperature": 0.7,
     },
     "spark": {
-        "api_key": os.getenv("SPARK_API_KEY", ""),
-        "api_secret": os.getenv("SPARK_API_SECRET", ""),
-        "app_id": os.getenv("SPARK_APP_ID", ""),
-        "api_url": "https://spark-api-open.xf-yun.com/v1",
-        "model": "spark-pro",
+        "api_password": os.getenv("SPARK_API_PASSWORD") or os.getenv("SPARK_API_KEY", ""),
+        "api_url": os.getenv(
+            "SPARK_API_URL",
+            "https://spark-api-open.xf-yun.com/agent/v1/chat/completions",
+        ),
+        "model": os.getenv("SPARK_MODEL", "spark-x"),
         "max_tokens": 4096,
-        "temperature": 0.7,
+        "temperature": 1.2,
     },
     "deepseek": {
         "api_key": os.getenv("DEEPSEEK_API_KEY", ""),
@@ -124,7 +121,7 @@ class LLMClientV2:
     def __init__(self, provider: str = None):
         provider = provider or os.getenv("LLM_PROVIDER", "dashscope")
         self.provider = provider
-        self.config = DEFAULT_LLM_CONFIGS.get(provider, DEFAULT_LLM_CONFIGS["deepseek"])
+        self.config = self._config_for_provider(provider)
         self._client: Optional[AsyncOpenAI] = None
 
         # Input manager（仅对有限制的 provider 启用）
@@ -136,6 +133,24 @@ class LLMClientV2:
         ) if max_input else None
 
         self._init_client()
+
+    @staticmethod
+    def _config_for_provider(provider: str) -> Dict[str, Any]:
+        """Resolve provider configuration at construction time."""
+        config = dict(DEFAULT_LLM_CONFIGS.get(provider, DEFAULT_LLM_CONFIGS["deepseek"]))
+        if provider == "spark":
+            config.update(
+                {
+                    "api_password": os.getenv("SPARK_API_PASSWORD")
+                    or os.getenv("SPARK_API_KEY", ""),
+                    "api_url": os.getenv(
+                        "SPARK_API_URL",
+                        "https://spark-api-open.xf-yun.com/agent/v1/chat/completions",
+                    ),
+                    "model": os.getenv("SPARK_MODEL", "spark-x"),
+                }
+            )
+        return config
 
     @property
     def has_input_limit(self) -> bool:
@@ -251,37 +266,17 @@ class LLMClientV2:
         max_tokens: int,
         json_mode: bool,
     ) -> Dict[str, Any]:
-        """通过 HTTP 调用讯飞星火大模型（含 HMAC 鉴权）。"""
+        """通过 HTTP 调用 Spark-X2-Flash 的 OpenAI 兼容接口。"""
         cfg = self.config
-        host = "spark-api-open.xf-yun.com"
-        path = "/v1/chat/completions"
-
-        # HMAC 签名
-        now_str = datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S GMT")
-        signature_origin = f"host: {host}\ndate: {now_str}\nPOST {path} HTTP/1.1"
-        signature_sha = hmac.new(
-            cfg.get("api_secret", "").encode("utf-8"),
-            signature_origin.encode("utf-8"),
-            digestmod=hashlib.sha256,
-        ).digest()
-        signature = base64.b64encode(signature_sha).decode()
-
-        authorization_origin = (
-            f'api_key="{cfg.get("api_key", "")}", '
-            f'algorithm="hmac-sha256", '
-            f'headers="host date request-line", '
-            f'signature="{signature}"'
-        )
-        authorization = base64.b64encode(authorization_origin.encode()).decode()
+        temperature = max(0.01, min(2.0, float(temperature)))
 
         headers = {
-            "Authorization": f"Bearer {authorization}",
-            "Date": now_str,
+            "Authorization": f"Bearer {cfg.get('api_password', '')}",
             "Content-Type": "application/json",
         }
 
         payload = {
-            "model": cfg.get("model", "spark-pro"),
+            "model": cfg.get("model", "spark-x"),
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -289,26 +284,98 @@ class LLMClientV2:
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
-                f"https://{host}{path}",
+                self._spark_endpoint(),
                 headers=headers,
                 json=payload,
             )
-            if resp.status_code == 200:
-                body = resp.json()
-                choices = body.get("choices", [])
-                content = ""
-                for c in choices:
-                    content += c.get("message", {}).get("content", "")
-                return {
-                    "content": content,
-                    "usage": body.get("usage", {}),
-                    "model": body.get("model", cfg.get("model")),
-                    "finish_reason": choices[0].get("finish_reason", "stop") if choices else "stop",
-                }
-            else:
-                raise RuntimeError(f"Spark HTTP {resp.status_code}: {resp.text[:200]}")
+            body = self._parse_spark_response(resp)
+            choices = body.get("choices", [])
+            content = "".join(
+                choice.get("message", {}).get("content", "") or ""
+                for choice in choices
+            )
+            return {
+                "content": content,
+                "usage": body.get("usage", {}),
+                "model": body.get("model", cfg.get("model")),
+                "finish_reason": choices[0].get("finish_reason", "stop") if choices else "stop",
+            }
 
     # ------------------------------------------------------------------
+    def _spark_endpoint(self) -> str:
+        """Normalize either a full endpoint or an OpenAI-compatible base URL."""
+        configured = str(self.config.get("api_url") or "").strip().rstrip("/")
+        if not configured:
+            configured = "https://spark-api-open.xf-yun.com/agent/v1"
+        if configured.endswith("/chat/completions"):
+            return configured
+        return f"{configured}/chat/completions"
+
+    @staticmethod
+    def _parse_spark_response(response: httpx.Response) -> Dict[str, Any]:
+        """Validate HTTP and Spark-level errors without exposing credentials."""
+        if response.status_code != 200:
+            detail = response.text[:200].replace("\n", " ")
+            raise RuntimeError(f"Spark HTTP {response.status_code}: {detail}")
+        body = response.json()
+        code = body.get("code")
+        if code not in (None, 0, "0"):
+            raise RuntimeError(f"Spark API {code}: {body.get('message', 'request failed')}")
+        return body
+
+    async def _chat_spark_stream(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+    ) -> AsyncGenerator[str, None]:
+        """Yield only final-answer content from Spark's SSE response."""
+        cfg = self.config
+        temperature = max(0.01, min(2.0, float(temperature)))
+        headers = {
+            "Authorization": f"Bearer {cfg.get('api_password', '')}",
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+        }
+        payload = {
+            "model": cfg.get("model", "spark-x"),
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            async with client.stream(
+                "POST",
+                self._spark_endpoint(),
+                headers=headers,
+                json=payload,
+            ) as response:
+                if response.status_code != 200:
+                    await response.aread()
+                    detail = response.text[:200].replace("\n", " ")
+                    raise RuntimeError(f"Spark HTTP {response.status_code}: {detail}")
+                async for line in response.aiter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    raw = line[5:].strip()
+                    if raw == "[DONE]":
+                        break
+                    try:
+                        body = json.loads(raw)
+                    except json.JSONDecodeError as exc:
+                        raise RuntimeError("Spark returned malformed SSE data") from exc
+                    code = body.get("code")
+                    if code not in (None, 0, "0"):
+                        raise RuntimeError(
+                            f"Spark API {code}: {body.get('message', 'request failed')}"
+                        )
+                    for choice in body.get("choices", []):
+                        content = choice.get("delta", {}).get("content") or ""
+                        if content:
+                            yield content
+
     # Map-Reduce
     # ------------------------------------------------------------------
 
@@ -420,8 +487,8 @@ class LLMClientV2:
         max_tok = max_tokens or self.config.get("max_tokens", 4096)
 
         if self.provider == "spark":
-            result = await self._chat_spark_http(messages, temp, max_tok, False)
-            yield result["content"]
+            async for token in self._chat_spark_stream(messages, temp, max_tok):
+                yield token
             return
 
         kwargs = {
@@ -728,14 +795,14 @@ def create_llm_client_v2_from_env() -> LLMClientV2:
     """从环境变量自动检测并创建 LLMClientV2。
 
     优先级（赛题要求：优先使用科大讯飞相关工具）:
-      1. SPARK_API_KEY + SPARK_APP_ID + SPARK_API_SECRET → spark（讯飞星火，首选）
+      1. SPARK_API_PASSWORD（或兼容别名 SPARK_API_KEY） → spark（讯飞星火，首选）
       2. DASHSCOPE_API_KEY → dashscope（阿里云 Qwen，备用）
       3. DEEPSEEK_API_KEY → deepseek
       4. OPENAI_API_KEY → openai
       5. 都不存在 → 抛出异常
     """
     # 讯飞星火优先（第十五届中国软件杯赛题规定：使用科大讯飞相关工具）
-    if os.getenv("SPARK_API_KEY") and os.getenv("SPARK_APP_ID") and os.getenv("SPARK_API_SECRET"):
+    if os.getenv("SPARK_API_PASSWORD") or os.getenv("SPARK_API_KEY"):
         return LLMClientV2(provider="spark")
     elif os.getenv("DASHSCOPE_API_KEY"):
         return LLMClientV2(provider="dashscope")
@@ -746,7 +813,7 @@ def create_llm_client_v2_from_env() -> LLMClientV2:
     else:
         raise RuntimeError(
             "未检测到可用的大模型 API Key。请设置以下环境变量之一:\n"
-            "  优先（讯飞）: SPARK_API_KEY + SPARK_APP_ID + SPARK_API_SECRET\n"
+            "  优先（讯飞）: SPARK_API_PASSWORD（或兼容别名 SPARK_API_KEY）\n"
             "  备用（阿里云）: DASHSCOPE_API_KEY\n"
             "  其他: DEEPSEEK_API_KEY / OPENAI_API_KEY"
         )
