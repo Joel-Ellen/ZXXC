@@ -34,6 +34,7 @@ vi.mock("../services/eduAgentApi", () => ({
   refreshToken: vi.fn(),
   register: vi.fn(),
   streamSessionTutor: vi.fn(),
+  streamSessionTutorWithReconnect: vi.fn(),
   streamResourceGeneration: serviceMocks.streamResourceGeneration,
   submitSessionLearningEvent: vi.fn(async () => ({})),
   submitSessionProfileInput: vi.fn(),

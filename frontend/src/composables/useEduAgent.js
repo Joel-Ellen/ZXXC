@@ -16,7 +16,7 @@ import {
   requestResourceGeneration,
   resetSession,
   streamResourceGeneration,
-  streamSessionTutor,
+  streamSessionTutorWithReconnect,
   submitSessionLearningEvent,
   submitSessionProfileInput,
   switchCourse,
@@ -730,6 +730,7 @@ function createEduAgent() {
       await streamResourceGeneration(entry.jobId, {
         signal: entry.controller?.signal,
         lastEventId: entry.lastEventId,
+        requestId: entry.requestId,
         onEvent: (event) => {
           if (event?.id) entry.lastEventId = event.id;
         },
@@ -798,6 +799,24 @@ function createEduAgent() {
           if (failedCardTypes.includes("concept_map")) finishConceptLoading(entry, { notifyReady: false });
           setResourceGenerationJob(entry.context.nodeId, { status: "failed", jobId: entry.jobId });
         },
+        onCancelled: (data) => {
+          if (!isActiveResourceGenerationStream(entry)) return;
+          entry.terminal = true;
+          const cancelledCardTypes = entry.cardTypes.filter((cardType) => (
+            resourceCardState(entry.context.nodeId, cardType)?.status !== "ready"
+          ));
+          if (cancelledCardTypes.length) {
+            markResourceCardsFailed(
+              entry.context.nodeId,
+              cancelledCardTypes,
+              generationFailureMessage(data, "资源生成已取消。"),
+            );
+          }
+          if (cancelledCardTypes.includes("concept_map")) {
+            finishConceptLoading(entry, { notifyReady: false });
+          }
+          setResourceGenerationJob(entry.context.nodeId, { status: "cancelled", jobId: entry.jobId });
+        },
         onError: (error) => {
           streamError = error;
         },
@@ -810,7 +829,14 @@ function createEduAgent() {
       releaseResourceGenerationStream(entry);
       return;
     }
-    scheduleResourceGenerationReconnect(entry, streamError || new Error("Resource generation stream disconnected."));
+    const disconnectError = streamError || new Error("Resource generation stream disconnected.");
+    if (disconnectError.retryable === false) {
+      failUnresolvedGenerationCards(entry, disconnectError);
+      setResourceGenerationJob(entry.context.nodeId, { status: "failed", jobId: entry.jobId });
+      releaseResourceGenerationStream(entry);
+      return;
+    }
+    scheduleResourceGenerationReconnect(entry, disconnectError);
   }
 
   function startResourceGenerationStream(context, jobId, options = {}) {
@@ -830,6 +856,7 @@ function createEduAgent() {
       retryTimer: null,
       controller: null,
       lastEventId: "",
+      requestId: createEventId(),
       terminal: false,
       cancelled: false,
     };
@@ -2144,9 +2171,13 @@ function createEduAgent() {
     let idleTimeoutId = null;
     let maxDurationTimeoutId = null;
     let rejectStreamFailure;
+    let resolveStreamComplete;
     const abortController = new AbortController();
     const streamFailurePromise = new Promise((_, reject) => {
       rejectStreamFailure = reject;
+    });
+    const streamCompletePromise = new Promise((resolve) => {
+      resolveStreamComplete = resolve;
     });
     const stopStreamTimers = () => {
       if (idleTimeoutId !== null) clearTimeout(idleTimeoutId);
@@ -2178,6 +2209,11 @@ function createEduAgent() {
     };
     const streamHandlers = {
       signal: abortController.signal,
+      requestId: createEventId(),
+      lastEventId: "",
+      onEvent(event) {
+        if (event?.id) streamHandlers.lastEventId = event.id;
+      },
       onToken(token) {
         if (transportClosed || streamCompleted || streamFailure) return;
         armIdleTimeout();
@@ -2200,9 +2236,29 @@ function createEduAgent() {
           contextType,
         });
         refreshStatuses();
+        resolveStreamComplete();
         abortController.abort();
       },
       onError: onStreamError,
+    };
+    const tutorPayload = {
+      question: query.trim(),
+      context_type: contextType,
+      code_snippet: codeSnippet,
+      error_message: errorMessage,
+    };
+    const startTransport = () => {
+      if (transportClosed || streamCompleted || streamFailure || abortController.signal.aborted) {
+        return Promise.resolve();
+      }
+      armIdleTimeout();
+      return Promise.resolve()
+        .then(() => streamSessionTutorWithReconnect(sessionId.value, tutorPayload, streamHandlers))
+        .then(() => {
+          if (transportClosed || streamCompleted || streamFailure) return;
+          onStreamError(new Error("辅导连接意外中断，请稍后重试。"));
+        })
+        .catch(onStreamError);
     };
 
     armIdleTimeout();
@@ -2213,20 +2269,8 @@ function createEduAgent() {
     }, TUTOR_STREAM_MAX_DURATION_MS);
 
     try {
-      const transportPromise = Promise.resolve().then(() => streamSessionTutor(
-        sessionId.value,
-        {
-          question: query.trim(),
-          context_type: contextType,
-          code_snippet: codeSnippet,
-          error_message: errorMessage,
-        },
-        streamHandlers,
-      ));
-      await Promise.race([transportPromise, streamFailurePromise]);
-      if (!streamCompleted && !streamFailure) {
-        streamHandlers.onError(new Error("辅导连接意外中断，请稍后重试。"));
-      }
+      void startTransport();
+      await Promise.race([streamCompletePromise, streamFailurePromise]);
     } catch (error) {
       streamHandlers.onError(error);
     } finally {

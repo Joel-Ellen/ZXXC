@@ -412,7 +412,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import ChatArea from "../components/ChatArea.vue";
 import apiClient from "../services/apiClient";
@@ -420,8 +420,10 @@ import {
   deleteSessionReviewItem,
   startSessionDirectReviewRetest,
   startSessionReviewItem,
+  streamSessionTutorWithReconnect,
 } from "../services/eduAgentApi";
 
+const REVIEW_SESSION_ID = "student:data_structures";
 const router = useRouter();
 const sessionId = "student:data_structures";
 const loading = ref(true);
@@ -437,6 +439,10 @@ const expandedIds = ref([]);
 const startingIds = ref([]);
 const removingIds = ref([]);
 const deleteTarget = ref(null);
+let tutorAbortController = null;
+onBeforeUnmount(() => {
+  tutorAbortController?.abort();
+});
 
 const tutorMessages = ref([]);
 const tutorBusy = ref(false);
@@ -709,51 +715,53 @@ async function confirmDelete() {
   }
 }
 
-function onTutorSend({ text }) {
-  const userMsg = { id: `u-${Date.now()}`, role: "user", content: text };
+async function onTutorSend({ text }) {
+  const question = String(text || "").trim();
+  if (!question || tutorBusy.value) return;
+  const userMsg = { id: `u-${Date.now()}`, role: "user", content: question };
   tutorMessages.value = [...tutorMessages.value, userMsg];
   const assistantId = `a-${Date.now()}`;
   tutorMessages.value = [...tutorMessages.value, { id: assistantId, role: "assistant", content: "", isStreaming: true }];
   tutorBusy.value = true;
-  apiClient.post(`/sessions/${encodeURIComponent(sessionId)}/tutor-stream`, {
-    question: `请始终使用简体中文回答，不要使用英文。用户问题：${text}`,
-  }, {
-    responseType: "stream",
-    onDownloadProgress(event) {
-      const chunk = event?.event?.target?.response || event?.currentTarget?.response || "";
-      chunk.split("\n").filter((line) => line.startsWith("data: ")).forEach((line) => {
-        try {
-          const data = JSON.parse(line.slice(6));
-          if (!data.token) return;
-          const index = tutorMessages.value.findIndex((message) => message.id === assistantId);
-          if (index >= 0) {
-            const messages = [...tutorMessages.value];
-            messages[index] = { ...messages[index], content: messages[index].content + data.token };
-            tutorMessages.value = messages;
-          }
-        } catch (_) {
-          // Stream chunks can split JSON across progress events.
-        }
-      });
-    },
-  }).then(() => {
+  const controller = new AbortController();
+  tutorAbortController = controller;
+  let accumulated = "";
+  const patchTutorMessage = (fields) => {
     const index = tutorMessages.value.findIndex((message) => message.id === assistantId);
-    if (index >= 0) {
-      const messages = [...tutorMessages.value];
-      messages[index] = { ...messages[index], isStreaming: false };
-      tutorMessages.value = messages;
-    }
-  }).catch(() => {
-    const index = tutorMessages.value.findIndex((message) => message.id === assistantId);
-    if (index >= 0) {
-      const messages = [...tutorMessages.value];
-      messages[index] = { ...messages[index], isStreaming: false, content: messages[index].content || "辅导服务暂不可用。" };
-      tutorMessages.value = messages;
-    }
-  }).finally(() => {
-    tutorBusy.value = false;
+    if (index < 0) return;
+    const messages = [...tutorMessages.value];
+    messages[index] = { ...messages[index], ...fields };
+    tutorMessages.value = messages;
+  };
+  const fail = (error) => patchTutorMessage({
+    content: accumulated || (error?.status === 401 ? "登录状态已失效，请重新登录。" : "辅导服务暂不可用。"),
+    isStreaming: false,
+    streamStatus: "error",
   });
-}
+
+  try {
+    await streamSessionTutorWithReconnect(REVIEW_SESSION_ID, { question }, {
+       signal: controller.signal,
+       onToken(token) {
+         accumulated += token;
+         patchTutorMessage({ content: accumulated });
+       },
+       onReset() {
+         accumulated = "";
+         patchTutorMessage({ content: "" });
+       },
+       onDone() {
+         patchTutorMessage({ isStreaming: false, streamStatus: "complete" });
+       },
+       onError: fail,
+    });
+  } catch (error) {
+    fail(error);
+  } finally {
+     if (tutorAbortController === controller) tutorAbortController = null;
+     tutorBusy.value = false;
+   }
+ }
 
 async function fetchData() {
   loading.value = true;

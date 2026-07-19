@@ -20,7 +20,8 @@
       </div>
     </header>
 
-    <main class="retest-main">
+    <div class="retest-workspace">
+      <main class="retest-main">
       <section v-if="loading" class="retest-state" aria-live="polite">
         <div class="retest-spinner" />
         <h2>正在准备新的复测题</h2>
@@ -33,7 +34,6 @@
         <p>{{ error }}</p>
         <button type="button" class="retest-submit focus-ring" @click="loadQuiz">重新加载</button>
       </section>
-
       <template v-else-if="questions.length">
         <section class="retest-intro">
           <p class="retest-intro__eyebrow">{{ item?.node_title || "当前知识点" }}</p>
@@ -93,19 +93,41 @@
         <p>返回错题本后可以选择其他复习任务。</p>
         <button type="button" class="retest-submit focus-ring" @click="goBack">返回错题本</button>
       </section>
-    </main>
+      </main>
+
+      <aside class="retest-tutor-sidebar">
+        <div class="retest-tutor-sidebar__header">
+          <p>错题辅导</p>
+        </div>
+        <div class="retest-tutor-sidebar__body">
+          <ChatArea
+            :messages="tutorMessages"
+            :busy="tutorBusy"
+            :node-title="'错题复习'"
+            :boot-mode="'ready'"
+            session-id="student:data_structures"
+            node-id="N01"
+            :suggestions="tutorSuggestions"
+            @send="onTutorSend"
+          />
+        </div>
+      </aside>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import ChatArea from "../components/ChatArea.vue";
 import {
   fetchSessionReviewDashboard,
   fetchSessionResources,
+  streamSessionTutorWithReconnect,
   submitSessionLearningEvent,
 } from "../services/eduAgentApi";
 
+const REVIEW_SESSION_ID = "student:data_structures";
 const router = useRouter();
 const route = useRoute();
 const sessionId = "student:data_structures";
@@ -120,6 +142,9 @@ const submitting = ref(false);
 const submitted = ref(false);
 const resourceId = ref("");
 const nodeId = ref(String(route.query.nodeId || ""));
+let tutorAbortController = null;
+
+onBeforeUnmount(() => tutorAbortController?.abort());
 
 const answeredCount = computed(() => Object.keys(answers.value).length);
 const progressPercent = computed(() => questions.value.length ? Math.round(answeredCount.value / questions.value.length * 100) : 0);
@@ -127,6 +152,63 @@ const correctCount = computed(() => results.value.filter((result) => result.corr
 
 function optionLetter(index) {
   return String.fromCharCode(65 + index);
+}
+
+const tutorMessages = ref([]);
+const tutorBusy = ref(false);
+const tutorSuggestions = [
+  "这道题考察了什么知识点？",
+  "帮我分析一下错题的错误原因",
+  "请出一道类似的题目让我巩固一下",
+];
+
+function patchTutorMessage(messageId, fields) {
+  const index = tutorMessages.value.findIndex((message) => message.id === messageId);
+  if (index < 0) return;
+  const messages = [...tutorMessages.value];
+  messages[index] = { ...messages[index], ...fields };
+  tutorMessages.value = messages;
+}
+
+async function onTutorSend({ text }) {
+  const question = String(text || "").trim();
+  if (!question || tutorBusy.value) return;
+  const userMsg = { id: `u-${Date.now()}`, role: "user", content: question };
+  tutorMessages.value = [...tutorMessages.value, userMsg];
+  const aid = `a-${Date.now()}`;
+  tutorMessages.value = [...tutorMessages.value, { id: aid, role: "assistant", content: "", isStreaming: true }];
+  tutorBusy.value = true;
+  const controller = new AbortController();
+  tutorAbortController = controller;
+  let accumulated = "";
+  const fail = (error) => patchTutorMessage(aid, {
+    content: accumulated || (error?.status === 401 ? "登录状态已失效，请重新登录。" : "辅导服务暂不可用。"),
+    isStreaming: false,
+    streamStatus: "error",
+  });
+
+  try {
+    await streamSessionTutorWithReconnect(REVIEW_SESSION_ID, { question }, {
+      signal: controller.signal,
+      onToken(token) {
+        accumulated += token;
+        patchTutorMessage(aid, { content: accumulated });
+      },
+      onReset() {
+        accumulated = "";
+        patchTutorMessage(aid, { content: "" });
+      },
+      onDone() {
+        patchTutorMessage(aid, { isStreaming: false, streamStatus: "complete" });
+      },
+      onError: fail,
+    });
+  } catch (error) {
+    fail(error);
+  } finally {
+    if (tutorAbortController === controller) tutorAbortController = null;
+    tutorBusy.value = false;
+  }
 }
 
 function selectAnswer(questionId, optionIndex) {
@@ -322,6 +404,49 @@ onMounted(loadQuiz);
 
 .retest-main {
   padding: 48px 0 72px;
+}
+
+.retest-workspace {
+  display: flex;
+  align-items: stretch;
+  width: min(100% - 40px, 1200px);
+  min-height: calc(100vh - 80px);
+  margin: 0 auto;
+}
+
+.retest-workspace > .retest-main {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  margin: 0;
+  padding-right: 28px;
+}
+
+.retest-tutor-sidebar {
+  display: flex;
+  flex: 0 0 360px;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--border-subtle);
+  background: var(--space-panel);
+}
+
+.retest-tutor-sidebar__header {
+  flex: 0 0 auto;
+  padding: 16px 18px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.retest-tutor-sidebar__header p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.retest-tutor-sidebar__body {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .retest-intro {
@@ -601,6 +726,19 @@ onMounted(loadQuiz);
 
   .retest-main {
     padding-top: 32px;
+  }
+
+  .retest-workspace {
+    width: min(100% - 28px, 820px);
+  }
+
+  .retest-workspace > .retest-main {
+    width: 100%;
+    padding-right: 0;
+  }
+
+  .retest-tutor-sidebar {
+    display: none;
   }
 
   .retest-intro h2 {
