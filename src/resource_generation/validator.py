@@ -20,14 +20,23 @@ from .schemas import CARD_TYPES, coerce_payload
 _MAX_PYTHON_SOURCE_BYTES = 16 * 1024
 _MAX_PYTHON_SOURCE_LINES = 600
 
+_MERMAID_NODE_ID = r"[A-Za-z][A-Za-z0-9_-]*"
+_MERMAID_NODE_SHAPE = (
+    r"(?:\[[^\]\r\n]*\]"
+    r"|\(\([^\)\r\n]*\)\)"
+    r"|\([^\)\r\n]*\)"
+    r"|\{\{[^\}\r\n]*\}\}"
+    r"|\{[^\}\r\n]*\})"
+)
 _MERMAID_SHAPED_NODE_RE = re.compile(
-    r"(?<![\w-])([A-Za-z][A-Za-z0-9_-]*)\s*(?=\[|\(\(|\{|\(\s)"
+    rf"(?<![\w-])({_MERMAID_NODE_ID})\s*(?={_MERMAID_NODE_SHAPE})"
 )
 _MERMAID_EDGE_RE = re.compile(
-    r"(?P<source>[A-Za-z][A-Za-z0-9_-]*)\s*(?:-->\|[^|\r\n]{1,120}\||-->|-\.->|==>|---)\s*"
-    r"(?P<target>[A-Za-z][A-Za-z0-9_-]*)"
+    rf"(?P<source>{_MERMAID_NODE_ID})\s*(?:{_MERMAID_NODE_SHAPE})?\s*"
+    r"(?:-->\s*\|[^|\r\n]{1,120}\||-->|-\.->|==>|---)\s*"
+    rf"(?=(?P<target>{_MERMAID_NODE_ID})(?![A-Za-z0-9_-]))"
 )
-_MERMAID_LABELED_EDGE_RE = re.compile(r"-->(?:\|[^|\r\n]{1,120}\|)")
+_MERMAID_LABELED_EDGE_RE = re.compile(r"-->\s*\|[^|\r\n]{1,120}\|")
 
 
 def _mermaid_graph_metrics(source: str) -> tuple[set[str], list[tuple[str, str]], int]:

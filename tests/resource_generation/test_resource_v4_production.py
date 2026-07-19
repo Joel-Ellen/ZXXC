@@ -111,6 +111,41 @@ def test_v4_concept_map_rejects_a_visually_valid_but_shallow_diagram() -> None:
     assert {"mermaid_too_shallow", "mermaid_edges_missing", "mermaid_branch_missing"}.issubset(issue_codes)
 
 
+def test_v4_concept_map_accepts_inline_round_nodes() -> None:
+    context = _v4_context()
+    payload = ResourceGenerator().template(context, "concept_map").structured_payload
+    payload["mermaid_source"] = (
+        "graph TD\n"
+        "A(核心概念) -->|定义| B(概念定义)\n"
+        "A(核心概念) -->|约束| C(成立约束)\n"
+        "A(核心概念) -->|机制| D(运行机制)\n"
+        "A(核心概念) -->|示例| E(典型示例)\n"
+        "A(核心概念) -->|边界| F(适用边界)\n"
+        "A(核心概念) -->|误区| G(常见误区)\n"
+        "A(核心概念) -->|迁移| H(迁移问题)"
+    )
+
+    validation = validate_resource_payload("concept_map", payload, context)
+
+    assert validation.valid, validation.issues
+
+
+def test_v4_concept_map_counts_chain_edges_with_inline_nodes() -> None:
+    context = _v4_context()
+    payload = ResourceGenerator().template(context, "concept_map").structured_payload
+    payload["mermaid_source"] = (
+        "graph TD\n"
+        "A(核心概念) -->|定义| B(概念定义) -->|约束| C(成立约束) -->|机制| D(运行机制) -->|示例| E(典型示例)\n"
+        "A(核心概念) -->|边界| F(适用边界)\n"
+        "A(核心概念) -->|误区| G(常见误区)\n"
+        "A(核心概念) -->|迁移| H(迁移问题)"
+    )
+
+    validation = validate_resource_payload("concept_map", payload, context)
+
+    assert validation.valid, validation.issues
+
+
 def test_nli_outage_can_only_produce_degraded_quality() -> None:
     class UnavailableNLI:
         def entailment(self, *_args, **_kwargs):
