@@ -218,12 +218,11 @@ def upsert_resource_card(agent_state, card: ResourceCard) -> None:
     normalize_state_resources(agent_state)
 
 
-def state_response(session: RuntimeSession, include_legacy: bool = False) -> Dict[str, Any]:
+def state_response(session: RuntimeSession) -> Dict[str, Any]:
     from src.adapters.domain_to_response import session_response_from_runtime
 
     normalize_state_resources(session.agent_state)
-    response = session_response_from_runtime(session)
-    return response.to_compatible_dict() if include_legacy else response.to_dto_dict()
+    return session_response_from_runtime(session).to_dto_dict()
 
 
 def feedback_item(

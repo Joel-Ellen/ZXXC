@@ -460,9 +460,6 @@ from src.application._common import (  # noqa: E402
 )
 
 
-# ─── 全局会话存储 (user_id → course_id → session) ──────────
-sessions: Dict[str, Dict[str, Dict[str, Any]]] = {}
-
 # ─── 课程存储 (全局单例) ────────────────────────────────────
 _course_store = None
 
@@ -1686,7 +1683,6 @@ async def api_user_delete_account(request: Request) -> JSONResponse:
         log_event("auth.account_delete.identity_failed", level="error", user_id=user_id)
         return JSONResponse({"detail": "ACCOUNT_IDENTITY_DELETE_FAILED"}, status_code=503)
 
-    sessions.pop(user_id, None)
     try:
         from src.orchestration_runtime import get_runtime
 
@@ -1699,35 +1695,6 @@ async def api_user_delete_account(request: Request) -> JSONResponse:
 
 
 # Official route handlers: route -> application service -> response.
-# Older implementations above are retained as legacy migration references only.
-COMPAT_INTERNAL_HEADERS = {
-    "X-EduAgent-Api-Surface": "compat/internal",
-    "X-EduAgent-Api-Status": "deprecated",
-    "X-EduAgent-Canonical-Api": "/api/sessions",
-}
-
-TUTOR_CANONICAL_API = "/api/sessions/{session_id}/tutor"
-
-TUTOR_COMPAT_HEADERS = {
-    **COMPAT_INTERNAL_HEADERS,
-    "X-EduAgent-Canonical-Api": TUTOR_CANONICAL_API,
-}
-
-SESSION_TUTOR_ALIAS_HEADERS = {
-    "X-EduAgent-Api-Surface": "alias/bridge",
-    "X-EduAgent-Api-Status": "deprecated",
-    "X-EduAgent-Canonical-Api": TUTOR_CANONICAL_API,
-}
-
-
-def _compat_json_response(payload: Dict[str, Any], status_code: int = 200) -> JSONResponse:
-    return JSONResponse(payload, status_code=status_code, headers=COMPAT_INTERNAL_HEADERS)
-
-
-def _compat_sse_response(generator: Any) -> EventSourceResponse:
-    return EventSourceResponse(generator, headers=COMPAT_INTERNAL_HEADERS)
-
-
 _CLIENT_MASTERY_CLAIM_FIELDS = frozenset({
     "correctness",
     "score",
@@ -1863,137 +1830,15 @@ def _session_tutor_response(
 
 async def api_reset(request: Request) -> JSONResponse:
     body = await request.json()
+    user_id = body.get("user_id", "demo_user")
+    auth_error = _event_session_auth_error(request, user_id)
+    if auth_error is not None:
+        return auth_error
     return JSONResponse(session_service.reset_learning_session(
-        body.get("user_id", "demo_user"),
+        user_id,
         body.get("course_id", "data_structures"),
     ))
 
-
-async def api_compat_get_state(request: Request) -> JSONResponse:
-    return _compat_json_response(session_service.get_learning_state(
-        request.query_params.get("user_id", "demo_user"),
-        request.query_params.get("course_id", "data_structures"),
-    ))
-
-
-async def api_compat_cold_start_probe(request: Request) -> JSONResponse:
-    return _compat_json_response(profile_service.get_probe(
-        request.query_params.get("user_id", "demo_user"),
-        request.query_params.get("course_id", "data_structures"),
-    ))
-
-
-async def api_compat_cold_start_answer(request: Request) -> JSONResponse:
-    body = await request.json()
-    return _compat_json_response(profile_service.submit_probe_answer(
-        body.get("user_id", "demo_user"),
-        body.get("course_id", "data_structures"),
-        body.get("answer"),
-    ))
-
-
-async def api_compat_init_path(request: Request) -> JSONResponse:
-    body = await request.json()
-    return _compat_json_response(session_service.init_path(
-        body.get("user_id", "demo_user"),
-        body.get("course_id", "data_structures"),
-    ))
-
-
-async def api_compat_run_pipeline_step(request: Request) -> JSONResponse:
-    body = _without_client_mastery_claims(await request.json())
-    return _compat_json_response(session_service.advance_session(
-        body.get("user_id", "demo_user"),
-        body.get("course_id", "data_structures"),
-        user_input=body.get("tutor_query"),
-        behavior=body,
-    ))
-
-
-async def api_compat_stream_pipeline(request: Request) -> EventSourceResponse:
-    # Compat/internal bridge. Official advancement should use /api/sessions/{session_id}/advance.
-    user_id = request.query_params.get("user_id", "demo_user")
-    course_id = request.query_params.get("course_id", "data_structures")
-    behavior = {
-        "interaction_type": request.query_params.get("interaction_type", "browse_node"),
-        "current_node_id": request.query_params.get("current_node_id") or None,
-        "tutor_query": request.query_params.get("tutor_query", "") or None,
-    }
-
-    async def event_generator():
-        yield {
-            "event": "compat_notice",
-            "data": json.dumps({
-                "surface": "compat/internal",
-                "canonical_api": "/api/sessions/{session_id}/advance",
-            }, ensure_ascii=False),
-        }
-        result = await asyncio.to_thread(
-            session_service.advance_session,
-            user_id,
-            course_id,
-            behavior.get("tutor_query"),
-            behavior,
-        )
-        yield {"event": "done", "data": json.dumps(result, ensure_ascii=False)}
-
-    return _compat_sse_response(event_generator())
-
-
-# Keep legacy import names on the truthful session-service boundary. The old
-# in-module demo handlers were removed; these bridges are the only handlers.
-api_init_path = api_compat_init_path
-api_run_pipeline_step = api_compat_run_pipeline_step
-api_run_pipeline_step_v2 = api_compat_run_pipeline_step
-api_stream_pipeline = api_compat_stream_pipeline
-
-
-async def api_compat_ask_tutor(request: Request) -> JSONResponse:
-    # Compat/internal bridge. Official tutor traffic should use /api/sessions/{session_id}/tutor.
-    body = await request.json()
-    body = {**body, "stream": False}
-    return _session_tutor_response(
-        body.get("user_id", "demo_user"),
-        body.get("course_id", "data_structures"),
-        body,
-        headers=TUTOR_COMPAT_HEADERS,
-    )
-
-
-async def api_compat_ask_tutor_stream(request: Request) -> EventSourceResponse:
-    # Compat/internal bridge. Official tutor streaming should use /api/sessions/{session_id}/tutor with stream=true.
-    body = await request.json()
-    body = {**body, "stream": True}
-    return _session_tutor_response(
-        body.get("user_id", "demo_user"),
-        body.get("course_id", "data_structures"),
-        body,
-        headers=TUTOR_COMPAT_HEADERS,
-    )
-
-
-async def api_compat_generate_node_resources(request: Request) -> JSONResponse:
-    body = await request.json()
-    result = await asyncio.to_thread(
-        resource_service.generate_current_node_resources,
-        body.get("user_id", "demo_user"),
-        body.get("course_id", "data_structures"),
-        body.get("node_id", ""),
-        bool(body.get("force", False)),
-        include_legacy=True,
-        card_type=body.get("card_type", body.get("cardType")),
-    )
-    status_code = int(result.pop("status_code", 200))
-    return _compat_json_response(result, status_code=status_code)
-
-
-# Legacy import names are bridges too; only routes below define the supported HTTP surface.
-# The historical synchronous five-card generator has been removed from this module:
-# resource generation now lives exclusively in src.application.resource_service (async
-# jobs) — a direct import of the old handler name resolves to the resource-service bridge.
-api_generate_node_resources = api_compat_generate_node_resources
-api_ask_tutor = api_compat_ask_tutor
-api_ask_tutor_stream = api_compat_ask_tutor_stream
 
 def _session_ids(session_id: str) -> tuple[str, str]:
     if ":" in session_id:
@@ -2065,7 +1910,10 @@ async def api_session_advance(request: Request) -> JSONResponse:
     if auth_error is not None:
         return auth_error
     body = _without_client_mastery_claims(await request.json())
-    return JSONResponse(session_service.advance_session(user_id, course_id, user_input=body.get("tutor_query"), behavior=body))
+    result = await asyncio.to_thread(
+        session_service.advance_session, user_id, course_id, user_input=body.get("tutor_query"), behavior=body
+    )
+    return JSONResponse(result)
 
 
 async def api_session_behavior(request: Request) -> JSONResponse:
@@ -2075,7 +1923,8 @@ async def api_session_behavior(request: Request) -> JSONResponse:
         return auth_error
     body = _without_client_mastery_claims(await request.json())
     body.setdefault("interaction_type", "browse_node")
-    return JSONResponse(session_service.advance_session(user_id, course_id, behavior=body))
+    result = await asyncio.to_thread(session_service.advance_session, user_id, course_id, behavior=body)
+    return JSONResponse(result)
 
 
 def _session_event_response(result: Dict[str, Any]) -> JSONResponse:
@@ -2565,22 +2414,6 @@ async def api_session_tutor(request: Request):
     )
 
 
-async def api_session_tutor_stream(request: Request) -> EventSourceResponse | JSONResponse:
-    # Short-term alias only; canonical streaming is /api/sessions/{session_id}/tutor.
-    user_id, course_id = _session_ids(request.path_params.get("session_id", ""))
-    auth_error = _event_session_auth_error(request, user_id)
-    if auth_error is not None:
-        return auth_error
-    body = await request.json()
-    body = {**body, "stream": True}
-    return _session_tutor_response(
-        user_id,
-        course_id,
-        body,
-        headers=SESSION_TUTOR_ALIAS_HEADERS,
-    )
-
-
 async def api_session_replan(request: Request) -> JSONResponse:
     user_id, course_id = _session_ids(request.path_params.get("session_id", ""))
     auth_error = _event_session_auth_error(request, user_id)
@@ -2975,24 +2808,12 @@ async def _captcha_backend_unavailable_response(
     )
 
 
-_RETIRED_RESOURCE_GENERATION_PATHS = frozenset({
-    "/api/resources/generate",
-    "/api/resources/generate-all",
-})
+async def api_not_found(_request: Request) -> JSONResponse:
+    """Deterministic JSON 404 for any unmatched /api/* path.
 
-# ``new_routes`` is now health + a few read-only debug endpoints. The retired
-# synchronous resource-generation paths no longer exist there, but keep the
-# filter as a guard so they can never be mounted again: the canonical session
-# API owns resource generation now.
-_MOUNTED_NEW_ROUTES = tuple(
-    route
-    for route in new_routes
-    if getattr(route, "path", "") not in _RETIRED_RESOURCE_GENERATION_PATHS
-)
-
-
-async def api_retired_resource_generation(_request: Request) -> JSONResponse:
-    """Tombstone historical synchronous resource-generator HTTP paths."""
+    Without this catch-all, unknown API paths would fall through to the SPA
+    static mount and surface as 405/HTML instead of an API-shaped 404.
+    """
     return JSONResponse({"detail": "NOT_FOUND"}, status_code=404, headers={"Cache-Control": "no-store"})
 
 
@@ -3024,8 +2845,6 @@ app = Starlette(
         Route("/api/sessions/{session_id}/practice/run", api_session_practice_run, methods=["POST"]),
         Route("/api/sessions/{session_id}/practice/submit", api_session_practice_submit, methods=["POST"]),
         Route("/api/sessions/{session_id}/tutor", api_session_tutor, methods=["POST"]),
-        # Short-term deprecated alias. Main app and new clients must use /tutor with stream=true or Accept: text/event-stream.
-        Route("/api/sessions/{session_id}/tutor-stream", api_session_tutor_stream, methods=["POST"]),
         Route("/api/sessions/{session_id}/replan", api_session_replan, methods=["POST"]),
         Route("/api/sessions/{session_id}/resources/{node_id}/generation", api_session_resource_generation, methods=["POST"]),
         Route("/api/sessions/{session_id}/resources/{node_id}", api_session_resources, methods=["GET"]),
@@ -3049,25 +2868,6 @@ app = Starlette(
         Route("/api/ready", api_readiness, methods=["GET"]),
         Route("/api/reset", api_reset, methods=["POST"]),
 
-        # These paths previously reached a second synchronous agent chain.
-        # Keep deterministic 404 tombstones so stale callers cannot fall
-        # through to the SPA or silently revive that generator.
-        Route("/api/resources/generate", api_retired_resource_generation, methods=["POST"]),
-        Route("/api/resources/generate-all", api_retired_resource_generation, methods=["POST"]),
-
-        # Compat/internal legacy learning endpoints.
-        # Frozen bridge paths for old clients and diagnostics only.
-        # Main app code must use /api/sessions/*; compat responses carry X-EduAgent-Api-Surface.
-        Route("/api/state", api_compat_get_state, methods=["GET"]),
-        Route("/api/cold-start/probe", api_compat_cold_start_probe, methods=["GET"]),
-        Route("/api/cold-start/answer", api_compat_cold_start_answer, methods=["POST"]),
-        Route("/api/init-path", api_compat_init_path, methods=["POST"]),
-        Route("/api/pipeline/step", api_compat_run_pipeline_step, methods=["POST"]),
-        Route("/api/pipeline/stream", api_compat_stream_pipeline, methods=["GET"]),
-        Route("/api/tutor/ask", api_compat_ask_tutor, methods=["POST"]),
-        Route("/api/tutor/ask-stream", api_compat_ask_tutor_stream, methods=["POST"]),
-        Route("/api/resources/generate-node", api_compat_generate_node_resources, methods=["POST"]),
-
         # Auth API.
         Route("/api/auth/captcha", api_auth_captcha, methods=["GET"]),
         Route("/api/auth/captcha-json", api_auth_captcha_json, methods=["GET"]),
@@ -3084,7 +2884,9 @@ app = Starlette(
         Route("/api/auth/sessions/{session_id}", api_auth_session_revoke, methods=["DELETE"]),
 
         # Additional API routes merged from backend modules.
-        *_MOUNTED_NEW_ROUTES,
+        *new_routes,
+        # Any /api path not matched above is a deterministic JSON 404.
+        Route("/api/{rest:path}", api_not_found, methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]),
         Mount("/", app=SpaStaticFiles(directory=str(static_dir), html=True)),
     ],
 )
@@ -3096,39 +2898,6 @@ def _request_surface(path: str) -> str:
     if path.startswith("/api/"):
         return "api"
     return "static"
-
-
-_COMPAT_INTERNAL_PATHS = frozenset({
-    "/api/reset",
-    "/api/state",
-    "/api/cold-start/probe",
-    "/api/cold-start/answer",
-    "/api/init-path",
-    "/api/pipeline/step",
-    "/api/pipeline/stream",
-    "/api/tutor/ask",
-    "/api/tutor/ask-stream",
-    "/api/resources/generate-node",
-}) | frozenset(
-    route.path
-    for route in _MOUNTED_NEW_ROUTES
-    if route.path != "/api/health"
-)
-
-
-def _compat_request_allowed(request: Request) -> bool:
-    # The old synchronous resource bridge is retained only for deliberate
-    # diagnostics/migrations.  Enabling generic compat APIs must not expose
-    # it accidentally.
-    if request.url.path == "/api/resources/generate-node" and not operational_switch(
-        "legacy_resource_generation",
-        default=False,
-    ):
-        return False
-    enabled = operational_switch("compat_api", default=not is_production())
-    if not enabled:
-        return False
-    return not is_production() or _ops_token_matches(request)
 
 
 _CORE_RATE_LIMITERS: dict[tuple[str, int, int, str, int], RateLimiter] = {}
@@ -3168,7 +2937,7 @@ def _core_rate_limit_policy(request: Request) -> Optional[tuple[str, int, int]]:
         policy = ("email_verification_verify", 10, 3600)
     elif method == "POST" and path == "/api/ops/client-events":
         policy = ("client_events", 30, 60)
-    elif method == "POST" and path.endswith(("/tutor", "/tutor-stream")):
+    elif method == "POST" and path.endswith("/tutor"):
         policy = ("tutor", 6, 60)
     elif method == "GET" and "/resources/" in path and path.startswith("/api/sessions/"):
         force = request.query_params.get("force", "false").lower() in {"1", "true", "yes"}
@@ -3247,7 +3016,7 @@ def _request_body_limit(request: Request) -> Optional[int]:
         return 16 * 1024
     if path.startswith("/api/sessions/") and path.endswith("/events"):
         return 32 * 1024
-    if path.startswith("/api/sessions/") and path.endswith(("/tutor", "/tutor-stream")):
+    if path.startswith("/api/sessions/") and path.endswith("/tutor"):
         return 64 * 1024
     if path.startswith("/api/sessions/") and "/practice/" in path:
         return 96 * 1024
@@ -3334,9 +3103,6 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
                     body_limit_response = await _enforce_request_body_limit(request)
                     if body_limit_response is not None:
                         response = body_limit_response
-                    elif path in _COMPAT_INTERNAL_PATHS and not _compat_request_allowed(request):
-                        incr_metric("release.internal_surface_block_total", surface="compat_api")
-                        response = JSONResponse({"detail": "NOT_FOUND"}, status_code=404)
                     else:
                         response = await call_next(request)
             except Exception as exc:

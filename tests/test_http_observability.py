@@ -62,10 +62,13 @@ def test_request_id_header_round_trip_and_metrics_endpoint(monkeypatch):
     )
     client = TestClient(app)
 
+    from src.auth.security import SecurityManager
+    token = SecurityManager.create_token_pair("http-obs", "STUDENT")["access_token"]
+
     response = client.post(
         "/api/sessions",
         json={"user_id": "http-obs", "course_id": "data_structures"},
-        headers={"X-Request-ID": "req-observe-123"},
+        headers={"X-Request-ID": "req-observe-123", "Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 200
     assert response.headers["x-request-id"] == "req-observe-123"

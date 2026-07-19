@@ -56,49 +56,50 @@ class Provider(str, Enum):
 # LLM 配置
 # ============================================================================
 
-# 默认多供应商配置
-DEFAULT_LLM_CONFIGS = {
-    "dashscope": {
-        "api_key": os.getenv("DASHSCOPE_API_KEY", ""),
-        "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "model": os.getenv("DASHSCOPE_MODEL", "qwen-plus"),
-        "max_tokens": 4096,
-        "temperature": 0.7,
-    },
-    "spark": {
-        "api_password": os.getenv("SPARK_API_PASSWORD") or os.getenv("SPARK_API_KEY", ""),
-        "api_url": os.getenv(
-            "SPARK_API_URL",
-            "https://spark-api-open.xf-yun.com/agent/v1/chat/completions",
-        ),
-        "model": os.getenv("SPARK_MODEL", "spark-x"),
-        "max_tokens": 4096,
-        "temperature": 1.2,
-    },
-    "deepseek": {
-        "api_key": os.getenv("DEEPSEEK_API_KEY", ""),
-        "api_url": os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/v1"),
-        "model": "deepseek-chat",
-        "max_tokens": 4096,
-        "temperature": 0.7,
-    },
-    "qwen": {
-        "api_key": os.getenv("DASHSCOPE_API_KEY", ""),
-        "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "model": "qwen-plus",
-        "max_tokens": 4096,
-        "temperature": 0.7,
-        "max_input_tokens": 128000,
-        "overflow_strategy": "map_reduce",
-    },
-    "openai": {
-        "api_key": os.getenv("OPENAI_API_KEY", ""),
-        "api_url": os.getenv("OPENAI_API_URL", "https://api.openai.com/v1"),
-        "model": "gpt-4o",
-        "max_tokens": 4096,
-        "temperature": 0.7,
-    },
-}
+def _get_llm_configs() -> Dict[str, Dict[str, Any]]:
+    """获取 LLM 配置（每次调用时重新读取环境变量）。"""
+    return {
+        "dashscope": {
+            "api_key": os.getenv("DASHSCOPE_API_KEY", ""),
+            "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "model": os.getenv("DASHSCOPE_MODEL", "qwen-plus"),
+            "max_tokens": 4096,
+            "temperature": 0.7,
+        },
+        "spark": {
+            "api_password": os.getenv("SPARK_API_PASSWORD") or os.getenv("SPARK_API_KEY", ""),
+            "api_url": os.getenv(
+                "SPARK_API_URL",
+                "https://spark-api-open.xf-yun.com/agent/v1/chat/completions",
+            ),
+            "model": os.getenv("SPARK_MODEL", "spark-x"),
+            "max_tokens": 4096,
+            "temperature": 1.2,
+        },
+        "deepseek": {
+            "api_key": os.getenv("DEEPSEEK_API_KEY", ""),
+            "api_url": os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/v1"),
+            "model": "deepseek-chat",
+            "max_tokens": 4096,
+            "temperature": 0.7,
+        },
+        "qwen": {
+            "api_key": os.getenv("DASHSCOPE_API_KEY", ""),
+            "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "model": "qwen-plus",
+            "max_tokens": 4096,
+            "temperature": 0.7,
+            "max_input_tokens": 128000,
+            "overflow_strategy": "map_reduce",
+        },
+        "openai": {
+            "api_key": os.getenv("OPENAI_API_KEY", ""),
+            "api_url": os.getenv("OPENAI_API_URL", "https://api.openai.com/v1"),
+            "model": "gpt-4o",
+            "max_tokens": 4096,
+            "temperature": 0.7,
+        },
+    }
 
 
 # ============================================================================
@@ -137,7 +138,8 @@ class LLMClientV2:
     @staticmethod
     def _config_for_provider(provider: str) -> Dict[str, Any]:
         """Resolve provider configuration at construction time."""
-        config = dict(DEFAULT_LLM_CONFIGS.get(provider, DEFAULT_LLM_CONFIGS["deepseek"]))
+        configs = _get_llm_configs()
+        config = dict(configs.get(provider, configs["deepseek"]))
         if provider == "spark":
             config.update(
                 {
@@ -248,11 +250,7 @@ class LLMClientV2:
                 "model": response.model,
                 "finish_reason": choice.finish_reason,
             }
-        except Exception as e:
-            if self.provider == "spark":
-                # Spark 失败 → 降级到 DeepSeek
-                fallback = LLMClientV2("deepseek")
-                return await fallback.chat(messages, temperature, max_tokens, json_mode)
+        except Exception:
             raise
 
     # ------------------------------------------------------------------

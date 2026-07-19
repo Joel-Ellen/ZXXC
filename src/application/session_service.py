@@ -359,10 +359,6 @@ def reset_learning_session(user_id: str, course_id: str = "data_structures") -> 
     return {"status": "ok", "user_id": user_id, "course_id": course_id}
 
 
-def get_learning_state(user_id: str, course_id: str = "data_structures") -> Dict[str, Any]:
-    return state_response(get_session(user_id, course_id), include_legacy=True)
-
-
 def init_path(user_id: str, course_id: str = "data_structures") -> Dict[str, Any]:
     with bind_context(user_id=user_id, course_id=course_id, operation="init_path"):
         session = get_session(user_id, course_id)

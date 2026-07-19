@@ -552,11 +552,11 @@ class ProfilerNode:
             dp.knowledge_mastery[node_id] = decayed
 
             # 更新掌握度记录
-            import datetime
+            from datetime import datetime, timezone
             dp.knowledge_mastery_records[node_id] = KnowledgeMasteryRecord(
                 node_id=node_id,
                 mastery=decayed,
-                last_updated=datetime.datetime.utcnow().isoformat(),
+                last_updated=datetime.now(timezone.utc).isoformat(),
                 interaction_count=(
                     mastery_record.interaction_count + 1
                     if mastery_record else 1

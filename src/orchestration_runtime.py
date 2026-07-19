@@ -6,6 +6,7 @@ from __future__ import annotations
 import concurrent.futures
 import inspect
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -74,6 +75,7 @@ class OrchestrationRuntime:
         self._llm_clients: Dict[str, Any] = {}
         self._graph: Optional[EduAgentGraph] = None
         self._sessions: Dict[str, Dict[str, RuntimeSession]] = {}
+        self._sessions_lock = threading.Lock()
         # Resource work runs out of band.  Keep each provider attempt short so
         # a slow model cannot pin a worker or delay concept-map first paint.
         self._resource_llm_timeout_sec = self._read_float_env("EDUAGENT_RESOURCE_LLM_TIMEOUT_SEC", 18.0)
@@ -262,23 +264,24 @@ class OrchestrationRuntime:
         return self._sessions.get(user_id, {}).get(course_id)
 
     def get_session(self, user_id: str, course_id: str = "data_structures") -> RuntimeSession:
-        user_sessions = self._sessions.setdefault(user_id, {})
-        if course_id not in user_sessions:
-            target_node = "N20" if course_id == "data_structures" else "N01"
-            agent_state = AgentState(
-                user_id=user_id,
-                course_id=course_id,
-                current_node_id=None,
-                target_node_id=target_node,
-            )
-            cold_engine = ColdStartEngine()
-            user_sessions[course_id] = RuntimeSession(
-                agent_state=agent_state,
-                cold_engine=cold_engine,
-                cold_state=cold_engine.initialize(user_id),
-                path_planner=self.kg.create_path_planner(course_id, local_only=True),
-            )
-        return user_sessions[course_id]
+        with self._sessions_lock:
+            user_sessions = self._sessions.setdefault(user_id, {})
+            if course_id not in user_sessions:
+                target_node = "N20" if course_id == "data_structures" else "N01"
+                agent_state = AgentState(
+                    user_id=user_id,
+                    course_id=course_id,
+                    current_node_id=None,
+                    target_node_id=target_node,
+                )
+                cold_engine = ColdStartEngine()
+                user_sessions[course_id] = RuntimeSession(
+                    agent_state=agent_state,
+                    cold_engine=cold_engine,
+                    cold_state=cold_engine.initialize(user_id),
+                    path_planner=self.kg.create_path_planner(course_id, local_only=True),
+                )
+            return user_sessions[course_id]
 
     def replace_session_state(
         self,
@@ -294,8 +297,9 @@ class OrchestrationRuntime:
         return session
 
     def reset_session(self, user_id: str, course_id: str = "data_structures") -> RuntimeSession:
-        if user_id in self._sessions:
-            self._sessions[user_id].pop(course_id, None)
+        with self._sessions_lock:
+            if user_id in self._sessions:
+                self._sessions[user_id].pop(course_id, None)
         return self.get_session(user_id, course_id)
 
     def drop_session(self, user_id: str, course_id: str = "data_structures") -> None:

@@ -39,15 +39,6 @@ def test_resource_service_generates_only_requested_card_type(monkeypatch) -> Non
     assert all("answer_index" in question for question in stored_quiz.metadata["questions"])
     assert {question["answer_index"] for question in stored_quiz.metadata["questions"]} != {0}
 
-    legacy = resource_service.generate_current_node_resources(
-        "resource-type-user",
-        "course1",
-        "N01",
-        include_legacy=True,
-        card_type="diagnostic_quiz",
-    )
-    assert all("answer_index" not in question for question in legacy["cards"][0]["metadata"]["questions"])
-
     refreshed = resource_service.generate_current_node_resources(
         "resource-type-user",
         "course1",

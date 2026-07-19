@@ -238,22 +238,25 @@ class PresetAccounts:
       - student / Learn@2026 (学生)
     """
 
-    PRESET_USERS = [
-        {
-            "user_id": "admin",
-            "email": "admin@eduagent.local",
-            "password": "Admin@2026!",
-            "role": "ADMIN",
-            "display_name": "系统管理员",
-        },
-        {
-            "user_id": "student",
-            "email": "student@eduagent.local",
-            "password": "Learn@2026",
-            "role": "STUDENT",
-            "display_name": "测试学生",
-        },
-    ]
+    @classmethod
+    def _get_preset_users(cls) -> List[Dict[str, str]]:
+        """获取预设用户配置（惰性读取环境变量）。"""
+        return [
+            {
+                "user_id": "admin",
+                "email": "admin@eduagent.local",
+                "password": os.getenv("PRESET_ADMIN_PASSWORD", ""),
+                "role": "ADMIN",
+                "display_name": "系统管理员",
+            },
+            {
+                "user_id": "student",
+                "email": "student@eduagent.local",
+                "password": os.getenv("PRESET_STUDENT_PASSWORD", ""),
+                "role": "STUDENT",
+                "display_name": "测试学生",
+            },
+        ]
 
     @classmethod
     def ensure_presets(cls, store: UserStore) -> List[UserRecord]:
@@ -264,9 +267,16 @@ class PresetAccounts:
 
         Returns:
             创建/已存在的预设用户列表。
+
+        Note:
+            需要设置 PRESET_ADMIN_PASSWORD 和 PRESET_STUDENT_PASSWORD 环境变量。
+            如果密码为空，则跳过该账号的创建。
         """
         created = []
-        for preset in cls.PRESET_USERS:
+        for preset in cls._get_preset_users():
+            if not preset.get("password"):
+                # Skip creation if password not provided via environment variable
+                continue
             existing = store.get_by_id(preset["user_id"])
             if existing is None:
                 user = store.create_user(
@@ -284,4 +294,4 @@ class PresetAccounts:
     @classmethod
     def ensure_presets_db(cls, repo) -> list:
         """确保预设账号存在（数据库版本）。"""
-        return repo.ensure_presets(cls.PRESET_USERS)
+        return repo.ensure_presets(cls._get_preset_users())

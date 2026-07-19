@@ -26,19 +26,6 @@ class SessionResponse(BaseModel):
     tutor_response: Optional[Dict[str, Any]] = None
     agent_feedback: List[Dict[str, Any]] = Field(default_factory=list)
     pipeline_log: List[Dict[str, Any]] = Field(default_factory=list)
-    legacy: Dict[str, Any] = Field(default_factory=dict, exclude=True)
 
     def to_dto_dict(self) -> Dict[str, Any]:
         return self.model_dump()
-
-    def to_compatible_dict(self) -> Dict[str, Any]:
-        data = self.to_dto_dict()
-        legacy = dict(self.legacy)
-        data["generated_resources"] = {
-            node_id: [
-                ResourceContract.model_validate(item).with_legacy_aliases()
-                for item in cards
-            ]
-            for node_id, cards in data.get("resources", {}).items()
-        }
-        return {**legacy, **data}

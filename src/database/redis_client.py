@@ -114,17 +114,34 @@ def blacklist_token(jti: str, ttl: int = 900) -> None:
         try:
             r.setex(f"auth:blacklist:{jti}", ttl, "1")
         except Exception:
-            pass
+            try:
+                from src.observability import incr_metric
+                incr_metric("redis.blacklist_token.error")
+            except Exception:
+                pass
 
 
 def is_blacklisted(jti: str) -> bool:
-    """检查令牌是否已注销。"""
+    """检查令牌是否已注销。生产环境下 Redis 不可用时 fail-closed（拒绝请求）。"""
     r = get_redis()
     if r:
         try:
             return bool(r.exists(f"auth:blacklist:{jti}"))
         except Exception:
+            try:
+                from src.observability import incr_metric
+                incr_metric("redis.blacklist_check.error")
+            except Exception:
+                pass
+            if _is_production_environment():
+                return True  # fail-closed: treat as blacklisted when Redis fails
+    elif _is_production_environment():
+        try:
+            from src.observability import incr_metric
+            incr_metric("redis.blacklist_check.unavailable")
+        except Exception:
             pass
+        return True  # fail-closed: Redis unavailable in production
     return False
 
 
@@ -139,13 +156,26 @@ def mark_rotated(jti: str, ttl: int = 10) -> None:
 
 
 def is_rotated(jti: str) -> bool:
-    """检查令牌是否已被轮转（重放攻击检测）。"""
+    """检查令牌是否已被轮转（重放攻击检测）。生产环境下 Redis 不可用时 fail-closed。"""
     r = get_redis()
     if r:
         try:
             return bool(r.exists(f"auth:rotated:{jti}"))
         except Exception:
+            try:
+                from src.observability import incr_metric
+                incr_metric("redis.rotation_check.error")
+            except Exception:
+                pass
+            if _is_production_environment():
+                return True  # fail-closed: treat as rotated when Redis fails
+    elif _is_production_environment():
+        try:
+            from src.observability import incr_metric
+            incr_metric("redis.rotation_check.unavailable")
+        except Exception:
             pass
+        return True  # fail-closed: Redis unavailable in production
     return False
 
 
@@ -205,7 +235,11 @@ def revoke_all_user_sessions(user_id: str) -> None:
                 keys.append(f"auth:refresh_token:{user_id}:{session_id}")
             r.delete(*keys)
         except Exception:
-            pass
+            try:
+                from src.observability import incr_metric
+                incr_metric("redis.revoke_all_sessions.error")
+            except Exception:
+                pass
 
 
 def cache_action_token(token_hash: str, user_id: str, purpose: str, ttl: int) -> None:

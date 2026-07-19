@@ -372,6 +372,12 @@ class TestUserStore:
 class TestPresetAccounts:
     """预设账号测试。"""
 
+    @pytest.fixture(autouse=True)
+    def setup_preset_env(self, monkeypatch):
+        """为预设账号测试设置环境变量。"""
+        monkeypatch.setenv("PRESET_ADMIN_PASSWORD", "Admin@2026!")
+        monkeypatch.setenv("PRESET_STUDENT_PASSWORD", "Learn@2026")
+
     def test_presets_created(self, store: UserStore) -> None:
         """首次调用应创建预设账号。"""
         users = PresetAccounts.ensure_presets(store)

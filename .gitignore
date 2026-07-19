@@ -82,6 +82,7 @@ _merge_tmp/
 
 # Claude / agent skills
 .agents/
+.claude/skills/
 
 # Temporary scripts (non-project)
 auto_deploy.py

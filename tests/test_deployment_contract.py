@@ -44,7 +44,7 @@ def test_compose_defaults_to_fail_closed_production_release() -> None:
     assert "EDUAGENT_APP_ACCESS_ROLLOUT_DENYLIST=${EDUAGENT_APP_ACCESS_ROLLOUT_DENYLIST:-}" in compose
     assert "EDUAGENT_RATE_LIMIT_BACKEND=redis" in compose
     assert "EDUAGENT_TRUST_PROXY_HEADERS=true" in compose
-    assert "EDUAGENT_ENABLE_COMPAT_API=false" in compose
+    assert "EDUAGENT_ENABLE_COMPAT_API" not in compose
     assert "EDUAGENT_ENABLE_PUBLIC_METRICS=false" in compose
     assert "EduAgent2024!" not in compose
     assert "minioadmin" not in compose

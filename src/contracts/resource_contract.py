@@ -87,12 +87,3 @@ class ResourceContract(BaseModel):
     source_refs: List[Dict[str, Any]] = Field(default_factory=list)
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
-    def with_legacy_aliases(self) -> Dict[str, Any]:
-        data = self.model_dump()
-        data["card_type"] = self.resource_type
-        data["content"] = self.body_markdown
-        data["metadata"] = {
-            **self.structured_payload,
-            **({"generation": self.generation} if self.generation else {}),
-        }
-        return data

@@ -17,8 +17,3 @@ class ResourceResponse(BaseModel):
 
     def to_dto_dict(self) -> Dict[str, Any]:
         return self.model_dump()
-
-    def to_compatible_dict(self) -> Dict[str, Any]:
-        data = self.model_dump()
-        data["cards"] = [resource.with_legacy_aliases() for resource in self.resources]
-        return data

@@ -112,13 +112,31 @@ def es_post(path: str, body: Dict, host: str, auth_header: Optional[str]) -> Dic
         return json.loads(resp.read().decode())
 
 
-def backend_post(path: str, body: Dict, base_url: str) -> Dict[str, Any]:
+def backend_post(path: str, body: Dict, base_url: str, headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     url = base_url.rstrip("/") + "/" + path.lstrip("/")
     data = json.dumps(body, ensure_ascii=False).encode()
     req = urllib.request.Request(url, data=data, method="POST")
     req.add_header("Content-Type", "application/json")
+    for name, value in (headers or {}).items():
+        req.add_header(name, value)
     with urllib.request.urlopen(req, timeout=30) as resp:
         return json.loads(resp.read().decode())
+
+
+def _session_api_path(user_id: str, course_id: str, suffix: str = "") -> str:
+    session_id = urllib.parse.quote(f"{user_id}:{course_id}", safe="")
+    return f"/api/sessions/{session_id}{suffix}"
+
+
+def _dev_auth_headers(user_id: str) -> Dict[str, str]:
+    """Mint a local dev token (same default JWT secret as a dev server)."""
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+    from src.auth.security import SecurityManager
+
+    token = SecurityManager.create_token_pair(user_id, "STUDENT")["access_token"]
+    return {"Authorization": f"Bearer {token}"}
 
 
 # ── ES 测试 ───────────────────────────────────────────────────────────────────
@@ -271,75 +289,30 @@ def test_es_search(index: str, host: str, auth_header: Optional[str]) -> None:
 
 # ── SSE 测试 ──────────────────────────────────────────────────────────────────
 
-def test_sse_pipeline(backend: str) -> bool:
-    sep("④ SSE 流水线端点: GET /api/pipeline/stream")
-    url = (
-        f"{backend}/api/pipeline/stream"
-        f"?user_id={DEFAULT_USER_ID}"
-        f"&course_id={DEFAULT_COURSE_ID}"
-        f"&correctness=0.75"
-        f"&time_spent_ratio=1.0"
-        f"&code_pass_rate=0.70"
-        f"&tutor_query={urllib.parse.quote('快速排序怎么工作', safe='')}"
-    )
-    info(f"请求: {url}")
+def test_session_advance(backend: str) -> bool:
+    sep("④ 会话推进端点: POST /api/sessions/{session_id}/advance")
+    path = _session_api_path(DEFAULT_USER_ID, DEFAULT_COURSE_ID, "/advance")
+    info(f"请求: POST {backend}{path}")
     try:
-        req = urllib.request.Request(url)
-        req.add_header("Accept", "text/event-stream")
-        resp = urllib.request.urlopen(req, timeout=40)
-
-        events_received: List[Dict] = []
-        start = time.time()
-        reader = TextIOWrapper(resp, encoding="utf-8")
-
-        event_type = ""
-        data_buf   = ""
-        for raw_line in reader:
-            line = raw_line.rstrip("\n")
-            if line.startswith("event:"):
-                event_type = line[len("event:"):].strip()
-            elif line.startswith("data:"):
-                data_buf = line[len("data:"):].strip()
-            elif line == "" and event_type:
-                events_received.append({"event": event_type, "data": data_buf})
-                if event_type == "done":
-                    break
-                if time.time() - start > 55:
-                    warn("超时（55s），中断读取")
-                    break
-                event_type = ""
-                data_buf   = ""
-
-        resp.close()
-
-        if not events_received:
-            fail("收到0条SSE事件")
+        headers = _dev_auth_headers(DEFAULT_USER_ID)
+        init_path = _session_api_path(DEFAULT_USER_ID, DEFAULT_COURSE_ID, "/path/init")
+        init_state = backend_post(init_path, {}, backend, headers=headers)
+        node_id = init_state.get("current_node_id") or (init_state.get("active_path") or [None])[0]
+        if not node_id:
+            fail("path/init 未返回学习节点")
             return False
+        info(f"当前节点: {node_id}")
 
-        # 汇总
-        event_counts: Dict[str, int] = {}
-        for ev in events_received:
-            event_counts[ev["event"]] = event_counts.get(ev["event"], 0) + 1
+        result = backend_post(path, {
+            "current_node_id": node_id,
+            "interaction_type": "load_node",
+        }, backend, headers=headers)
 
-        ok(f"共收到 {BOLD}{len(events_received)}{RESET} 条事件: {event_counts}")
-
-        # 打印前3条和最后1条
-        for ev in events_received[:3]:
-            try:
-                d = json.loads(ev["data"])
-                info(f"[{ev['event']}] {json.dumps(d, ensure_ascii=False)[:100]}")
-            except Exception:
-                info(f"[{ev['event']}] {ev['data'][:100]}")
-
-        if len(events_received) > 3:
-            last = events_received[-1]
-            try:
-                d = json.loads(last["data"])
-                info(f"[{last['event']}] {json.dumps(d, ensure_ascii=False)[:120]}")
-            except Exception:
-                info(f"[{last['event']}] {last['data'][:120]}")
-
-        return "done" in event_counts
+        if result.get("current_node_id") != node_id:
+            fail(f"advance 返回节点不一致: {result.get('current_node_id')!r}")
+            return False
+        ok(f"advance OK  interaction={result.get('interaction_type')}  contract_v{result.get('resource_contract_version')}")
+        return True
 
     except urllib.error.URLError as e:
         if "Connection refused" in str(e) or "actively refused" in str(e).lower():
@@ -348,18 +321,17 @@ def test_sse_pipeline(backend: str) -> bool:
             fail(f"网络错误: {e}")
         return False
     except Exception as e:
-        fail(f"SSE管线测试失败: {e}")
+        fail(f"会话推进测试失败: {e}")
         return False
 
 
 def test_sse_tutor_stream(backend: str) -> bool:
-    sep("⑤ SSE Tutor 端点: POST /api/tutor/ask-stream")
-    url = f"{backend}/api/tutor/ask-stream"
+    sep("⑤ SSE Tutor 端点: POST /api/sessions/{session_id}/tutor (stream=true)")
+    url = backend.rstrip("/") + _session_api_path(DEFAULT_USER_ID, DEFAULT_COURSE_ID, "/tutor")
     payload = {
-        "user_id": DEFAULT_USER_ID,
-        "course_id": DEFAULT_COURSE_ID,
         "question": "快速排序的最坏情况是什么？如何避免？",
         "context_type": "concept",
+        "stream": True,
     }
     info(f"请求: POST {url}")
     info(f"问题: {payload['question']}")
@@ -368,6 +340,8 @@ def test_sse_tutor_stream(backend: str) -> bool:
         req = urllib.request.Request(url, data=data, method="POST")
         req.add_header("Content-Type", "application/json")
         req.add_header("Accept", "text/event-stream")
+        for name, value in _dev_auth_headers(DEFAULT_USER_ID).items():
+            req.add_header(name, value)
         resp = urllib.request.urlopen(req, timeout=30)
 
         tokens_received = 0
@@ -425,7 +399,7 @@ def test_sse_tutor_stream(backend: str) -> bool:
         if "Connection refused" in str(e) or "actively refused" in str(e).lower():
             fail(f"后端未运行 ({backend})")
         elif "404" in str(e):
-            fail(f"/api/tutor/ask-stream 端点不存在 (404) — 检查 server.py 路由注册")
+            fail("/api/sessions/{session_id}/tutor 端点不存在 (404) — 检查 server.py 路由注册")
         else:
             fail(f"网络错误: {e}")
         return False
@@ -436,17 +410,16 @@ def test_sse_tutor_stream(backend: str) -> bool:
 
 def test_tutor_sync(backend: str) -> bool:
     """同步 tutor ask（用于确认后端连通性基线）。"""
-    sep("⑥ 同步 Tutor 端点（基线）: POST /api/tutor/ask")
-    url = f"{backend}/api/tutor/ask"
+    sep("⑥ 同步 Tutor 端点（基线）: POST /api/sessions/{session_id}/tutor")
+    tutor_path = _session_api_path(DEFAULT_USER_ID, DEFAULT_COURSE_ID, "/tutor")
     payload = {
-        "user_id": DEFAULT_USER_ID,
-        "course_id": DEFAULT_COURSE_ID,
         "question": "什么是动态规划？",
         "context_type": "concept",
+        "stream": False,
     }
-    info(f"请求: POST {url}")
+    info(f"请求: POST {backend}{tutor_path}")
     try:
-        resp_data = backend_post("/api/tutor/ask", payload, backend)
+        resp_data = backend_post(tutor_path, payload, backend, headers=_dev_auth_headers(DEFAULT_USER_ID))
         tutor_resp = resp_data.get("tutor_response") or {}
         text = tutor_resp.get("text_explanation", "") if isinstance(tutor_resp, dict) else ""
         ok(f"同步响应 OK  回答长度: {len(text)} chars")
@@ -509,9 +482,9 @@ def main() -> None:
 
     # ── SSE 测试 ──
     if not args.skip_sse:
-        results["tutor_sync"]   = test_tutor_sync(args.backend)
-        results["sse_pipeline"] = test_sse_pipeline(args.backend)
-        results["sse_tutor"]    = test_sse_tutor_stream(args.backend)
+        results["tutor_sync"]      = test_tutor_sync(args.backend)
+        results["session_advance"] = test_session_advance(args.backend)
+        results["sse_tutor"]       = test_sse_tutor_stream(args.backend)
     else:
         info("跳过 SSE 测试 (--skip-sse)")
 

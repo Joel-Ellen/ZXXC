@@ -156,30 +156,20 @@ def test_resource_latency_client_events_are_bounded_and_histogrammed() -> None:
     assert histograms["frontend.resource_concept_ready_ms"]["p95"] == 9400.0
 
 
-def test_historical_sync_resource_routes_are_not_mounted() -> None:
+def test_historical_sync_resource_routes_are_retired() -> None:
     paths = {
         route.path
         for route in server.app.routes
         if hasattr(route, "path")
     }
-    assert "/api/resources/generate" in paths
-    assert "/api/resources/generate-all" in paths
-    assert all(route.path not in server._RETIRED_RESOURCE_GENERATION_PATHS for route in server._MOUNTED_NEW_ROUTES)
+    assert "/api/resources/generate" not in paths
+    assert "/api/resources/generate-all" not in paths
+    assert "/api/resources/generate-node" not in paths
 
     client = TestClient(server.app)
     assert client.post("/api/resources/generate", json={}).status_code == 404
     assert client.post("/api/resources/generate-all", json={}).status_code == 404
-
-
-def test_legacy_resource_bridge_requires_its_own_explicit_switch(monkeypatch) -> None:
-    monkeypatch.setenv("APP_ENV", "development")
-    monkeypatch.setenv("EDUAGENT_ENABLE_COMPAT_API", "true")
-    monkeypatch.setenv("EDUAGENT_ENABLE_LEGACY_RESOURCE_GENERATION", "false")
-    client = TestClient(server.app)
-
-    response = client.post("/api/resources/generate-node", json={})
-
-    assert response.status_code == 404
+    assert client.post("/api/resources/generate-node", json={}).status_code == 404
 
 
 def test_production_release_metrics_require_authenticated_telemetry(monkeypatch) -> None:
@@ -302,12 +292,12 @@ def test_resource_and_code_execution_outcomes_feed_launch_rates(monkeypatch) -> 
 
 def test_production_hides_internal_surfaces_and_protects_metrics(monkeypatch) -> None:
     monkeypatch.setenv("APP_ENV", "production")
-    monkeypatch.setenv("EDUAGENT_ENABLE_COMPAT_API", "false")
     monkeypatch.setenv("EDUAGENT_ENABLE_PUBLIC_METRICS", "false")
     monkeypatch.setenv("EDUAGENT_OPS_TOKEN", "operations-secret")
     client = TestClient(server.app)
 
-    assert client.post("/api/reset", json={"user_id": "demo_user"}).status_code == 404
+    # /api/reset is a live authenticated feature now: anonymous callers get 401.
+    assert client.post("/api/reset", json={"user_id": "demo_user"}).status_code == 401
     assert client.get("/api/state").status_code == 404
     assert client.get("/api/ops/metrics").status_code == 404
 
@@ -319,31 +309,32 @@ def test_production_hides_internal_surfaces_and_protects_metrics(monkeypatch) ->
     assert authorized.headers["cache-control"] == "no-store"
 
 
-def test_production_hides_legacy_debug_routes_without_ops_token(monkeypatch) -> None:
-    monkeypatch.setenv("APP_ENV", "production")
-    monkeypatch.setenv("EDUAGENT_ENABLE_COMPAT_API", "true")
+def test_retired_debug_routes_are_gone_in_every_mode(monkeypatch) -> None:
     monkeypatch.setenv("EDUAGENT_OPS_TOKEN", "operations-secret")
-    client = TestClient(server.app)
+    for app_env in ("test", "development", "production"):
+        monkeypatch.setenv("APP_ENV", app_env)
+        client = TestClient(server.app)
 
-    requests = (
-        ("GET", "/api/profile/me"),
-        ("POST", "/api/profile/build"),
-        ("POST", "/api/learning/generate-path"),
-        ("POST", "/api/resources/generate"),
-        ("POST", "/api/resources/generate-all"),
-        ("POST", "/api/evaluation/generate-report"),
-        ("GET", "/api/agents/status"),
-        ("POST", "/api/knowledge/search"),
-        ("GET", "/api/knowledge/stats"),
-    )
-    for method, path in requests:
-        assert client.request(method, path, json={}).status_code == 404
+        requests = (
+            ("GET", "/api/profile/me"),
+            ("POST", "/api/profile/build"),
+            ("POST", "/api/learning/generate-path"),
+            ("POST", "/api/resources/generate"),
+            ("POST", "/api/resources/generate-all"),
+            ("POST", "/api/evaluation/generate-report"),
+            ("GET", "/api/agents/status"),
+            ("POST", "/api/knowledge/search"),
+            ("GET", "/api/knowledge/stats"),
+        )
+        for method, path in requests:
+            assert client.request(method, path, json={}).status_code == 404
 
-    authorized = client.get(
-        "/api/agents/status",
-        headers={"X-EduAgent-Ops-Token": "operations-secret"},
-    )
-    assert authorized.status_code == 200
+        # The ops token is not a backdoor into removed endpoints.
+        authorized = client.get(
+            "/api/agents/status",
+            headers={"X-EduAgent-Ops-Token": "operations-secret"},
+        )
+        assert authorized.status_code == 404
 
 
 def test_public_health_is_minimal_in_production(monkeypatch) -> None:
@@ -448,17 +439,6 @@ def test_app_access_allowlist_overrides_zero_percent(monkeypatch) -> None:
     assert decision.enabled is True
     assert decision.cohort == "allowlist"
     assert response is None
-
-
-def test_legacy_debug_routes_remain_available_in_test_mode(monkeypatch) -> None:
-    monkeypatch.setenv("APP_ENV", "test")
-    monkeypatch.delenv("EDUAGENT_ENABLE_COMPAT_API", raising=False)
-    client = TestClient(server.app)
-
-    response = client.get("/api/agents/status")
-
-    assert response.status_code == 200
-    assert response.json()["orchestrator_status"] == "idle"
 
 
 def test_code_practice_rollout_can_hold_back_without_identity_metrics(monkeypatch) -> None:

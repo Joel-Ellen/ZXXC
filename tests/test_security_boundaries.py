@@ -145,7 +145,6 @@ SESSION_OWNER_ROUTES = [
     ("POST", "/api/sessions/alice%3Acourse-a/practice/run", {}),
     ("POST", "/api/sessions/alice%3Acourse-a/practice/submit", {}),
     ("POST", "/api/sessions/alice%3Acourse-a/tutor", {"question": "help"}),
-    ("POST", "/api/sessions/alice%3Acourse-a/tutor-stream", {"question": "help"}),
     ("POST", "/api/sessions/alice%3Acourse-a/replan", {}),
     ("GET", "/api/sessions/alice%3Acourse-a/resources/N01", None),
 ]

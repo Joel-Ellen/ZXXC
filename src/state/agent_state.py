@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field, field_validator
 from typing import Dict, List, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 # ---------------------------------------------------------------------------
@@ -94,7 +94,7 @@ class KnowledgeMasteryRecord(BaseModel):
     node_id: str = Field(..., description="Neo4j 知识点节点 ID")
     mastery: float = Field(default=0.0, ge=0.0, le=1.0, description="掌握度 (0.0-1.0)")
     last_updated: str = Field(
-        default_factory=lambda: datetime.utcnow().isoformat(),
+        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
         description="最近一次更新的 ISO 时间戳"
     )
     interaction_count: int = Field(default=0, ge=0, description="与该知识点的交互总次数")
@@ -201,7 +201,7 @@ class LatestBehavior(BaseModel):
     )
     help_request_count: int = Field(default=0, ge=0, description="求助次数")
     timestamp: str = Field(
-        default_factory=lambda: datetime.utcnow().isoformat(),
+        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
         description="ISO 时间戳"
     )
 
@@ -348,7 +348,7 @@ class AgentState(BaseModel):
 
     # ---- 会话元数据 ----
     session_start: str = Field(
-        default_factory=lambda: datetime.utcnow().isoformat(),
+        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
         description="会话启动 ISO 时间戳"
     )
     iteration: int = Field(default=0, ge=0, description="当前 LangGraph 迭代轮次")
@@ -359,7 +359,7 @@ class AgentState(BaseModel):
 
     def record_error(self, error_msg: str) -> None:
         """追加一条错误信息并截断至最近 50 条。"""
-        self.errors.append(f"[{datetime.utcnow().isoformat()}] {error_msg}")
+        self.errors.append(f"[{datetime.now(timezone.utc).isoformat()}] {error_msg}")
         if len(self.errors) > 50:
             self.errors = self.errors[-50:]
 

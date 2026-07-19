@@ -41,7 +41,6 @@ from frontend.server import (  # noqa: E402
     RESOURCE_CARD_ORDER,
     RESOURCE_CONTRACT_VERSION,
     app,
-    sessions,
 )
 from frontend import server  # noqa: E402
 from src.application._common import get_session  # noqa: E402
@@ -102,14 +101,14 @@ def _isolated_resource_generation(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _init_workspace(client: TestClient, user_id: str, course_id: str) -> str:
-    sessions.pop(user_id, None)
-    init_response = client.post("/api/init-path", json={"user_id": user_id, "course_id": course_id})
+    init_response = client.post(
+        f"/api/sessions/{_session_path(user_id, course_id)}/path/init",
+        json={},
+        headers=_auth_headers(user_id),
+    )
     assert init_response.status_code == 200
-
-    state_response = client.get("/api/state", params={"user_id": user_id, "course_id": course_id})
-    assert state_response.status_code == 200
-    state = state_response.json()
-    return state["current_node_id"] or state["active_path"][0]
+    init_state = init_response.json()
+    return init_state["current_node_id"] or init_state["active_path"][0]
 
 
 def _session_path(user_id: str, course_id: str) -> str:
@@ -160,13 +159,12 @@ def _load_node(
     generate_resources: bool = True,
 ) -> dict:
     response = client.post(
-        "/api/pipeline/step",
+        f"/api/sessions/{_session_path(user_id, course_id)}/advance",
         json={
-            "user_id": user_id,
-            "course_id": course_id,
             "current_node_id": node_id,
             "interaction_type": "load_node",
         },
+        headers=_auth_headers(user_id),
     )
     assert response.status_code == 200
     resources_response = client.get(
@@ -207,13 +205,16 @@ def _load_node(
 
 
 def _fetch_state(client: TestClient, user_id: str, course_id: str) -> dict:
-    response = client.get("/api/state", params={"user_id": user_id, "course_id": course_id})
+    response = client.get(
+        f"/api/sessions/{_session_path(user_id, course_id)}",
+        headers=_auth_headers(user_id),
+    )
     assert response.status_code == 200
     return response.json()
 
 
 def _cards_for_node(state: dict, node_id: str) -> list[dict]:
-    return state["generated_resources"].get(node_id, [])
+    return state["resources"].get(node_id, [])
 
 
 def _quiz_submission(user_id: str, course_id: str, node_id: str, *, correct: bool) -> dict:
@@ -249,15 +250,15 @@ def test_load_node_returns_current_node_resource_contract() -> None:
     assert step_payload["advanced_to_next_node"] is False
 
     assert state["resource_contract_version"] == RESOURCE_CONTRACT_VERSION
-    assert [card["card_type"] for card in cards] == RESOURCE_CARD_ORDER
+    assert [card["resource_type"] for card in cards] == RESOURCE_CARD_ORDER
     assert len(cards) == len(RESOURCE_CARD_ORDER)
-    assert len({card["card_type"] for card in cards}) == len(RESOURCE_CARD_ORDER)
+    assert len({card["resource_type"] for card in cards}) == len(RESOURCE_CARD_ORDER)
 
     for card in cards:
-        metadata = card["metadata"]
-        assert metadata["render_type"] == card["card_type"]
+        payload = card["structured_payload"]
+        assert payload["render_type"] == card["resource_type"]
 
-    metadata_by_type = {card["card_type"]: card["metadata"] for card in cards}
+    metadata_by_type = {card["resource_type"]: card["structured_payload"] for card in cards}
     assert all(metadata_by_type[card_type]["title"] for card_type in RESOURCE_CARD_ORDER)
     assert {"title", "questions", "pass_threshold"} <= metadata_by_type["diagnostic_quiz"].keys()
     assert all(
@@ -278,8 +279,8 @@ def test_repeated_load_node_does_not_duplicate_cards() -> None:
     cards = _cards_for_node(state, node_id)
 
     assert len(cards) == len(RESOURCE_CARD_ORDER)
-    assert [card["card_type"] for card in cards] == RESOURCE_CARD_ORDER
-    assert len({card["card_type"] for card in cards}) == len(RESOURCE_CARD_ORDER)
+    assert [card["resource_type"] for card in cards] == RESOURCE_CARD_ORDER
+    assert len({card["resource_type"] for card in cards}) == len(RESOURCE_CARD_ORDER)
 
 
 def test_diagnostic_below_threshold_stays_on_current_node() -> None:
@@ -289,14 +290,13 @@ def test_diagnostic_below_threshold_stays_on_current_node() -> None:
     _load_node(client, user_id, course_id, node_id)
 
     response = client.post(
-        "/api/pipeline/step",
+        f"/api/sessions/{_session_path(user_id, course_id)}/advance",
         json={
-            "user_id": user_id,
-            "course_id": course_id,
             "current_node_id": node_id,
             "interaction_type": "complete_learning",
             **_quiz_submission(user_id, course_id, node_id, correct=False),
         },
+        headers=_auth_headers(user_id),
     )
     assert response.status_code == 200
     payload = response.json()
@@ -309,7 +309,7 @@ def test_diagnostic_below_threshold_stays_on_current_node() -> None:
     assert payload["current_node_id"] == node_id
     assert payload["evaluated_node_id"] == node_id
     assert payload["evaluated_node_mastery"] == 0.0
-    assert state["current_node_id"] == node_id
+    assert state["session"]["current_node_id"] == node_id
     assert len(_cards_for_node(state, node_id)) == len(RESOURCE_CARD_ORDER)
 
 
@@ -323,14 +323,13 @@ def test_diagnostic_at_threshold_advances_to_next_pending_node() -> None:
     session.agent_state.dynamic_profile.knowledge_mastery[node_id] = 0.9
 
     response = client.post(
-        "/api/pipeline/step",
+        f"/api/sessions/{_session_path(user_id, course_id)}/advance",
         json={
-            "user_id": user_id,
-            "course_id": course_id,
             "current_node_id": node_id,
             "interaction_type": "complete_learning",
             **_quiz_submission(user_id, course_id, node_id, correct=True),
         },
+        headers=_auth_headers(user_id),
     )
     assert response.status_code == 200
     payload = response.json()
@@ -344,4 +343,4 @@ def test_diagnostic_at_threshold_advances_to_next_pending_node() -> None:
     assert payload["next_node_id"]
     assert payload["next_node_id"] != node_id
     assert payload["current_node_id"] == payload["next_node_id"]
-    assert state["current_node_id"] == payload["next_node_id"]
+    assert state["session"]["current_node_id"] == payload["next_node_id"]

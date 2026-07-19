@@ -752,284 +752,6 @@ def _attach_generation_summary(
     }
 
 
-def _legacy_generate_current_node_resources(
-    user_id: str,
-    course_id: str = "data_structures",
-    node_id: Optional[str] = None,
-    force: bool = False,
-    include_legacy: bool = False,
-    card_type: Optional[str] = None,
-) -> Dict[str, Any]:
-    from src.orchestration_runtime import get_runtime
-
-    with bind_context(
-        user_id=user_id,
-        course_id=course_id,
-        node_id=node_id or "",
-        operation="generate_current_node_resources",
-    ):
-        started = time.perf_counter()
-        session = get_session(user_id, course_id)
-        state = session.agent_state
-        target_node = node_id or state.current_node_id or (state.active_path[0] if state.active_path else None)
-        if not target_node:
-            return {"error": "缺少学习节点标识。", "status_code": 400}
-
-        requested_types, card_type_error = _requested_card_types(card_type)
-        if card_type_error:
-            return {"error": card_type_error, "status_code": 400}
-
-        active_retest_resource_id = _active_retest_resource_id(state, target_node)
-        if force and active_retest_resource_id and "diagnostic_quiz" in (requested_types or []):
-            if str(card_type or "").strip() == "diagnostic_quiz":
-                return {
-                    "status": "review_retest_active",
-                    "error": "请先完成当前复习复测，再替换诊断测验。",
-                    "status_code": 409,
-                    "node_id": target_node,
-                    "retest_resource_id": active_retest_resource_id,
-                }
-            # A general refresh may still update supporting material, but it
-            # must not replace the only diagnostic card that can close the
-            # active review item.
-            requested_types = [
-                resource_type
-                for resource_type in requested_types or []
-                if resource_type != "diagnostic_quiz"
-            ]
-
-        runtime = get_runtime()
-        binding = _canonical_node_binding(runtime, course_id, target_node)
-        validation_pipeline = get_validation_pipeline()
-        difficulty = max(0.1, 1.0 - state.dynamic_profile.knowledge_mastery.get(target_node, 0.5))
-        rejected_cards = 0
-        generation_by_type: Dict[str, Dict[str, Any]] = {}
-        existing = state.generated_resources.get(target_node, [])
-
-        # Persisted cards predate the semantic binding contract. Revalidate
-        # them before the already_exists fast path so a stale wrong-topic card
-        # cannot remain visible indefinitely.
-        if not force:
-            audited_existing: list[ResourceCard] = []
-            repaired_existing = False
-            for existing_card in existing:
-                if existing_card.card_type not in (requested_types or []):
-                    audited_existing.append(existing_card)
-                    continue
-                bound_existing = _with_semantic_binding(existing_card, binding)
-                bound_existing = _refresh_unconsumed_diagnostic_metadata(
-                    state,
-                    bound_existing,
-                    binding,
-                )
-                bound_existing, practice_metadata_changed = _refresh_interactive_exercise_metadata(
-                    bound_existing,
-                    binding,
-                )
-                repaired_existing = repaired_existing or practice_metadata_changed
-                validated_existing, validation = validation_pipeline.validate_resource_card(
-                    bound_existing
-                )
-                if validated_existing is not None:
-                    audited_existing.append(validated_existing)
-                    continue
-
-                repaired_existing = True
-                rejected_cards += 1
-                issue_codes = _record_resource_rejection(
-                    state,
-                    target_node,
-                    existing_card.card_type,
-                    validation,
-                    stage="persisted_resource_output",
-                )
-                previous_generation = (
-                    existing_card.metadata.get("generation", {})
-                    if isinstance(existing_card.metadata, dict)
-                    else {}
-                )
-                if not isinstance(previous_generation, dict):
-                    previous_generation = {}
-                fallback_generation = _fallback_generation(previous_generation, issue_codes)
-                fallback_content = _bound_template_content(binding, existing_card.card_type)
-                try:
-                    quiz_revision = max(
-                        1,
-                        int((existing_card.metadata or {}).get("quiz_revision", 1)),
-                    )
-                except (TypeError, ValueError):
-                    quiz_revision = 1
-                fallback_card = _resource_card(
-                    resource_id=existing_card.resource_id,
-                    binding=binding,
-                    card_type=existing_card.card_type,
-                    content=fallback_content,
-                    difficulty=existing_card.difficulty,
-                    cognitive_style=existing_card.cognitive_style,
-                    quiz_revision=quiz_revision,
-                    generation=fallback_generation,
-                )
-                validated_fallback, fallback_validation = validation_pipeline.validate_resource_card(
-                    fallback_card
-                )
-                if validated_fallback is not None:
-                    audited_existing.append(validated_fallback)
-                    generation_by_type[existing_card.card_type] = fallback_generation
-                else:
-                    _record_resource_rejection(
-                        state,
-                        target_node,
-                        existing_card.card_type,
-                        fallback_validation,
-                        stage="resource_template_fallback",
-                    )
-
-            state.generated_resources[target_node] = audited_existing
-            if repaired_existing:
-                normalize_state_resources(state)
-                persist_session(session)
-            existing = state.generated_resources.get(target_node, [])
-
-        # Template fallbacks are placeholders for a failed generation. Treat
-        # them as missing so a later request retries with a fresh LLM budget
-        # instead of pinning the degraded card until a force regeneration.
-        existing_types = {
-            card.card_type
-            for card in existing
-            if not _is_template_generated(card.metadata)
-        }
-        if not force and existing_types.issuperset(set(requested_types or [])):
-            normalize_state_resources(state)
-            resources = [
-                resource_contract_from_card(card)
-                for card in state.generated_resources.get(target_node, [])
-                if card.card_type in (requested_types or [])
-            ]
-            response = resource_response(
-                target_node,
-                resources,
-                status="repaired_fallback" if generation_by_type else "already_exists",
-            )
-            payload = (
-                response.to_compatible_dict()
-                if include_legacy
-                else response.to_dto_dict()
-            )
-            _attach_generation_summary(payload, generation_by_type)
-            return payload
-
-        types_to_generate = [
-            requested_card_type
-            for requested_card_type in requested_types or []
-            if force or requested_card_type not in existing_types
-        ]
-        generation_results = _generate_resource_results(
-            runtime,
-            course_id,
-            target_node,
-            str(binding["title"]),
-            types_to_generate,
-            difficulty,
-        )
-        for requested_card_type in requested_types or []:
-            if not force and requested_card_type in existing_types:
-                continue
-            content, generation = generation_results.get(
-                requested_card_type,
-                ("", {"source": "unknown"}),
-            )
-            content = _truthful_generated_content(content, generation)
-            quiz_revision = (
-                _diagnostic_quiz_revision(existing, force)
-                if requested_card_type == "diagnostic_quiz"
-                else 1
-            )
-            resource_id = f"{target_node}_{requested_card_type}_supp"
-            if requested_card_type == "diagnostic_quiz" and quiz_revision > 1:
-                resource_id = f"{resource_id}_r{quiz_revision}"
-            raw_card = _resource_card(
-                resource_id=resource_id,
-                binding=binding,
-                card_type=requested_card_type,
-                content=content,
-                difficulty=difficulty,
-                cognitive_style=state.recommended_resource_style or "textual",
-                quiz_revision=quiz_revision,
-                generation=generation,
-            )
-            validated_card, validation = validation_pipeline.validate_resource_card(raw_card)
-            if validated_card is not None:
-                upsert_resource_card(state, validated_card)
-                generation_by_type[requested_card_type] = generation
-            else:
-                rejected_cards += 1
-                issue_codes = _record_resource_rejection(
-                    state,
-                    target_node,
-                    requested_card_type,
-                    validation,
-                    stage="resource_output",
-                )
-                fallback_generation = _fallback_generation(generation, issue_codes)
-                fallback_content = _bound_template_content(binding, requested_card_type)
-                fallback_card = _resource_card(
-                    resource_id=resource_id,
-                    binding=binding,
-                    card_type=requested_card_type,
-                    content=fallback_content,
-                    difficulty=difficulty,
-                    cognitive_style=state.recommended_resource_style or "textual",
-                    quiz_revision=quiz_revision,
-                    generation=fallback_generation,
-                )
-                validated_fallback, fallback_validation = validation_pipeline.validate_resource_card(
-                    fallback_card
-                )
-                generation_by_type[requested_card_type] = fallback_generation
-                if validated_fallback is not None:
-                    upsert_resource_card(state, validated_fallback)
-                else:
-                    _record_resource_rejection(
-                        state,
-                        target_node,
-                        requested_card_type,
-                        fallback_validation,
-                        stage="resource_template_fallback",
-                    )
-
-        normalize_state_resources(state)
-        persist_session(session)
-        duration_ms = round((time.perf_counter() - started) * 1000, 3)
-        observe_metric("resource.generate.duration_ms", duration_ms)
-        log_event(
-            "resource.generate.complete",
-            node_id=target_node,
-            rejected_cards=rejected_cards,
-            template_fallback_count=sum(
-                1
-                for generation in generation_by_type.values()
-                if generation.get("source") == "template"
-            ),
-            force=force,
-            card_type=card_type or "all",
-            duration_ms=duration_ms,
-        )
-
-        resources = [
-            resource_contract_from_card(card)
-            for card in state.generated_resources.get(target_node, [])
-            if card.card_type in (requested_types or [])
-        ]
-        response = resource_response(target_node, resources, status="generated")
-        payload = response.to_compatible_dict() if include_legacy else response.to_dto_dict()
-        _attach_generation_summary(payload, generation_by_type)
-        if active_retest_resource_id:
-            payload["preserved_retest_resource_id"] = active_retest_resource_id
-        return payload
-
-
-# The legacy implementation above remains as a rollback reference while the
-# public entry points below are used by the HTTP API and background workers.
 _RESOURCE_JOB_REPO: Optional[ResourceGenerationRepo] = None
 _RESOURCE_JOB_REPO_LOCK = threading.Lock()
 _RESOURCE_JOB_FUTURES: Dict[str, concurrent.futures.Future[Any]] = {}
@@ -1228,7 +950,6 @@ def _resource_payload(
     *,
     requested_types: Iterable[str],
     status: str = "ok",
-    include_legacy: bool = False,
 ) -> Dict[str, Any]:
     cards = list(cards)
     response = resource_response(
@@ -1236,7 +957,7 @@ def _resource_payload(
         [resource_contract_from_card(card) for card in cards],
         status=status,
     )
-    payload = response.to_compatible_dict() if include_legacy else response.to_dto_dict()
+    payload = response.to_dto_dict()
     present = {card.card_type for card in cards}
     payload["missing_card_types"] = [
         card_type for card_type in requested_types if card_type not in present
@@ -1464,7 +1185,6 @@ def get_node_resources(
     *,
     card_types: Optional[Iterable[str]] = None,
     card_type: Optional[str] = None,
-    include_legacy: bool = False,
     locale: str = "zh-CN",
     repo: Optional[ResourceGenerationRepo] = None,
 ) -> Dict[str, Any]:
@@ -1528,7 +1248,6 @@ def get_node_resources(
         target_node,
         selected,
         requested_types=requested_types or [],
-        include_legacy=include_legacy,
     )
 
 
@@ -3363,10 +3082,9 @@ def generate_current_node_resources(
     course_id: str = "data_structures",
     node_id: Optional[str] = None,
     force: bool = False,
-    include_legacy: bool = False,
     card_type: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Synchronous compatibility bridge over the job-based generation path."""
+    """Synchronous harness over the job-based generation path (tests/diagnostics)."""
     requested_types, error = _normalise_requested_types(card_type=card_type)
     if error:
         return {"error": error, "status_code": 400}
@@ -3398,7 +3116,6 @@ def generate_current_node_resources(
         course_id,
         target_node,
         card_types=visible_types,
-        include_legacy=include_legacy,
     )
     if payload.get("status_code"):
         return payload
