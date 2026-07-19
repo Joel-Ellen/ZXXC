@@ -8,9 +8,9 @@ Validator Node — 双极防幻觉校验链
 
 核心能力：
 
-1. 第一极门控 (Pole-1 Gate) — 符号硬核对 + AST 静态检查
+1. 第一极门控 (Pole-1 Gate) — 符号硬核对 + 静态语法检查
    - 提取生成文本中的公式实体 (LaTeX / 数学符号)
-   - 对代码片段进行 AST 静态语法检查 (Python AST)
+   - 对学习者代码片段进行 C11 静态语法检查
    - 通过后立即允许流式直通上屏 (先行通过，不阻塞用户体验)
 
 2. 第二极门控 (Pole-2 Gate) — 异步 NLI 蕴含度度量
@@ -24,14 +24,13 @@ Validator Node — 双极防幻觉校验链
    - 最多 3 轮迭代，超限则标记为需人工审核
 
 依赖声明：
-  AST 模块使用 Python 内置 ast 库。
+  C11 静态检查使用 pycparser，不执行学习者代码。
   科大讯飞星火大模型用于 NLI 推理与内容安全审查。
   AI 辅助编码工具：科大讯飞 iFlyCode / 星火大模型辅助生成。
 """
 
 from __future__ import annotations
 
-import ast as _ast
 import re
 import math
 from typing import Dict, List, Optional, Tuple, Any, Set, Callable
@@ -40,6 +39,35 @@ from enum import Enum
 from pydantic import BaseModel, Field
 
 from ..state.agent_state import AgentState, ResourceCard
+from ..validation.c_syntax import validate_c_source
+
+
+_C11_LEARNER_OUTPUT_TYPES = {
+    "assessment_report",
+    "code_snippet",
+    "concept_map",
+    "diagnostic_quiz",
+    "interactive_exercise",
+    "tutor_response",
+    "video_summary",
+}
+_NON_EXECUTABLE_FENCE_LANGUAGES = {
+    "csv",
+    "diff",
+    "json",
+    "latex",
+    "markdown",
+    "math",
+    "md",
+    "mermaid",
+    "output",
+    "plain",
+    "plaintext",
+    "text",
+    "xml",
+    "yaml",
+    "yml",
+}
 
 
 # ============================================================================
@@ -178,7 +206,7 @@ class EntityExtractor:
     ]
     # Markdown 代码块模式
     CODE_BLOCK_RE: re.Pattern = re.compile(
-        r'```(\w*)\n(.*?)```', re.DOTALL
+        r"```([^\n`]*)\r?\n(.*?)```", re.DOTALL
     )
 
     # 常见 LaTeX 语法错误模式
@@ -212,22 +240,10 @@ class EntityExtractor:
         return errors
 
     @classmethod
-    def check_python_ast(cls, code: str) -> List[str]:
-        """对 Python 代码进行 AST 静态语法检查。
-
-        Returns:
-            语法错误列表（空 = 无错误）。
-        """
-        errors: List[str] = []
-        try:
-            _ast.parse(code)
-        except SyntaxError as e:
-            errors.append(
-                f"AST SyntaxError at line {e.lineno}, col {e.offset}: {e.msg}"
-            )
-        except Exception as e:
-            errors.append(f"AST parse exception: {str(e)[:100]}")
-        return errors
+    def check_c_syntax(cls, code: str) -> List[str]:
+        """Run the bounded, non-executing syntax gate for C examples."""
+        issue = validate_c_source(code)
+        return [issue.message] if issue is not None else []
 
 
 # ============================================================================
@@ -298,11 +314,11 @@ class SlidingWindowSplitter:
 # ============================================================================
 
 class Pole1Gate:
-    """第一极门控 — 符号硬核对 + AST 静态检查。
+    """第一极门控 — 符号硬核对 + 静态语法检查。
 
     流程:
       1. 提取公式 → LaTeX 语法检查
-      2. 提取代码块 → Python AST 解析
+      2. 按输出合同提取并校验代码块
       3. 通过 → 流式直通；失败 → 标记拒绝
     """
 
@@ -324,9 +340,42 @@ class Pole1Gate:
             formula_errors.extend(EntityExtractor.check_formula_syntax(f))
 
         ast_errors: List[str] = []
+        if card_type == "code_snippet" and not code_blocks:
+            ast_errors.append("Code snippets must contain a fenced C11 code block.")
         for lang, code in code_blocks:
-            if lang.lower() in ("python", "py", ""):
-                ast_errors.extend(EntityExtractor.check_python_ast(code))
+            normalized_language = lang.strip().lower()
+            if card_type == "code_snippet":
+                if normalized_language not in {"c", "c11"}:
+                    ast_errors.append("Code snippets must use a c or c11 fence.")
+                    continue
+                ast_errors.extend(EntityExtractor.check_c_syntax(code))
+            elif card_type == "tutor_response":
+                # ``text`` is reserved for verbatim learner submissions and
+                # diagnostics. Any new executable example must be C11.
+                if normalized_language == "text":
+                    continue
+                if normalized_language not in {"c", "c11"}:
+                    ast_errors.append("Tutor code examples must use a c or c11 fence.")
+                    continue
+                ast_errors.extend(EntityExtractor.check_c_syntax(code))
+            elif card_type in _C11_LEARNER_OUTPUT_TYPES:
+                if normalized_language in _NON_EXECUTABLE_FENCE_LANGUAGES:
+                    continue
+                if normalized_language not in {"c", "c11"}:
+                    ast_errors.append("Learner code examples must use a c or c11 fence.")
+                    continue
+                ast_errors.extend(EntityExtractor.check_c_syntax(code))
+            elif normalized_language in _NON_EXECUTABLE_FENCE_LANGUAGES:
+                # Explicit text/output blocks are diagnostic payloads, not
+                # generated examples. They are intentionally not parsed.
+                continue
+            elif normalized_language in ("c", "c11"):
+                ast_errors.extend(EntityExtractor.check_c_syntax(code))
+            else:
+                # Unknown and unlabelled fences must not fall back to the
+                # historical Python parser: that would let valid Python pass
+                # while rejecting a valid C example in a future card type.
+                ast_errors.append("Learner code examples must use a c or c11 fence.")
 
         passed = len(formula_errors) == 0 and len(ast_errors) == 0
 

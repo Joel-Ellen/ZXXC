@@ -74,6 +74,7 @@
       :get-agent-label="getAgentLabel"
       :parse-quiz="parseQuiz"
       :active-course="activeCourse"
+      :session-id="sessionId"
       :enrolled-courses="enrolledCourses"
       @select-node="loadNode"
       @submit-quiz="submitWorkspaceQuiz"
@@ -85,6 +86,8 @@
       @browse-courses="openCourseSelection"
       @refresh-resources="() => refreshNodeResources(currentNode, { force: true })"
       @generate-card="onGenerateCard"
+      @code-run="onCodeRun"
+      @code-submitted="onCodeSubmitted"
       @restart-probe="restartProbe"
     />
   </div>
@@ -126,6 +129,7 @@ const {
   overallProgress,
   masteredCount,
   activeCourse,
+  sessionId,
   availableCourses,
   enrolledCourses,
   handleLogout,
@@ -141,6 +145,8 @@ const {
   handleEnrollCourse,
   handleSwitchCourse,
   restartProbe,
+  recordCodeRun,
+  recordCodeSubmission,
 } = useEduAgent();
 
 onMounted(() => {
@@ -216,6 +222,18 @@ async function onGenerateCard({ nodeId, force = false, cardType = "" } = {}) {
   const targetNode = nodeId || currentNode.value;
   if (!targetNode) return;
   await refreshNodeResources(targetNode, { force, cardType });
+}
+
+function onCodeRun(payload) {
+  void recordCodeRun(payload).catch((error) => {
+    console.error("Unable to record code run:", error);
+  });
+}
+
+function onCodeSubmitted(payload) {
+  void recordCodeSubmission(payload).catch((error) => {
+    console.error("Unable to record code submission:", error);
+  });
 }
 </script>
 

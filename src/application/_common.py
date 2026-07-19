@@ -15,6 +15,7 @@ except Exception:
 from src.orchestration_runtime import RuntimeSession, get_runtime
 from src.observability import incr_metric, log_event
 from src.state.agent_state import AgentFeedbackItem, ResourceCard
+from src.validation.c_syntax import is_c_learner_resource
 from src.validation.pipeline import get_validation_pipeline
 from src.validation.result import ValidationResult
 
@@ -185,6 +186,15 @@ def normalize_state_resources(agent_state) -> None:
         extras: List[ResourceCard] = []
         for raw_card in cards:
             card = normalize_resource_card(raw_card)
+            if not is_c_learner_resource(
+                card.content,
+                card_type=card.card_type,
+                structured_payload=card.metadata.get("structured_payload"),
+            ):
+                # Persisted sessions may contain pre-C examples. Drop them
+                # before any session DTO can expose source under a C label;
+                # the next resource read will regenerate the missing type.
+                continue
             if card.card_type in RESOURCE_CARD_ORDER:
                 latest_by_type[card.card_type] = card
             else:

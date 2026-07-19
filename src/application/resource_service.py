@@ -64,6 +64,7 @@ from src.resource_generation.policy import (
 from src.resource_generation.quality import evaluate_resource_quality
 from src.resource_generation.services import content_hash
 from src.state.agent_state import ResourceCard
+from src.validation.c_syntax import is_c_learner_resource
 from src.validation.language import (
     is_chinese_learning_content,
     non_chinese_resource_fields,
@@ -222,7 +223,7 @@ def _bound_template_content(binding: Dict[str, Any], card_type: str) -> str:
         ),
         "code_snippet": (
             f"## {title}\n\n"
-            f"```python\n# {title}（{node_id}）的练习脚手架\npass\n```"
+            f"```c\n#include <stddef.h>\n\n/* {title}（{node_id}）的练习脚手架 */\nint solve(const int *values, size_t count) {{\n    (void)values;\n    (void)count;\n    return 0;\n}}\n```"
         ),
         "interactive_exercise": (
             f"## {title}\n\n"
@@ -271,18 +272,29 @@ def _truthful_generated_content(content: str, generation: Dict[str, Any]) -> str
 
 
 def _resource_card_language_valid(card: ResourceCard, locale: str) -> bool:
-    if not str(locale or "").lower().startswith("zh"):
-        return True
-    if not is_chinese_learning_content(card.content):
-        return False
     metadata = card.metadata if isinstance(card.metadata, dict) else {}
-    structured_payload = metadata.get("structured_payload")
-    if not isinstance(structured_payload, dict):
+    canonical_payload = metadata.get("structured_payload")
+    has_canonical_payload = isinstance(canonical_payload, dict)
+    structured_payload = canonical_payload
+    if not has_canonical_payload:
         try:
             projected = resource_contract_from_card(card).structured_payload
         except Exception:
             projected = {}
         structured_payload = projected if isinstance(projected, dict) else {}
+    # Apply the same C/example fence contract used by state serialization.
+    # Canonical code payloads additionally require an explicit C language.
+    if not is_c_learner_resource(
+        card.content,
+        card_type=card.card_type,
+        structured_payload=structured_payload,
+        require_structured_language=has_canonical_payload,
+    ):
+        return False
+    if not str(locale or "").lower().startswith("zh"):
+        return True
+    if not is_chinese_learning_content(card.content):
+        return False
     return not non_chinese_resource_fields(structured_payload)
 
 

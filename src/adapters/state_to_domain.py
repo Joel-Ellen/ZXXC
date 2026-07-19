@@ -12,6 +12,21 @@ from src.domain.profile import DynamicLearningProfile, StudentProfile
 from src.domain.resource import LearningResource, ResourceBundle
 from src.domain.session import LearningSession, SessionStatus
 from src.state.agent_state import AgentState, ResourceCard
+from src.validation.c_syntax import is_c_learner_resource
+
+
+def _public_resource_contracts(cards: List[ResourceCard]) -> List[ResourceContract]:
+    contracts: List[ResourceContract] = []
+    for card in cards:
+        resource = resource_contract_from_card(card)
+        if is_c_learner_resource(
+            resource.body_markdown,
+            card_type=resource.resource_type,
+            structured_payload=resource.structured_payload,
+            require_structured_language=resource.resource_type == "code_snippet",
+        ):
+            contracts.append(resource)
+    return contracts
 
 
 def _node_title(node_id: Optional[str]) -> str:
@@ -266,13 +281,18 @@ def learning_resource_from_card(card: ResourceCard) -> LearningResource:
 def resource_bundle_from_state(state: AgentState, node_id: str) -> ResourceBundle:
     return ResourceBundle(
         node_id=node_id,
-        resources=[learning_resource_from_card(card) for card in state.generated_resources.get(node_id, [])],
+        resources=[
+            LearningResource.model_validate(resource.model_dump())
+            for resource in _public_resource_contracts(
+                state.generated_resources.get(node_id, [])
+            )
+        ],
     )
 
 
 def resources_from_state(state: AgentState) -> Dict[str, List[ResourceContract]]:
     return {
-        node_id: [resource_contract_from_card(card) for card in cards]
+        node_id: _public_resource_contracts(cards)
         for node_id, cards in state.generated_resources.items()
     }
 

@@ -3,11 +3,12 @@
 
 from __future__ import annotations
 
-import ast
 import re
 import unicodedata
 from collections.abc import Mapping, Sequence
 from typing import Any
+
+from .c_syntax import validate_c_source
 
 
 _CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
@@ -53,6 +54,14 @@ _CODE_BLOCK_SIGNAL_RE = re.compile(
     r"=>|\{\s*$|;\s*$"
     r")",
     re.MULTILINE,
+)
+_DIAGNOSTIC_LINE_RE = re.compile(
+    r"(?:"
+    r"^\s*(?:[^\s:]+\.(?:c|h):)?\d+(?::\d+)?:\s*(?:fatal\s+)?(?:error|warning|note):|"
+    r"^\s*[A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception|Warning):\s*\S|"
+    r"^\s*(?:Traceback \(most recent call last\):|at\s+\S+\s*\([^\n]+\))"
+    r")",
+    re.MULTILINE | re.IGNORECASE,
 )
 _NON_SIMPLIFIED_CJK_RE = re.compile(
     r"[學習語説說體驗課內標題圖書問應該輸為與這個關係讓從對於實開發處結總簡"
@@ -166,30 +175,9 @@ _TRANSLATABLE_UPPERCASE_WORDS = {
 }
 _UPPERCASE_PROSE_SEPARATOR_RE = re.compile(r"[\s,.;:/|&()\[\]{}]+")
 _PROGRAMMING_FENCE_LANGUAGES = {
-    "bash",
     "c",
-    "cpp",
-    "css",
-    "go",
-    "html",
-    "java",
-    "javascript",
-    "js",
-    "json",
-    "jsx",
-    "kotlin",
-    "python",
-    "py",
-    "rust",
-    "shell",
-    "sql",
-    "swift",
-    "ts",
-    "tsx",
-    "typescript",
-    "vue",
-    "xml",
-    "yaml",
+    "c11",
+    "text",
 }
 _TECHNICAL_WORDS = {
     "api",
@@ -438,19 +426,35 @@ def _looks_like_inline_code(body: str) -> bool:
 
 
 def _looks_like_fenced_code(language: str, body: str) -> bool:
-    if language in {"python", "py"}:
-        try:
-            parsed = ast.parse(body, filename="<learner-code>", mode="exec")
-        except (SyntaxError, ValueError, TypeError, MemoryError, RecursionError):
-            return False
-        return bool(parsed.body or re.search(r"^\s*#", body, re.MULTILINE))
-    if language == "yaml":
-        return bool(re.search(
-            r"^\s*[A-Za-z_][A-Za-z0-9_.-]*\s*:\s*\S+",
-            body,
-            re.MULTILINE,
-        ))
-    return _looks_like_code_block(body)
+    if language in {"c", "c11"}:
+        return validate_c_source(body) is None
+    if language == "text":
+        # ``text`` is used for verbatim learner submissions and diagnostics,
+        # but it must not become a way to hide ordinary English prose from the
+        # learner-language gate.
+        return bool(
+            _looks_like_code_block(body)
+            or validate_c_source(body) is None
+            or _DIAGNOSTIC_LINE_RE.search(body)
+        )
+    if not language:
+        return validate_c_source(body) is None
+    return False
+
+
+def _looks_like_c_example(value: str) -> bool:
+    """Accept only raw C source or one or more C/C11 fenced blocks."""
+    stripped = value.strip()
+    fenced = list(_FENCED_CODE_RE.finditer(stripped))
+    if not fenced:
+        return validate_c_source(stripped) is None
+    if _FENCED_CODE_RE.sub("", stripped).strip():
+        return False
+    return all(
+        match.group(1).strip().lower() in {"c", "c11"}
+        and validate_c_source(match.group(2)) is None
+        for match in fenced
+    )
 
 
 def _strip_indented_code(text: str) -> tuple[str, bool]:
@@ -473,7 +477,7 @@ def _strip_indented_code(text: str) -> tuple[str, bool]:
             line = lines[index]
             block.append(line[4:] if line.startswith("    ") else line[1:] if line.startswith("\t") else line)
             index += 1
-        if _looks_like_code_block("".join(block)):
+        if _looks_like_c_example("".join(block)):
             output.append("\n")
             found = True
         else:
@@ -764,11 +768,7 @@ def non_chinese_tutor_fields(payload: Mapping[str, Any]) -> list[str]:
             for index, item in enumerate(value):
                 visit(item, f"{path}.{index}", code_value=code_value)
         elif isinstance(value, str) and value.strip():
-            if code_value and (
-                _looks_like_fenced_code("python", value)
-                or _looks_like_code_block(value)
-                or _looks_like_inline_code(value)
-            ):
+            if code_value and _looks_like_c_example(value):
                 return
             if not is_chinese_learning_content(value):
                 failures.append(path)

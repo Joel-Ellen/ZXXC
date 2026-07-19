@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -10,6 +9,11 @@ from typing import Any
 from pydantic import ValidationError
 
 from src.validation.language import non_chinese_resource_fields
+from src.validation.c_syntax import (
+    MAX_C_SOURCE_BYTES,
+    MAX_C_SOURCE_LINES,
+    validate_c_source,
+)
 
 from .context import ResourceContext
 from .schemas import CARD_TYPES, coerce_payload
@@ -17,8 +21,8 @@ from .schemas import CARD_TYPES, coerce_payload
 
 # The schema caps snippets at 12,000 characters. These secondary limits keep
 # parser work bounded even for multi-byte input or very many tiny lines.
-_MAX_PYTHON_SOURCE_BYTES = 16 * 1024
-_MAX_PYTHON_SOURCE_LINES = 600
+_MAX_C_SOURCE_BYTES = MAX_C_SOURCE_BYTES
+_MAX_C_SOURCE_LINES = MAX_C_SOURCE_LINES
 
 _MERMAID_NODE_ID = r"[A-Za-z][A-Za-z0-9_-]*"
 _MERMAID_NODE_SHAPE = (
@@ -75,36 +79,11 @@ def _source_ids(context: ResourceContext) -> set[str]:
     }
 
 
-def _validate_python(code: str) -> ValidationIssue | None:
-    if len(code.encode("utf-8")) > _MAX_PYTHON_SOURCE_BYTES:
-        return ValidationIssue(
-            "code_too_large",
-            "Generated Python exceeds the local validation size limit.",
-            "code",
-        )
-    if code.count("\n") + 1 > _MAX_PYTHON_SOURCE_LINES:
-        return ValidationIssue(
-            "code_too_many_lines",
-            "Generated Python exceeds the local validation line limit.",
-            "code",
-        )
-    try:
-        # ast.parse checks syntax only; generated code is never imported or
-        # executed by the validation path.
-        ast.parse(code, filename="<generated-resource>", mode="exec")
-    except SyntaxError as exc:
-        return ValidationIssue(
-            "code_syntax_invalid",
-            f"Generated Python does not parse: {exc.msg}",
-            "code",
-        )
-    except (MemoryError, OverflowError, RecursionError, ValueError, TypeError) as exc:
-        return ValidationIssue(
-            "code_syntax_validation_failed",
-            f"Generated Python could not be safely parsed: {type(exc).__name__}",
-            "code",
-        )
-    return None
+def _validate_c(code: str) -> ValidationIssue | None:
+    issue = validate_c_source(code)
+    if issue is None:
+        return None
+    return ValidationIssue(issue.code, issue.message, "code")
 
 
 def _validate_semantics(
@@ -271,8 +250,8 @@ def _validate_semantics(
                             "learning_blueprint.claims",
                         ))
     elif card_type == "code_snippet":
-        if payload.get("language") == "python":
-            syntax_issue = _validate_python(str(payload.get("code") or ""))
+        if payload.get("language") == "c":
+            syntax_issue = _validate_c(str(payload.get("code") or ""))
             if syntax_issue:
                 issues.append(syntax_issue)
         if (

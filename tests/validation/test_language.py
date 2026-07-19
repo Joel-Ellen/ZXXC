@@ -55,10 +55,10 @@ def test_chinese_contract_allows_code_formulas_symbols_and_technical_names():
         "公式 α + β + γ + δ + ε = 1 表示五个参数之和。"
     )
     assert is_chinese_learning_content(
-        '```python\n# Keep this code comment in English.\nprint("hello")\n```'
+        '```c\n/* Keep this code comment in English. */\nint answer(void) { return 1; }\n```'
     )
     assert is_chinese_learning_content(
-        '    # Keep this code comment in English.\n    print("hello")'
+        "    /* Keep this code comment in English. */\n    int answer(void) { return 1; }"
     )
     assert is_chinese_learning_content(
         '概念关系如下：\n```mermaid\ngraph TD\nA[问题] --> B[答案]\n```'
@@ -75,6 +75,12 @@ def test_chinese_contract_rejects_prose_hidden_as_code_formula_or_another_langua
     assert not is_chinese_learning_content(
         "```python\nThis is prose disguised as Python output.\n```"
     )
+    assert not is_chinese_learning_content(
+        "中文说明\n```python\ndef answer():\n    return 42\n```"
+    )
+    assert is_chinese_learning_content(
+        "中文说明\n```text\nsolution.c:7:3: error: expected ';'\n```"
+    )
     assert not is_chinese_learning_content("Check value = next item carefully")
     assert not is_chinese_learning_content(
         "Runtime grows rapidly (quadratic complexity)"
@@ -88,11 +94,15 @@ def test_chinese_contract_rejects_prose_hidden_as_code_formula_or_another_langua
     )
 
 
-def test_tutor_code_example_requires_code_instead_of_disguised_prose():
+def test_tutor_code_example_requires_c_instead_of_other_code_or_prose():
+    assert non_chinese_tutor_fields({
+        "text_explanation": "这是中文讲解。",
+        "code_example": "int visit(int node) {\n    return node;\n}",
+    }) == []
     assert non_chinese_tutor_fields({
         "text_explanation": "这是中文讲解。",
         "code_example": "def visit(node):\n    return node",
-    }) == []
+    }) == ["code_example"]
     assert non_chinese_tutor_fields({
         "text_explanation": "这是中文讲解。",
         "code_example": "THE FUNCTION RETURNS AN EMPTY LIST",

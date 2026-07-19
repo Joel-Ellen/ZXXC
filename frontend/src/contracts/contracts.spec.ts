@@ -85,16 +85,25 @@ describe("practice contracts", () => {
     expect(normalizePracticeExecutionRequest({
       resourceId: " resource-1 ",
       problemId: " problem-1 ",
-      sourceCode: " def solve():\n    return 1 ",
-      language: "PYTHON",
+      sourceCode: "int main(void) { return 0; }",
+      language: "C",
       mode: "run",
     })).toEqual({
       resource_id: "resource-1",
       problem_id: "problem-1",
-      source_code: " def solve():\n    return 1 ",
-      language: "python",
+      source_code: "int main(void) { return 0; }",
+      language: "c",
       mode: "run",
     });
+  });
+
+  it("rejects non-C practice requests", () => {
+    expect(() => normalizePracticeExecutionRequest({
+      resourceId: "resource-1",
+      sourceCode: "print('legacy')",
+      language: "python",
+      mode: "run",
+    })).toThrow("Unsupported practice language: python");
   });
 
   it("normalizes verdicts while suppressing hidden test values", () => {

@@ -17,7 +17,7 @@ export type TestVisibility = "public" | "hidden";
 export interface PracticeExecutionRequest {
   resource_id: string;
   problem_id: string;
-  language: "python";
+  language: "c";
   source_code: string;
   mode: PracticeMode;
 }
@@ -90,8 +90,8 @@ export function normalizePracticeExecutionRequest(value: unknown): PracticeExecu
   if (!resourceId) throw new TypeError("Practice resource_id is required");
   if (!sourceCode.trim()) throw new TypeError("Practice source_code is required");
 
-  const language = normalizedString(source.language).toLowerCase() || "python";
-  if (language !== "python") throw new TypeError(`Unsupported practice language: ${language}`);
+  const language = normalizedString(source.language).toLowerCase() || "c";
+  if (language !== "c") throw new TypeError(`Unsupported practice language: ${language}`);
 
   return {
     resource_id: resourceId,

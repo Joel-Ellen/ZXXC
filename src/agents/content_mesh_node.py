@@ -492,7 +492,7 @@ class ContentMeshNode:
 
     RESOURCE_TEMPLATES: Dict[str, str] = {
         "concept_map": "# {title}\n\n## 概念图谱\n\n```mermaid\ngraph TD\n{content}\n```\n\n*难度: {difficulty}*",
-        "code_snippet": "# {title}\n\n## 代码示例\n\n```python\n{content}\n```\n\n*难度: {difficulty}*",
+        "code_snippet": "# {title}\n\n## 代码示例\n\n```c\n{content}\n```\n\n*难度: {difficulty}*",
         "interactive_exercise": "# {title}\n\n## 互动练习\n\n{content}\n\n---\n*难度: {difficulty} | 类型: exercise*",
         "video_summary": "# {title}\n\n## 视频摘要\n\n[video] {content}\n\n*时长: ~{duration}min | 难度: {difficulty}*",
         "diagnostic_quiz": "# {title}\n\n## 诊断测验\n\n{content}\n\n---\n*题目数: {question_count} | 难度: {difficulty}*",
@@ -703,6 +703,24 @@ class ContentMeshNode:
 
         实际部署时替换为科大讯飞星火大模型 API 调用。
         """
+        if card_type == CardType.CODE_SNIPPET.value:
+            # Keep the legacy mesh fallback executable as well as correctly
+            # labelled. The structured generator normally supplies richer
+            # examples, but this path must never put prose inside a C fence.
+            return (
+                f"# 知识点 {node_id}\n\n"
+                "## 代码示例\n\n"
+                "```c\n"
+                "#include <stddef.h>\n\n"
+                f"/* {node_id} 的 C11 练习脚手架。 */\n"
+                "int solve(const int *values, size_t count) {\n"
+                "    (void)values;\n"
+                "    return (int)count;\n"
+                "}\n"
+                "```\n\n"
+                f"*难度: {difficulty:.2f}*"
+            )
+
         template = ContentMeshNode.RESOURCE_TEMPLATES.get(
             card_type,
             "# {title}\n\n{content}\n\n*难度: {difficulty}*",

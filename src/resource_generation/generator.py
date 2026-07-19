@@ -330,16 +330,28 @@ def _template_payload(context: ResourceContext, card_type: str) -> dict[str, Any
         return {
             **common,
             "render_type": card_type,
-            "language": "python",
+            "language": "c",
             "scenario": f"用一个与正式练习不同的小例子，执行并跟踪{title}。",
             "prerequisites": ["运行前先阅读输入契约并确认边界。"],
-            "code": "def apply_concept(items):\n    if items is None:\n        return []\n    return list(items)",
+            "code": (
+                "#include <stddef.h>\n"
+                "\n"
+                "int apply_concept(const int *items, size_t count, int *output) {\n"
+                "    if (!items || !output) return 0;\n"
+                "    for (size_t i = 0; i < count; ++i) output[i] = items[i];\n"
+                "    return (int)count;\n"
+                "}\n"
+            ),
             "boundary_tests": [
-                {"name": "空输入", "input": "[]", "expected": "[]"},
+                {
+                    "name": "空输入",
+                    "input": "items = {}, count = 0",
+                    "expected": "return 0; output 不变",
+                },
             ],
             "walkthrough_steps": ["先检查输入边界，再执行数据转换。"],
             "explanation": "该预验证示例显式保留输入契约，并产生确定性输出。",
-            "complexity_notes": ["复制序列需要 O(n) 时间和 O(n) 额外空间。"],
+            "complexity_notes": ["遍历需要 O(n) 时间和 O(1) 额外空间；调用方输出数组不计入辅助空间。"],
             "pitfalls": ["未检查契约就假设输入一定存在。"],
             "experiments": ["增加单元素测试，并说明执行过程中保持的不变量。"],
             "example_binding": f"example:{context.node_id}:resource-v4",
@@ -597,6 +609,9 @@ class ResourceGenerator:
             "status": "pending" if source == "llm" else "template",
         }
         if card_type == "code_snippet":
+            # Keep generated cards and the bound practice panel on one
+            # server-owned language contract.
+            bound["language"] = "c"
             bound["practice_id"] = str(
                 context.code_practice.get("problem_id") or ""
             )

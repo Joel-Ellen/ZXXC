@@ -337,4 +337,28 @@ describe("learning route synchronization", () => {
     expect(agent.currentCards.value.find((card) => card.resource_type === "code_snippet")?.resource_id)
       .toBe("node-a-code-snippet-v2");
   });
+
+  it("replaces stale in-memory cards when a successful resource read is empty", async () => {
+    const courses = [{ course_id: "course-a", title_cn: "A" }];
+    serviceMocks.fetchUserCourses.mockResolvedValue({ active_course: "course-a", courses });
+    serviceMocks.getSession.mockResolvedValue(sessionState("course-a", "node-a"));
+    serviceMocks.fetchSessionResources
+      .mockResolvedValueOnce({ resources: completeResourceSet("node-a") })
+      .mockResolvedValue({ resources: [] });
+    serviceMocks.requestResourceGeneration.mockResolvedValue({
+      status: "queued",
+      job_id: "job-empty-read",
+      requested_card_types: ["code_snippet"],
+    });
+
+    await agent.prepareLearningRoute("course-a", "node-a");
+    await vi.waitFor(() => expect(serviceMocks.fetchSessionResources).toHaveBeenCalledWith(
+      "route-user:course-a",
+      "node-a",
+    ));
+
+    await agent.refreshNodeResources("node-a", { cardType: "code_snippet" });
+
+    expect(agent.currentCards.value).toEqual([]);
+  });
 });

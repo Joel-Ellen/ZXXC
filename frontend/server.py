@@ -2513,7 +2513,7 @@ async def _api_session_practice_execute(request: Request, mode: str) -> JSONResp
                 course_id=course_id,
                 resource_id=body.get("resource_id", body.get("resourceId", "")),
                 problem_id=body.get("problem_id", body.get("problemId", "")),
-                language=body.get("language", "python"),
+                language=body.get("language", "c"),
                 source_code=body.get("code", ""),
                 mode=mode,
             )

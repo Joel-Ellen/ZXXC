@@ -230,12 +230,14 @@ test.describe("in-place recovery for critical learning requests", () => {
       withCodePractice: true,
       failPracticeRunAttempts: 1,
     });
-    await page.goto("/learn/course-a/arrays");
+    await page.goto("/app");
+    await expect(page.getByRole("heading", { name: "数组基础", exact: true })).toBeVisible();
+    await page.locator(".resource-canvas__filter").filter({ hasText: "代码" }).click();
 
     const panel = page.getByRole("region", { name: "代码练习" });
     await expect(panel.getByText("读取数组首项", { exact: true })).toBeVisible();
     const editor = panel.locator(".cm-content");
-    const code = "def first_value(values):\n    return values[0]";
+    const code = "int first_value(const int *values, size_t count) {\n    return count > 0 ? values[0] : 0;\n}";
     await expect(editor).toBeVisible();
     await editor.fill(code);
 
@@ -244,10 +246,14 @@ test.describe("in-place recovery for critical learning requests", () => {
 
     await expect(panel.getByText("隔离运行时不可用", { exact: true })).toBeVisible();
     await expect(panel.getByText("隔离运行时暂时不可用，请原位重试。", { exact: true })).toBeVisible();
-    await expect(editor).toContainText("return values[0]");
+    await expect(editor).toContainText("return count > 0 ? values[0] : 0;");
     await expect(run).toBeEnabled();
     await expect.poll(() => api.practiceRequests.run.length).toBe(1);
-    expect(api.practiceRequests.run[0].code).toBe(code);
+    expect(api.practiceRequests.run[0]).toMatchObject({
+      resource_id: "code-arrays-v1",
+      language: "c",
+      code,
+    });
 
     await run.click();
 
@@ -255,7 +261,7 @@ test.describe("in-place recovery for critical learning requests", () => {
     await expect(panel.getByText("公开测试通过。", { exact: true })).toBeVisible();
     await expect.poll(() => api.practiceRequests.run.length).toBe(2);
     expect(api.practiceRequests.run[1]).toEqual(api.practiceRequests.run[0]);
-    await expect(editor).toContainText("return values[0]");
+    await expect(editor).toContainText("return count > 0 ? values[0] : 0;");
     await expectNoUnhandledApiRequests(api);
   });
 

@@ -323,8 +323,12 @@ def _build_resource_coding(**kwargs: Any) -> str:
         topic=kwargs["topic"],
         difficulty=kwargs["difficulty"],
         extra_requirements={
-            "language": kwargs.get("language", "python"),
+            # Resource coding examples are server-owned C11 regardless of a
+            # stale caller preference; learner-submitted debug code is handled
+            # separately by the code_debug prompt below.
+            "language": "c",
             "count": kwargs.get("count", 3),
+            "requirement": "代码示例必须使用标准 C11，包含完整函数实现和可运行测试；禁止 Python 或伪代码。",
         },
     )
     return base + """
@@ -392,6 +396,8 @@ def _build_tutor_prompt(
 2. 仅代码、变量名、API 名称和无法翻译的专有术语可保留英文。
 3. 即使学生使用英文提问，也必须用中文回答。
 4. 不得输出整段英文解释。
+5. 任何 code_example 字段或讲解中的新增示例必须使用可运行的标准 C11 代码，禁止 Python 或伪代码。
+6. code_debug 模式中的学生代码可按原始语言原样引用，但新增修复示例仍必须使用 C11。
 
 """
     if mode == "concept":
@@ -432,11 +438,12 @@ def _build_tutor_prompt(
 
     if mode == "code_debug":
         return language_contract + f"""请像结对编程导师一样分析错误，重点解释为什么错以及如何定位，而不是只给结果。
+若需要补充示例，统一使用标准 C11；学生提交的代码片段保留原始语言，不要擅自改写。
 
 学生画像：{student_context}
 问题：{query}
 代码：
-```python
+```text
 {code_snippet}
 ```
 错误信息：{error_message}

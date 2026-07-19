@@ -231,7 +231,7 @@ class SandboxRunnerClient(_JsonServiceClient):
         return self.post(
             "/v1/verify",
             {
-                "language": "python",
+                "language": "c",
                 "source_code": source_code,
                 "public_tests": public_tests,
                 "hidden_test_set_id": hidden_test_set_id,
@@ -246,6 +246,42 @@ class SandboxRunnerClient(_JsonServiceClient):
                 },
             },
             deadline_seconds=3.0,
+        )
+
+    def execute_c_case(
+        self,
+        *,
+        source_code: str,
+        harness_source: str,
+        time_limit_ms: int,
+        memory_limit_mb: int,
+        output_limit_bytes: int,
+    ) -> dict[str, Any]:
+        """Compile and execute one server-built C11 harness in the runner."""
+        deadline_seconds = max(1.0, (float(time_limit_ms) / 1000.0) + 1.5)
+        return self.post(
+            "/v1/execute",
+            {
+                "protocol_version": "eduagent-c11-practice-v1",
+                "language": "c",
+                "source_code": source_code,
+                "harness_source": harness_source,
+                # The runner must compile these as separate translation units.
+                # Keep the legacy fields above for older clients while the
+                # explicit mode prevents accidentally concatenating learner
+                # source with the server-owned harness.
+                "compile_mode": "separate_translation_units",
+                "limits": {
+                    "cpu": 1,
+                    "memory_mb": max(32, int(memory_limit_mb)),
+                    "timeout_ms": max(100, int(time_limit_ms)),
+                    "output_bytes": max(1_024, int(output_limit_bytes)),
+                    "network": "none",
+                    "root_filesystem": "read_only",
+                    "run_as_non_root": True,
+                },
+            },
+            deadline_seconds=deadline_seconds,
         )
 
 

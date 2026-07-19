@@ -28,9 +28,9 @@ const cards = [
     resource_type: "code_snippet",
     title: "前序遍历",
     structured_payload: {
-      language: "python",
+      language: "c",
       scenario: "用递归访问根、左子树和右子树。",
-      code: "def preorder(node):\n    if not node:\n        return []\n    return [node.value] + preorder(node.left) + preorder(node.right)",
+      code: "typedef struct Node {\n    int value;\n    struct Node *left;\n    struct Node *right;\n} Node;\n\nvoid preorder(const Node *node) {\n    if (node == NULL) return;\n    printf(\"%d \", node->value);\n    preorder(node->left);\n    preorder(node->right);\n}",
       walkthrough_steps: ["先处理空节点", "访问根节点", "递归访问左右子树"],
       complexity_notes: ["时间复杂度 O(n)"],
       explanation: "递归调用会把同一规则应用到左右子树。",
@@ -104,6 +104,7 @@ describe("node PPT generator", () => {
     expect(model.slides[0]).toMatchObject({ kind: "cover", title: "二叉树" });
     expect(model.slides.some((slide) => slide.kind === "agenda")).toBe(true);
     expect(model.slides.some((slide) => slide.kind === "code")).toBe(true);
+    expect(model.slides.find((slide) => slide.kind === "code")?.language).toBe("c");
     expect(model.slides.at(-1)?.kind).toBe("summary");
 
     const publicDeckText = JSON.stringify(model.slides);

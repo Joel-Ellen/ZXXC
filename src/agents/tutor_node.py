@@ -215,12 +215,19 @@ class TutorAgentNode:
 
     @staticmethod
     def _code_debug_fallback(query: str, code_snippet: str, error_message: str) -> str:
-        code_block = code_snippet or "（未提供代码片段）"
+        code_block = code_snippet or (
+            "#include <stdio.h>\n\n"
+            "int main(void) {\n"
+            "    /* 请替换为需要调试的 C11 代码。 */\n"
+            "    return 0;\n"
+            "}"
+        )
+        code_language = "text" if code_snippet else "c"
         error_block = error_message or "（未提供运行错误信息）"
         return (
             "## 代码调试建议\n\n"
             "### 待检查代码\n"
-            f"```\n{code_block}\n```\n\n"
+            f"```{code_language}\n{code_block}\n```\n\n"
             "### 错误信息\n"
             f"```text\n{error_block}\n```\n\n"
             "建议先用最小输入稳定复现问题，再对照报错位置检查执行前的变量值和控制流。"

@@ -230,6 +230,18 @@
                 <ul v-if="codeComplexityNotes(card).length" class="mb-8 space-y-2"><li v-for="item in codeComplexityNotes(card)" :key="'cx-'+item" class="flex gap-2"><span class="text-text-muted shrink-0">&bull;</span><span>{{ item }}</span></li></ul>
                 <div v-if="codePitfalls(card).length" class="mb-8 rounded-lg border border-warning-soft bg-warning-soft/30 py-3 px-4 space-y-1.5"><p class="text-xs font-semibold text-warning-dark mb-2">常见坑点</p><ul class="space-y-1.5"><li v-for="item in codePitfalls(card)" :key="'pit-'+item" class="text-xs flex gap-2"><span class="text-warning shrink-0">!</span><span>{{ item }}</span></li></ul></div>
                 <ul v-if="codeExperiments(card).length" class="space-y-2"><li v-for="item in codeExperiments(card)" :key="'exp-'+item" class="flex gap-2"><span class="text-text-muted shrink-0">&bull;</span><span>{{ item }}</span></li></ul>
+                <CodePracticePanel
+                  v-if="codePracticeAvailable(card)"
+                  class="mt-8"
+                  :session-id="sessionId"
+                  :node-id="currentNode"
+                  :resource-id="String(card.resource_id || card.id || '')"
+                  :problem-id="codePracticeProblemId(card)"
+                  :starter-code="codePracticeStarterCode(card)"
+                  :language="CODE_LANGUAGE"
+                  @code-run="emit('code-run', $event)"
+                  @code-submitted="emit('code-submitted', $event)"
+                />
               </article>
               <article v-else-if="resourceType(card) === 'interactive_exercise'" class="text-sm leading-7 text-text-secondary">
                 <div class="rounded-lg border-l-2 border-primary pl-4 py-1 mb-8">
@@ -366,6 +378,7 @@
 
 <script setup>
 import { computed, nextTick, ref, watch } from "vue";
+import CodePracticePanel from "./CodePracticePanel.vue";
 import ConceptMapLearning from "./ConceptMapLearning.vue";
 import IconPresentation from "./icons/IconPresentation.vue";
 import MarkdownContent from "./MarkdownContent.vue";
@@ -373,8 +386,14 @@ import PptPreview from "./PptPreview.vue";
 import ResourceCard from "./ResourceCard.vue";
 import { extractCodePreview, extractTextPreview } from "../utils/markdownPreview.js";
 import { buildNodePresentationModel, createNodePptBlob, downloadBlob } from "../utils/pptGenerator.js";
+import {
+  CODE_LANGUAGE,
+  CODE_LANGUAGE_LABEL,
+  extractCCode,
+} from "../utils/codeExample.js";
 
 const props = defineProps({
+  sessionId: { type: String, default: "" },
   cards: { type: Array, default: () => [] },
   currentNode: { type: String, default: "" },
   nodeTitle: { type: String, default: "" },
@@ -389,7 +408,16 @@ const props = defineProps({
   buildQuiz: { type: Function, required: true },
 });
 
-const emit = defineEmits(["submit-quiz", "quiz-next", "select-node", "refresh", "generate-card", "filter-change"]);
+const emit = defineEmits([
+  "submit-quiz",
+  "quiz-next",
+  "select-node",
+  "refresh",
+  "generate-card",
+  "filter-change",
+  "code-run",
+  "code-submitted",
+]);
 
 const orderedIds = ref([]);
 const minimizedIds = ref([]);
@@ -809,8 +837,7 @@ function previewText(card) {
 }
 
 function previewCode(card) {
-  const metadata = cardMetadata(card);
-  return metadata.code ? extractCodePreview(`\`\`\`\n${metadata.code}\n\`\`\``, 8) : codePreview(bodyMarkdown(card));
+  return extractCodePreview(extractCCode(card), 8);
 }
 
 function conceptMarkdown(card) {
@@ -869,12 +896,12 @@ function conceptReviewPrompts(card) {
   return Array.isArray(cardMetadata(card).review_prompts) ? cardMetadata(card).review_prompts : [];
 }
 
-function codeLanguage(card) {
-  return cardMetadata(card).language || "python";
+function codeLanguage(_card) {
+  return CODE_LANGUAGE_LABEL;
 }
 
 function fullCode(card) {
-  return cardMetadata(card).code || extractCodePreview(bodyMarkdown(card), 40);
+  return extractCCode(card) || "展开后查看完整代码示例。";
 }
 
 function codeExplanation(card) {
@@ -903,6 +930,43 @@ function codePitfalls(card) {
 
 function codeExperiments(card) {
   return Array.isArray(cardMetadata(card).experiments) ? cardMetadata(card).experiments : [];
+}
+
+function codePracticeBinding(card) {
+  const payload = cardMetadata(card);
+  const candidates = [
+    payload?.practice,
+    card?.practice,
+    card?.metadata?.practice,
+  ];
+  return candidates.find(
+    (candidate) => candidate && typeof candidate === "object" && !Array.isArray(candidate),
+  ) || {};
+}
+
+function codePracticeProblemId(card) {
+  const binding = codePracticeBinding(card);
+  return String(
+    binding.problem_id
+      || binding.problemId
+      || cardMetadata(card).practice_problem_id
+      || card?.metadata?.practice_problem_id
+      || "",
+  ).trim();
+}
+
+function codePracticeStarterCode(card) {
+  const binding = codePracticeBinding(card);
+  return [
+    binding.starter_code,
+    binding.starterCode,
+    cardMetadata(card).starter_code,
+    card?.metadata?.starter_code,
+  ].find((value) => typeof value === "string" && value.trim()) || "";
+}
+
+function codePracticeAvailable(card) {
+  return Boolean(codePracticeProblemId(card) || codePracticeStarterCode(card));
 }
 
 function exercisePrompt(card) {
@@ -1131,10 +1195,6 @@ function setActiveCard(cardId) {
 
 function textPreview(content) {
   return extractTextPreview(content, 190);
-}
-
-function codePreview(content) {
-  return extractCodePreview(content, 8);
 }
 
 function previewLabel(cardType) {

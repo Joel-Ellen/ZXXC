@@ -24,7 +24,7 @@ class _EnglishStreamingLlm:
 
 def test_chinese_language_check_allows_code_but_rejects_english_prose():
     assert is_chinese_explanatory_text(
-        "请先检查边界条件，再运行下面的代码：\n```python\nprint('hello')\n```"
+        "请先检查边界条件，再运行下面的代码：\n```c\nint answer(void) { return 1; }\n```"
     )
     assert not is_chinese_explanatory_text(
         "This answer explains the concept entirely in English."

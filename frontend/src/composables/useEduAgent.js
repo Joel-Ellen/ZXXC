@@ -447,6 +447,15 @@ function createEduAgent() {
     markResourceCardsReady(nodeId, incomingResources);
   }
 
+  function replaceNodeResources(nodeId, incomingResources) {
+    const nextResources = Array.isArray(incomingResources) ? incomingResources : [];
+    resources.value = {
+      ...resources.value,
+      [nodeId]: nextResources,
+    };
+    markResourceCardsReady(nodeId, nextResources);
+  }
+
   function normalizeCardTypes(cardTypes) {
     const values = Array.isArray(cardTypes) ? cardTypes : [cardTypes];
     return [...new Set(values
@@ -462,6 +471,15 @@ function createEduAgent() {
       response?.data?.existing_resources,
     ];
     return candidates.find((value) => Array.isArray(value)) ?? [];
+  }
+
+  function responseHasResourceList(response) {
+    return [
+      response?.resources,
+      response?.existing_resources,
+      response?.data?.resources,
+      response?.data?.existing_resources,
+    ].some((value) => Array.isArray(value));
   }
 
   function resourceTimingDuration(context) {
@@ -2068,7 +2086,13 @@ function createEduAgent() {
         return { ok: false, stale: true, error: new Error("同步期间学习节点已切换，本次结果已忽略。") };
       }
       const existingResources = resourceListFromResponse(readResult);
-      if (existingResources.length) mergeNodeResources(nodeId, existingResources);
+      if (responseHasResourceList(readResult)) {
+        // A successful empty read is authoritative. Drop stale in-memory cards
+        // so a filtered legacy Python card cannot survive under a C label.
+        replaceNodeResources(nodeId, existingResources);
+      } else if (existingResources.length) {
+        mergeNodeResources(nodeId, existingResources);
+      }
 
       const existingTypes = new Set(existingResources.map(resourceCardType));
       const cardTypesToGenerate = force

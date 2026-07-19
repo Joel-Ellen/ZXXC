@@ -117,4 +117,24 @@ describe("ResourceCanvas PPT export", () => {
     expect(wrapper.text()).not.toContain("EduAgent-节点一.pptx");
     expect(wrapper.text()).not.toContain("正在整理当前节点的学习内容");
   });
+
+  it("renders legacy nested code payloads as C examples", () => {
+    const wrapper = mountCanvas({
+      filterType: "code",
+      cards: [{
+        resource_id: "code-node-1",
+        resource_type: "code_snippet",
+        metadata: {
+          structured_payload: {
+            language: "c",
+            scenario: "遍历数组",
+            code: "int total = 0;",
+          },
+        },
+      }],
+    });
+
+    expect(wrapper.text()).toContain("C");
+    expect(wrapper.text()).toContain("int total = 0;");
+  });
 });

@@ -70,6 +70,24 @@ function conceptCard(nodeId) {
   };
 }
 
+function codeCard(nodeId) {
+  return {
+    resource_id: `code-${nodeId}`,
+    resource_type: "code_snippet",
+    title: `${nodeId} code`,
+    structured_payload: {
+      language: "c",
+      scenario: "Read the first array value safely.",
+      code: "int first_value(const int *values, size_t count) { return count ? values[0] : 0; }",
+      practice: {
+        problem_id: "arrays-first-value",
+        language: "c",
+        starter_code: "int first_value(const int *values, size_t count) { (void)values; (void)count; return 0; }",
+      },
+    },
+  };
+}
+
 function findButton(wrapper, label) {
   const b = wrapper.findAll("button").find((c) => c.text() === label);
   if (!b) throw new Error(`Unable to find button: ${label}`);
@@ -331,6 +349,93 @@ describe("ResourceCanvas card rendering", () => {
     expect(wrapper.text()).not.toContain("以上都不对");
     wrapper.unmount();
   });
+
+  it("mounts the C practice panel in code details and forwards run events", async () => {
+    const starter = "int first_value(const int *values, size_t count) { (void)values; (void)count; return 0; }";
+    serviceMocks.fetchSessionPracticeProblem.mockResolvedValue({
+      id: "arrays-first-value",
+      version: "v2",
+      title: "Array first value",
+      language: "c",
+      starter_code: starter,
+      public_test_count: 1,
+      hidden_test_count: 1,
+    });
+    serviceMocks.runSessionPractice.mockResolvedValue({
+      status: "ok",
+      mode: "run",
+      verdict: "accepted",
+      resource_id: "code-N01",
+    });
+
+    const wrapper = mount(ResourceCanvas, {
+      props: {
+        sessionId: "learner:course",
+        cards: [codeCard("N01")],
+        currentNode: "N01",
+        nodeTitle: "Node 01",
+        pathNodes: [],
+        filterType: "code",
+        loading: false,
+        getCardLabel: () => "Code",
+        getAgentLabel: () => "Agent",
+        buildQuiz: () => [],
+      },
+    });
+    await settleUi();
+
+    const panel = wrapper.findComponent(CodePracticePanel);
+    expect(panel.exists()).toBe(true);
+    expect(panel.props()).toMatchObject({
+      sessionId: "learner:course",
+      nodeId: "N01",
+      resourceId: "code-N01",
+      problemId: "arrays-first-value",
+      language: "c",
+    });
+    expect(serviceMocks.fetchSessionPracticeProblem)
+      .toHaveBeenCalledWith("learner:course", "arrays-first-value");
+
+    await panel.find(".code-practice-panel__actions button").trigger("click");
+    await settleUi();
+
+    expect(serviceMocks.runSessionPractice).toHaveBeenCalledWith(
+      "learner:course",
+      { resource_id: "code-N01", language: "c", code: starter },
+    );
+    expect(wrapper.emitted("code-run")?.[0]?.[0]).toMatchObject({
+      sessionId: "learner:course",
+      nodeId: "N01",
+      resourceId: "code-N01",
+      problemId: "arrays-first-value",
+      codeSnapshot: starter,
+    });
+    wrapper.unmount();
+  });
+
+  it("does not request a practice problem for an unbound legacy code card", async () => {
+    const legacyCard = codeCard("N01");
+    delete legacyCard.structured_payload.practice;
+    const wrapper = mount(ResourceCanvas, {
+      props: {
+        sessionId: "learner:course",
+        cards: [legacyCard],
+        currentNode: "N01",
+        nodeTitle: "Node 01",
+        pathNodes: [],
+        filterType: "code",
+        loading: false,
+        getCardLabel: () => "Code",
+        getAgentLabel: () => "Agent",
+        buildQuiz: () => [],
+      },
+    });
+    await settleUi();
+
+    expect(wrapper.findComponent(CodePracticePanel).exists()).toBe(false);
+    expect(serviceMocks.fetchSessionPracticeProblem).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
 });
 
 describe("ConceptMapLearning", () => {
@@ -384,68 +489,178 @@ describe("ConceptMapLearning", () => {
 // ── CodePracticePanel ─────────────────────────────────────────────
 
 describe("CodePracticePanel request snapshots", () => {
+  it("does not restore an explicit Python draft into the C editor", async () => {
+    const sid = "learner:course-language";
+    const starter = "int sum_values(const int *values, size_t count) { (void)values; (void)count; return 0; }";
+    serviceMocks.fetchSessionPracticeProblem.mockResolvedValue({
+      id: "p-c",
+      version: "v2",
+      title: "C draft",
+      language: "c",
+      starter_code: starter,
+      public_test_count: 1,
+      hidden_test_count: 1,
+    });
+    window.localStorage.setItem(
+      `eduagent:practice-draft:v1:${sid}:r-c`,
+      JSON.stringify({
+        resource_id: "r-c",
+        problem_id: "p-c",
+        version: "v2",
+        language: "python",
+        code: "def sum_values(values):\n    return sum(values)",
+        updated_at: Date.now(),
+      }),
+    );
+
+    const wrapper = mount(CodePracticePanel, {
+      props: {
+        sessionId: sid,
+        nodeId: "N01",
+        resourceId: "r-c",
+        problemId: "p-c",
+        language: "c",
+      },
+    });
+    await settleUi();
+
+    expect(EditorView.findFromDOM(wrapper.get(".cm-content").element).state.doc.toString())
+      .toBe(starter);
+    wrapper.unmount();
+  });
+
+  it("does not migrate a language-less legacy draft into the C editor", async () => {
+    const sid = "learner:course-language-less";
+    const starter = "int sum_values(const int *values, size_t count) { (void)values; (void)count; return 0; }";
+    serviceMocks.fetchSessionPracticeProblem.mockResolvedValue({
+      id: "p-c",
+      version: "v2",
+      title: "C draft",
+      language: "c",
+      starter_code: starter,
+      public_test_count: 1,
+      hidden_test_count: 1,
+    });
+    window.localStorage.setItem(
+      `eduagent:practice-draft:v1:${sid}:r-c`,
+      JSON.stringify({
+        resource_id: "r-c",
+        problem_id: "p-c",
+        version: "v2",
+        code: "def sum_values(values):\n    return sum(values)",
+        updated_at: Date.now(),
+      }),
+    );
+
+    const wrapper = mount(CodePracticePanel, {
+      props: {
+        sessionId: sid,
+        nodeId: "N01",
+        resourceId: "r-c",
+        problemId: "p-c",
+        language: "c",
+      },
+    });
+    await settleUi();
+
+    expect(EditorView.findFromDOM(wrapper.get(".cm-content").element).state.doc.toString())
+      .toBe(starter);
+    wrapper.unmount();
+  });
+
+  it("does not invent a main function when the server omits a starter template", async () => {
+    serviceMocks.fetchSessionPracticeProblem.mockResolvedValue({
+      id: "missing-template",
+      version: "v2",
+      title: "Missing template",
+      language: "c",
+      public_test_count: 1,
+      hidden_test_count: 1,
+    });
+
+    const wrapper = mount(CodePracticePanel, {
+      props: {
+        sessionId: "learner:course-missing-template",
+        nodeId: "N01",
+        resourceId: "r-missing-template",
+        problemId: "missing-template",
+        language: "c",
+      },
+    });
+    await settleUi();
+
+    expect(wrapper.find(".cm-content").exists()).toBe(false);
+    expect(wrapper.text()).toContain("缺少服务端提供的 C 函数模板");
+    expect(wrapper.text()).not.toContain("int main(void)");
+    wrapper.unmount();
+  });
+
   it("restores final local edit after logout instead of older server draft", async () => {
     const sid = "learner:course-draft";
     serviceMocks.fetchSessionPracticeProblem.mockResolvedValue({
-      id: "p1", version: "v1", title: "Draft", language: "python",
-      starter_code: "print('s')", public_test_count: 1, hidden_test_count: 1,
+      id: "p1", version: "v1", title: "Draft", language: "c",
+      starter_code: "int solve(void) { return 0; }", public_test_count: 1, hidden_test_count: 1,
     });
     const assets = useLearningAssetsStore();
     assets.setSession(sid);
 
     const w = mount(CodePracticePanel, {
-      props: { sessionId: sid, nodeId: "N01", resourceId: "r1", problemId: "p1", starterCode: "print('s')", language: "python" },
+      props: { sessionId: sid, nodeId: "N01", resourceId: "r1", problemId: "p1", starterCode: "int solve(void) { return 0; }", language: "c" },
     });
     await settleUi();
 
     const ed = EditorView.findFromDOM(w.get(".cm-content").element);
-    ed.dispatch({ changes: { from: 0, to: ed.state.doc.length, insert: "print('Z')" } });
+    ed.dispatch({ changes: { from: 0, to: ed.state.doc.length, insert: "int value = 42;" } });
     assets.reset();
     w.unmount();
 
     const prefix = `eduagent:practice-draft:v2:${sid}:`;
     const key = Object.keys(localStorage).find((k) => k.startsWith(prefix));
     const draft = JSON.parse(localStorage.getItem(key));
-    expect(draft.code).toBe("print('Z')");
+    expect(draft.code).toBe("int value = 42;");
 
     assets.setSession(sid);
     assets.write("code_drafts", key.slice(prefix.length), { ...draft, code: "old", updated_at: draft.updated_at - 60_000 }, { sync: false });
 
     const w2 = mount(CodePracticePanel, {
-      props: { sessionId: sid, nodeId: "N01", resourceId: "r1", problemId: "p1", starterCode: "print('s')", language: "python" },
+      props: { sessionId: sid, nodeId: "N01", resourceId: "r1", problemId: "p1", starterCode: "int solve(void) { return 0; }", language: "c" },
     });
     await settleUi();
-    expect(EditorView.findFromDOM(w2.get(".cm-content").element).state.doc.toString()).toBe("print('Z')");
+    expect(EditorView.findFromDOM(w2.get(".cm-content").element).state.doc.toString()).toBe("int value = 42;");
     w2.unmount();
   });
 
   it("attributes overlapping node runs to request-time context", async () => {
     const runA = deferred(); const runB = deferred();
     serviceMocks.fetchSessionPracticeProblem.mockImplementation(async (_s, rid) => ({
-      id: rid, title: `${rid}`, language: "python", starter_code: `print('${rid}')`, public_test_count: 1, hidden_test_count: 1,
+      id: rid, title: `${rid}`, language: "c", starter_code: `int ${rid === "rA" ? "first" : "second"} = 1;`, public_test_count: 1, hidden_test_count: 1,
     }));
     serviceMocks.runSessionPractice.mockImplementation((_s, p) => p.resource_id === "rA" ? runA.promise : runB.promise);
 
     useLearningAssetsStore().setSession("learner:course");
     const w = mount(CodePracticePanel, {
-      props: { sessionId: "learner:course", nodeId: "N01", resourceId: "rA", problemId: "rA", starterCode: "print('rA')", language: "python" },
+      props: { sessionId: "learner:course", nodeId: "N01", resourceId: "rA", problemId: "rA", starterCode: "int first = 1;", language: "c" },
     });
     await settleUi();
 
     await findButton(w, "运行公开测试").trigger("click");
-    await w.setProps({ nodeId: "N02", resourceId: "rB", problemId: "rB", starterCode: "print('rB')" });
+    expect(serviceMocks.runSessionPractice).toHaveBeenCalledWith(
+      "learner:course",
+      expect.objectContaining({ language: "c", code: "int first = 1;" }),
+    );
+    await w.setProps({ nodeId: "N02", resourceId: "rB", problemId: "rB", starterCode: "int second = 1;" });
     await settleUi();
     await findButton(w, "运行公开测试").trigger("click");
 
     runA.resolve({ status: "ok", mode: "run", verdict: "wrong_answer", resource_id: "rA" });
     await settleUi();
-    expect(w.emitted("code-run")[0][0]).toMatchObject({ nodeId: "N01", resourceId: "rA", codeSnapshot: "print('rA')" });
+    expect(w.emitted("code-run")[0][0]).toMatchObject({ nodeId: "N01", resourceId: "rA", codeSnapshot: "int first = 1;" });
     expect(findButton(w, "运行中...").attributes("disabled")).toBeDefined();
     expect(w.text()).not.toContain("答案错误");
 
     runB.resolve({ status: "ok", mode: "run", verdict: "accepted", resource_id: "rB" });
     await settleUi();
-    expect(w.emitted("code-run")[1][0]).toMatchObject({ nodeId: "N02", resourceId: "rB", codeSnapshot: "print('rB')" });
+    expect(w.emitted("code-run")[1][0]).toMatchObject({ nodeId: "N02", resourceId: "rB", codeSnapshot: "int second = 1;" });
     expect(w.text()).toContain("通过");
 
     w.unmount();

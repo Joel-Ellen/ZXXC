@@ -59,9 +59,13 @@ export function extractTextPreview(source = "", maxChars = 180) {
   return `${normalized.slice(0, maxChars).trimEnd()}…`;
 }
 
-export function extractCodePreview(source = "", maxLines = 8) {
+export function extractCode(source = "") {
   const match = source.match(/```[^\n]*\n?([\s\S]*?)```/);
-  const rawCode = (match?.[1] ?? source).replace(/\r/g, "").trim();
+  return (match?.[1] ?? source).replace(/\r/g, "").trim();
+}
+
+export function extractCodePreview(source = "", maxLines = 8) {
+  const rawCode = extractCode(source);
 
   if (!rawCode) {
     return "展开后查看完整代码示例。";

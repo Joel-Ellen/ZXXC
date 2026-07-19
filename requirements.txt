@@ -23,6 +23,7 @@ elasticsearch>=8.17.0,<9.0.0
 # --- Data Validation ---
 # Pydantic v2: 强类型校验与序列化
 pydantic>=2.5.0,<3.0.0
+pycparser>=2.22,<4.0.0
 numpy>=1.24.0,<2.0.0
 
 # --- Text Splitting ---

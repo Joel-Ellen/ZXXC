@@ -1,3 +1,10 @@
+import {
+  CODE_LANGUAGE,
+  extractCCode,
+  normalizeCodeLanguage,
+  resolveStructuredPayload,
+} from "./codeExample.js";
+
 const MIME_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 const BULLET = "\u2022";
 
@@ -272,7 +279,7 @@ function codeSlides(title, payload, card) {
     });
   }
 
-  const code = String(payload.code || extractCode(card.body_markdown || card.content) || "").trim();
+  const code = extractCCode(card);
   if (code) {
     const lines = code.split("\n");
     for (let index = 0; index < lines.length; index += 34) {
@@ -281,7 +288,7 @@ function codeSlides(title, payload, card) {
         kicker: "可运行片段",
         title: lines.length > 34 ? `${title}：代码 ${Math.floor(index / 34) + 1}` : `${title}：代码`,
         code: lines.slice(index, index + 34).join("\n"),
-        language: payload.language || "python",
+        language: normalizeCodeLanguage(payload.language),
       });
     }
   }
@@ -522,7 +529,7 @@ function renderColumns(slide, pptx, descriptor, slideNumber, totalSlides, nodeTi
 
 function renderCode(slide, pptx, descriptor, slideNumber, totalSlides, nodeTitle) {
   addHeader(slide, pptx, descriptor, slideNumber, totalSlides, nodeTitle);
-  slide.addText(`${descriptor.language || "python"}`, { x: 0.84, y: 1.5, w: 2.2, h: 0.3, fontFace: "Aptos", fontSize: 10, bold: true, color: COLORS.teal, charSpacing: 1.2, margin: 0 });
+  slide.addText(normalizeCodeLanguage(descriptor.language).toUpperCase() || CODE_LANGUAGE.toUpperCase(), { x: 0.84, y: 1.5, w: 2.2, h: 0.3, fontFace: "Aptos", fontSize: 10, bold: true, color: COLORS.teal, charSpacing: 1.2, margin: 0 });
   slide.addShape(pptx.ShapeType.roundRect, { x: 0.82, y: 1.88, w: 11.65, h: 4.65, fill: { color: COLORS.code }, line: { color: COLORS.code }, rectRadius: 0.08 });
   slide.addText(descriptor.code, { x: 1.08, y: 2.16, w: 11.1, h: 4.05, fontFace: "Consolas", fontSize: 11.5, color: COLORS.codeText, margin: 0.02, fit: "shrink", breakLine: false, valign: "top" });
 }
@@ -564,12 +571,7 @@ function resourceType(card) {
 }
 
 function cardPayload(card) {
-  const directPayload = objectValue(card?.structured_payload);
-  if (Object.keys(directPayload).length) return directPayload;
-
-  const metadata = objectValue(card?.metadata);
-  const metadataPayload = objectValue(metadata.structured_payload);
-  return Object.keys(metadataPayload).length ? metadataPayload : metadata;
+  return resolveStructuredPayload(card);
 }
 
 function cardTitle(card, fallback) {
@@ -668,11 +670,6 @@ function cleanMarkdown(value) {
     .replace(/^\s*[-*+]\s+/gm, "")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function extractCode(markdown) {
-  const match = String(markdown || "").match(/```(?:[\w-]+)?\s*([\s\S]*?)```/);
-  return match?.[1]?.trim() || "";
 }
 
 function safeFilename(value) {

@@ -174,7 +174,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { history, historyKeymap, defaultKeymap, indentWithTab } from "@codemirror/commands";
-import { python } from "@codemirror/lang-python";
+import { cpp } from "@codemirror/lang-cpp";
 import { EditorState } from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
@@ -184,6 +184,11 @@ import {
   submitSessionPractice,
 } from "../services/eduAgentApi";
 import { useLearningAssetsStore } from "../stores/learningAssets";
+import {
+  CODE_LANGUAGE,
+  CODE_LANGUAGE_LABEL,
+  normalizeCodeLanguage,
+} from "../utils/codeExample.js";
 
 const props = defineProps({
   sessionId: { type: String, default: "" },
@@ -191,7 +196,7 @@ const props = defineProps({
   resourceId: { type: String, required: true },
   problemId: { type: String, default: "" },
   starterCode: { type: String, default: "" },
-  language: { type: String, default: "python" },
+  language: { type: String, default: CODE_LANGUAGE },
 });
 
 const emit = defineEmits(["code-run", "code-submitted"]);
@@ -233,8 +238,10 @@ const VERDICT_LABELS = {
 const isBusy = computed(() => practiceState.value === "loading" || Boolean(activeAction.value));
 const isProblemReady = computed(() => practiceState.value === "ready" && Boolean(practiceProblem.value));
 const canExecute = computed(() => isProblemReady.value && !activeAction.value && Boolean(code.value.trim()));
-const resolvedLanguage = computed(() => String(practiceProblem.value?.language || props.language || "python").toLowerCase());
-const languageLabel = computed(() => resolvedLanguage.value === "python" ? "Python" : resolvedLanguage.value);
+const resolvedLanguage = computed(() => normalizeCodeLanguage(
+  practiceProblem.value?.language || props.language,
+));
+const languageLabel = computed(() => CODE_LANGUAGE_LABEL);
 const problemTitle = computed(() => firstString(practiceProblem.value?.title, "编程练习"));
 const problemPrompt = computed(() => firstString(
   practiceProblem.value?.prompt,
@@ -386,7 +393,7 @@ function createDraftContext() {
     resourceId,
     problemId,
     version,
-    language: normalizedText(resolvedLanguage.value) || "python",
+    language: normalizeCodeLanguage(resolvedLanguage.value),
     assetKey: `code:${assetKeySegment(resourceId)}:${assetKeySegment(problemId)}:${assetKeySegment(version)}`,
   };
 }
@@ -410,9 +417,13 @@ function draftMatchesContext(draft, context) {
   const resourceId = normalizedText(draft.resource_id ?? draft.resourceId);
   const problemId = normalizedText(draft.problem_id ?? draft.problemId);
   const version = normalizedText(draft.version ?? draft.problem_version ?? draft.problemVersion);
+  const language = normalizedText(draft.language).toLowerCase();
   return (!resourceId || resourceId === context.resourceId)
     && (!problemId || problemId === context.problemId)
-    && (!version || version === context.version);
+    && (!version || version === context.version)
+    // Drafts without an explicit language belong to the pre-C contract. Do
+    // not migrate them into the C editor where they would be submitted as C.
+    && language === context.language;
 }
 
 function readStoredDraft(key) {
@@ -503,7 +514,7 @@ function draftPayload(context) {
     problem_id: context.problemId,
     version: context.version,
     code: code.value,
-    language: context.language || normalizedText(resolvedLanguage.value),
+    language: normalizeCodeLanguage(context.language || resolvedLanguage.value),
     updated_at: Date.now(),
     run_attempts: runAttempts.value,
     submit_attempts: submitAttempts.value,
@@ -574,7 +585,6 @@ function resolvedStarterCode() {
     practiceProblem.value?.template,
     practiceProblem.value?.code_template,
     props.starterCode,
-    resolvedLanguage.value === "python" ? "# Write your solution here\n" : "",
   );
 }
 
@@ -616,6 +626,11 @@ async function loadPracticeProblem() {
     }
 
     practiceProblem.value = problem;
+    if (!resolvedStarterCode()) {
+      practiceState.value = "not_configured";
+      practiceLoadError.value = "该练习缺少服务端提供的 C 函数模板，请刷新资源后重试。";
+      return;
+    }
     draftContext.value = createDraftContext();
     const draft = readDraft(draftContext.value);
     applyDraft(draft);
@@ -650,7 +665,7 @@ function installEditor() {
       extensions: [
         lineNumbers(),
         history(),
-        python(),
+        cpp(),
         oneDark,
         EditorView.lineWrapping,
         EditorView.contentAttributes.of({
@@ -781,7 +796,7 @@ function capturePracticeRequest(mode) {
     resourceId: normalizedText(context?.resourceId || props.resourceId),
     problemId: normalizedText(context?.problemId || resolvedProblemId()),
     problemVersion: normalizedText(context?.version || resolvedProblemVersion()),
-    language: normalizedText(context?.language || resolvedLanguage.value) || "python",
+    language: normalizeCodeLanguage(context?.language || resolvedLanguage.value),
     code: code.value,
     attemptNumber,
   };

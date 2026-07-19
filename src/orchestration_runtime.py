@@ -751,7 +751,15 @@ class OrchestrationRuntime:
         title = title or self.kg.get_node_title(node_id) or node_id
         templates = {
             "concept_map": f"## {title}\n\n{node_id} 的核心概念图占位内容。",
-            "code_snippet": f"## {title}\n\n```python\n# {node_id} 的练习脚手架\npass\n```",
+            "code_snippet": (
+                f"## {title}\n\n```c\n#include <stddef.h>\n\n"
+                f"/* {node_id} 的练习脚手架 */\n"
+                "int solve(const int *values, size_t count) {\n"
+                "    (void)values;\n"
+                "    (void)count;\n"
+                "    return 0;\n"
+                "}\n```"
+            ),
             "interactive_exercise": f"## {title}\n\n尝试一个应用该概念的小练习。",
             "video_summary": f"## {title}\n\n用于复习该概念的简短讲解提纲。",
             "diagnostic_quiz": f"## {title}\n\n1. 这个概念的关键不变量是什么？",

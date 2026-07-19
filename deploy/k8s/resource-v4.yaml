@@ -521,8 +521,12 @@ spec:
   ingress:
     - from:
         - podSelector:
-            matchLabels:
-              app: resource-worker
+            matchExpressions:
+              - key: app
+                operator: In
+                values:
+                  - eduagent-api
+                  - resource-worker
       ports:
         - protocol: TCP
           port: 8080

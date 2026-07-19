@@ -408,11 +408,11 @@ def test_resource_language_gate_rejects_english_boundary_inputs(
     )
 
 
-def test_code_snippet_rejects_invalid_python_syntax(
+def test_code_snippet_rejects_invalid_c_syntax(
     generation_context: ResourceContext,
 ) -> None:
     payload = ResourceGenerator().template(generation_context, "code_snippet").structured_payload
-    payload["code"] = "def incomplete(:\n    return 1\n"
+    payload["code"] = "int incomplete(const int *values) {\n    return values[0];\n"
 
     validation = validate_resource_payload("code_snippet", payload, generation_context)
 
@@ -425,7 +425,10 @@ def test_code_snippet_syntax_check_does_not_execute_source(
     generation_context: ResourceContext,
 ) -> None:
     payload = ResourceGenerator().template(generation_context, "code_snippet").structured_payload
-    payload["code"] = "raise RuntimeError('validation must not execute source')"
+    payload["code"] = (
+        "#include <stdio.h>\n"
+        "int main(void) { /* validation must not execute source */ return 0; }\n"
+    )
 
     validation = validate_resource_payload("code_snippet", payload, generation_context)
 

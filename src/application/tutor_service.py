@@ -237,13 +237,20 @@ def _fallback_tutor_response(request: TutorRequest, node_id: str = "") -> Dict[s
         "你可以继续追问其中任意一步，辅导智能体会结合当前学习节点展开说明。"
     )
     if request.context_type == "code_debug":
-        code_block = request.code_snippet or "（未提供代码片段）"
+        code_block = request.code_snippet or (
+            "#include <stdio.h>\n\n"
+            "int main(void) {\n"
+            "    /* 请替换为需要调试的 C11 代码。 */\n"
+            "    return 0;\n"
+            "}"
+        )
+        code_language = "text" if request.code_snippet else "c"
         error_block = request.error_message or "（未提供运行错误信息）"
         text_explanation = (
             f"## {title}：代码调试\n\n"
             "学生问题已记录，下面按最小可复现路径进行排查。\n\n"
             "### 待检查代码\n"
-            f"```\n{code_block}\n```\n\n"
+            f"```{code_language}\n{code_block}\n```\n\n"
             "### 错误信息\n"
             f"```text\n{error_block}\n```\n\n"
             "智能辅导本次响应超时。请先用最小输入稳定复现问题，再检查失败操作之前的变量值、边界条件和控制流。"

@@ -127,7 +127,7 @@
                   <template v-else-if="currentSlide.kind === 'code'">
                     <span class="ppt-preview-slide-kicker">{{ currentSlide.kicker || "可运行片段" }}</span>
                     <h3>{{ currentSlide.title }}</h3>
-                    <p class="ppt-preview-code-language">{{ currentSlide.language || "python" }}</p>
+                    <p class="ppt-preview-code-language">{{ codeLanguageLabel(currentSlide.language) }}</p>
                     <pre class="ppt-preview-code"><code>{{ currentSlide.code }}</code></pre>
                   </template>
 
@@ -177,6 +177,7 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { CODE_LANGUAGE_LABEL, normalizeCodeLanguage } from "../utils/codeExample.js";
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -230,6 +231,10 @@ function previousSlide() {
 
 function nextSlide() {
   selectSlide(currentIndex.value + 1);
+}
+
+function codeLanguageLabel(value) {
+  return normalizeCodeLanguage(value).toUpperCase() || CODE_LANGUAGE_LABEL;
 }
 
 function handleKeydown(event) {

@@ -103,9 +103,10 @@ class BoundaryTest(BaseModel):
 
 class CodeSnippetPayload(ResourcePayload):
     render_type: Literal["code_snippet"] = "code_snippet"
-    # Code-practice execution and the local syntax gate are Python-only.  Do
-    # not advertise languages whose generated examples cannot be verified.
-    language: Literal["python"] = "python"
+    # Generated examples and the bound practice runner use the same C
+    # contract.  Keeping this literal prevents a provider from silently
+    # returning a different language that the learner cannot execute.
+    language: Literal["c"] = "c"
     scenario: str = Field(min_length=1, max_length=1000)
     prerequisites: list[str] = Field(default_factory=list, min_length=1, max_length=8)
     code: str = Field(min_length=1, max_length=12000)

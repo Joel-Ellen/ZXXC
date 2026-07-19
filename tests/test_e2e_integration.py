@@ -361,10 +361,11 @@ class TestValidatorComponents:
         text = """
         损失函数: $$L = \\frac{1}{n}\\sum (y_i - \\hat{y}_i)^2$$
 
-        ```python
-        def gradient_descent(lr, epochs):
-            for _ in range(epochs):
-                pass
+        ```c
+        int gradient_descent(int value, int epochs) {
+            for (int step = 0; step < epochs; ++step) value += step;
+            return value;
+        }
         ```
         """
         formulas = EntityExtractor.extract_formulas(text)
@@ -373,16 +374,16 @@ class TestValidatorComponents:
         code_blocks = EntityExtractor.extract_code_blocks(text)
         assert len(code_blocks) >= 1, "应提取到至少 1 个代码块"
 
-    def test_ast_check_valid_code(self) -> None:
-        """合法 Python 代码应通过 AST 检查。"""
-        code = "def hello():\n    return 'world'"
-        errors = EntityExtractor.check_python_ast(code)
+    def test_c_syntax_check_valid_code(self) -> None:
+        """合法 C11 代码应通过静态语法检查。"""
+        code = "int hello(void) { return 1; }"
+        errors = EntityExtractor.check_c_syntax(code)
         assert len(errors) == 0, f"合法代码不应有错误: {errors}"
 
-    def test_ast_check_invalid_code(self) -> None:
-        """非法 Python 代码应被 AST 检出。"""
-        code = "def broken(:\n    return"
-        errors = EntityExtractor.check_python_ast(code)
+    def test_c_syntax_check_invalid_code(self) -> None:
+        """非法 C11 代码应被静态检查检出。"""
+        code = "int broken(void) { return 1 }"
+        errors = EntityExtractor.check_c_syntax(code)
         assert len(errors) > 0, "非法代码应有错误"
 
     def test_sliding_window_with_overlap(self) -> None:
@@ -407,14 +408,14 @@ class TestValidatorComponents:
 
         # 合法的代码块应通过 AST 检查
         result_code = gate.validate(
-            "```python\ndef hello():\n    return 'world'\n```",
+            "```c\nconst char *hello(void) {\n    return \"world\";\n}\n```",
             "code_snippet",
         )
         assert result_code.passed is True
 
         # 含非法 Python 语法的代码应被检测
         result_bad_code = gate.validate(
-            "```python\ndef broken(:\n```",
+            "```c\nint broken(void) {\n    return 1\n}\n```",
             "code_snippet",
         )
         assert result_bad_code.passed is False

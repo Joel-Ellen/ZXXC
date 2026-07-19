@@ -44,6 +44,7 @@
         class="workspace-pane-layout__pane workspace-pane-layout__learning"
         :class="{ 'is-active-mobile': effectiveMobilePane === 'learn' }"
         panel-id="workspace-learn-panel"
+        :session-id="sessionId"
         :cards="cards"
         :current-node="currentNode"
         :node-title="nodeTitle"
@@ -62,6 +63,8 @@
         @refresh="$emit('refresh-resources')"
         @generate-card="(payload) => $emit('generate-card', payload)"
         @filter-change="onResourceFilterChange"
+        @code-run="(payload) => $emit('code-run', payload)"
+        @code-submitted="(payload) => $emit('code-submitted', payload)"
       />
 
       <button
@@ -186,6 +189,7 @@ const DRAWER_PANEL_ID = "workspace-sidebar-drawer";
 const props = defineProps({
   bootMode: { type: String, default: "loading" },
   user: { type: Object, default: null },
+  sessionId: { type: String, default: "" },
   currentNode: { type: String, default: "" },
   cards: { type: Array, default: () => [] },
   pathNodes: { type: Array, default: () => [] },
@@ -220,6 +224,8 @@ const emit = defineEmits([
   "switch-course",
   "refresh-resources",
   "generate-card",
+  "code-run",
+  "code-submitted",
   "restart-probe",
   "browse-courses",
 ]);

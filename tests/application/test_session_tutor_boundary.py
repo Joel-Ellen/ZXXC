@@ -7,6 +7,12 @@ from starlette.responses import JSONResponse
 from frontend import server
 
 
+@pytest.fixture(autouse=True)
+def _allow_direct_handler_calls(monkeypatch):
+    """Keep these routing tests independent from session authentication."""
+    monkeypatch.setattr(server, "_event_session_auth_error", lambda *_args, **_kwargs: None)
+
+
 class _Receive:
     def __init__(self, payload):
         self._payload = payload
