@@ -77,8 +77,17 @@ class OrchestrationRuntime:
         # Resource work runs out of band.  Keep each provider attempt short so
         # a slow model cannot pin a worker or delay concept-map first paint.
         self._resource_llm_timeout_sec = self._read_float_env("EDUAGENT_RESOURCE_LLM_TIMEOUT_SEC", 18.0)
-        self._resource_llm_total_timeout_sec = max(
+        # An attempt shorter than this cannot produce a card; skip the provider
+        # instead of burning a doomed call that only pollutes the breaker.
+        self._resource_llm_min_attempt_sec = min(
             self._resource_llm_timeout_sec,
+            max(0.5, self._read_float_env("EDUAGENT_RESOURCE_LLM_MIN_ATTEMPT_SEC", 3.0)),
+        )
+        # The total budget must leave a useful slice for at least one fallback
+        # attempt after the primary provider consumes its full per-attempt
+        # timeout; otherwise the fallback chain exists only on paper.
+        self._resource_llm_total_timeout_sec = max(
+            self._resource_llm_timeout_sec + self._resource_llm_min_attempt_sec,
             self._read_float_env("EDUAGENT_RESOURCE_LLM_TOTAL_TIMEOUT_SEC", 20.0),
         )
         # One bounded attempt is the default.  Deployments with a reliable
@@ -397,7 +406,7 @@ class OrchestrationRuntime:
         for provider_name, llm in candidates:
             for attempt in range(1, self._resource_llm_retries + 1):
                 remaining_sec = deadline - time.monotonic()
-                if remaining_sec <= 0:
+                if remaining_sec < self._resource_llm_min_attempt_sec:
                     last_failure = "deadline_exceeded"
                     break
 
@@ -472,7 +481,7 @@ class OrchestrationRuntime:
                     )
                     if backoff_sec:
                         time.sleep(backoff_sec)
-            if time.monotonic() >= deadline:
+            if deadline - time.monotonic() < self._resource_llm_min_attempt_sec:
                 break
 
         incr_metric("llm.fallback_total", operation="resource_generation", fallback="template")
@@ -613,7 +622,7 @@ class OrchestrationRuntime:
         attempts = 0
         for provider_name, llm in self._candidate_llms():
             remaining = deadline - time.monotonic()
-            if remaining <= 0:
+            if remaining < self._resource_llm_min_attempt_sec:
                 last_failure = "deadline_exceeded"
                 break
             timeout_sec = min(self._resource_llm_timeout_sec, remaining)
@@ -670,7 +679,7 @@ class OrchestrationRuntime:
         last_failure = "no_eligible_provider"
         for provider_name, llm in self._candidate_llms():
             remaining = deadline - time.monotonic()
-            if remaining <= 0:
+            if remaining < self._resource_llm_min_attempt_sec:
                 last_failure = "deadline_exceeded"
                 break
             timeout_sec = min(self._resource_llm_total_timeout_sec, remaining)

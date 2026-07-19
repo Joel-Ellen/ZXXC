@@ -13,8 +13,27 @@ from src.orchestration_core import _verify_quiz_completion
 from tests.helpers import FakeValidationPipeline, disable_persistence, install_fake_runtime
 
 
+def _enable_llm_generation(runtime) -> None:
+    """Make the fake runtime emit llm-sourced results.
+
+    Template fallbacks are deliberately excluded from every cache, so cache
+    behavior tests must generate cards with real LLM provenance.
+    """
+    def generate_resource_contents(node_id, card_types, difficulty, **_kwargs):
+        return {
+            card_type: {
+                "content": f"## {node_id} {card_type}\n\n模拟 LLM 内容",
+                "generation": {"source": "llm", "provider": "fake-provider", "model": "fake-model"},
+            }
+            for card_type in card_types
+        }
+
+    runtime.generate_resource_contents = generate_resource_contents
+
+
 def test_get_resources_serves_a_validated_generic_cache_without_creating_a_session(monkeypatch) -> None:
     runtime = install_fake_runtime(monkeypatch)
+    _enable_llm_generation(runtime)
     disable_persistence(monkeypatch)
     monkeypatch.setattr(resource_service, "get_validation_pipeline", lambda: FakeValidationPipeline())
     repo = MemoryResourceGenerationRepo()
@@ -144,6 +163,7 @@ def test_cached_quiz_is_restored_by_generation_before_it_can_be_graded(monkeypat
 
 def test_personalized_generation_never_populates_the_course_base_cache(monkeypatch) -> None:
     runtime = install_fake_runtime(monkeypatch)
+    _enable_llm_generation(runtime)
     disable_persistence(monkeypatch)
     monkeypatch.setattr(resource_service, "get_validation_pipeline", lambda: FakeValidationPipeline())
     repo = MemoryResourceGenerationRepo()
@@ -193,6 +213,57 @@ def test_personalized_generation_never_populates_the_course_base_cache(monkeypat
 
     assert result["resources"] == []
     assert result["missing_card_types"] == ["interactive_exercise"]
+
+
+def test_template_fallback_cards_never_enter_caches_and_self_heal(monkeypatch) -> None:
+    # Without an LLM the fake runtime falls back to templates. A template
+    # placeholder must not poison any cache, must not satisfy the
+    # already-exists check, and must be replaced once the LLM recovers.
+    runtime = install_fake_runtime(monkeypatch)
+    disable_persistence(monkeypatch)
+    monkeypatch.setattr(resource_service, "get_validation_pipeline", lambda: FakeValidationPipeline())
+    repo = MemoryResourceGenerationRepo(store=_MemoryGenerationStore())
+
+    source_session = runtime.get_session("template-heal", "course1")
+    source_session.agent_state.current_node_id = "N01"
+    first = resource_service.request_generation(
+        "template-heal",
+        "course1",
+        "N01",
+        card_types=["concept_map"],
+        submit=False,
+        repo=repo,
+    )
+    resource_service.run_generation_job(first["job_id"], repo=repo)
+
+    state = runtime.get_session("template-heal", "course1").agent_state
+    card = next(card for card in state.generated_resources["N01"] if card.card_type == "concept_map")
+    assert card.metadata["generation"]["source"] == "template"
+    assert repo.get_base_cache(
+        "course1",
+        "N01",
+        "concept_map",
+        content_version="resource-v3",
+        knowledge_index_version="course-catalog-v1",
+    ) is None
+
+    # The LLM recovers: a plain (non-force) request must retry the template
+    # card instead of short-circuiting on the degraded placeholder.
+    _enable_llm_generation(runtime)
+    second = resource_service.request_generation(
+        "template-heal",
+        "course1",
+        "N01",
+        card_types=["concept_map"],
+        submit=False,
+        repo=repo,
+    )
+    assert second["job_id"] is not None
+    resource_service.run_generation_job(second["job_id"], repo=repo)
+
+    state = runtime.get_session("template-heal", "course1").agent_state
+    healed = next(card for card in state.generated_resources["N01"] if card.card_type == "concept_map")
+    assert healed.metadata["generation"]["source"] == "llm"
 
 
 def test_resource_read_hides_english_cards_from_existing_sessions(monkeypatch) -> None:

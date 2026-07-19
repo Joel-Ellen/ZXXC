@@ -697,6 +697,14 @@ def _record_resource_rejection(
     return issue_codes
 
 
+def _is_template_generated(metadata: Any) -> bool:
+    """Whether a card is a local template placeholder for a failed generation."""
+    if not isinstance(metadata, dict):
+        return False
+    generation = metadata.get("generation")
+    return isinstance(generation, dict) and generation.get("source") == "template"
+
+
 def _fallback_generation(
     rejected_generation: Dict[str, Any],
     issue_codes: list[str],
@@ -882,7 +890,14 @@ def _legacy_generate_current_node_resources(
                 persist_session(session)
             existing = state.generated_resources.get(target_node, [])
 
-        existing_types = {card.card_type for card in existing}
+        # Template fallbacks are placeholders for a failed generation. Treat
+        # them as missing so a later request retries with a fresh LLM budget
+        # instead of pinning the degraded card until a force regeneration.
+        existing_types = {
+            card.card_type
+            for card in existing
+            if not _is_template_generated(card.metadata)
+        }
         if not force and existing_types.issuperset(set(requested_types or [])):
             normalize_state_resources(state)
             resources = [
@@ -1329,6 +1344,9 @@ def _validated_cached_card(
         return None
     cached_generation = metadata.get("generation")
     if not isinstance(cached_generation, dict) or not str(cached_generation.get("source") or "").strip():
+        return None
+    if cached_generation.get("source") == "template":
+        # Guard against caches poisoned before template writes were skipped.
         return None
     structured_payload = metadata.get("structured_payload")
     if not isinstance(structured_payload, dict):
@@ -1837,7 +1855,13 @@ def request_generation(
         for card in state.generated_resources.get(target_node, [])
         if _resource_card_language_valid(card, locale)
     ]
-    existing_types = {card.card_type for card in existing_cards}
+    # Template fallbacks count as missing so a later request retries them
+    # with a fresh budget; the degraded card stays visible in the meantime.
+    existing_types = {
+        card.card_type
+        for card in existing_cards
+        if not _is_template_generated(card.metadata)
+    }
     types_to_generate = list(requested_types or []) if force else [
         card_type for card_type in requested_types or [] if card_type not in existing_types
     ]
@@ -2159,6 +2183,10 @@ def _course_base_cache_card(context: ResourceContext, card: ResourceCard) -> Opt
 
 def _store_card_in_caches(repo: ResourceGenerationRepo, context: Any, card: ResourceCard) -> None:
     metadata = dict(card.metadata or {})
+    if _is_template_generated(metadata):
+        # A template placeholder is regenerable locally for free; caching it
+        # would turn one failed generation into a lasting cache hit.
+        return
     payload = card.model_dump(mode="json")
     source_refs = metadata.get("source_refs") if isinstance(metadata.get("source_refs"), list) else []
     cache_metadata = {
@@ -2812,8 +2840,13 @@ def _run_claimed_generation_job(
             existing_by_type = {card.card_type: card for card in existing_cards}
             unresolved: list[str] = []
             for card_type in requested:
-                if not force and card_type in existing_by_type:
-                    repo_card = resource_contract_from_card(existing_by_type[card_type]).model_dump()
+                existing_card = existing_by_type.get(card_type)
+                if (
+                    not force
+                    and existing_card is not None
+                    and not _is_template_generated(existing_card.metadata)
+                ):
+                    repo_card = resource_contract_from_card(existing_card).model_dump()
                     require_lease(repository.mark_card_ready(
                         str(job_id),
                         card_type,

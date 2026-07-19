@@ -58,7 +58,13 @@ const RESOURCE_CARD_TYPES = [
 const RESOURCE_STREAM_MAX_RECONNECTS = 2;
 const RESOURCE_STREAM_RECONNECT_DELAY_MS = 500;
 const RESOURCE_GENERATION_POLL_INTERVAL_MS = 750;
-const RESOURCE_GENERATION_POLL_MAX_ATTEMPTS = 80;
+// Cover the backend bundle deadline (BUNDLE_DEADLINE_SECONDS = 120s) plus
+// margin: the client must not declare a failure while the durable job can
+// still legitimately complete server-side.
+const RESOURCE_GENERATION_POLL_MAX_WAIT_MS = 130_000;
+const RESOURCE_GENERATION_POLL_MAX_ATTEMPTS = Math.ceil(
+  RESOURCE_GENERATION_POLL_MAX_WAIT_MS / RESOURCE_GENERATION_POLL_INTERVAL_MS,
+);
 
 function isRetryableLearningEventError(error) {
   const status = Number(error?.response?.status);

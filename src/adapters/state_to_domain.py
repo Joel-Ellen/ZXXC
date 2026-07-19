@@ -93,6 +93,27 @@ def path_from_state(state: AgentState) -> LearningPath:
     return LearningPath(nodes=nodes, current_node_id=state.current_node_id, target_node_id=state.target_node_id)
 
 
+def _lenient_validation_section(validation_payload: Dict[str, Any]) -> ResourceValidation:
+    """Rebuild a persisted validation section without failing the read.
+
+    Sessions poisoned by an older writer (e.g. non-list ``issues``) must
+    degrade to an unknown validation status instead of turning every
+    subsequent session read into a 500.
+    """
+    try:
+        return ResourceValidation(**validation_payload)
+    except Exception as exc:
+        return ResourceValidation(status="unknown", metadata={"parse_error": type(exc).__name__})
+
+
+def _lenient_safety_section(safety_payload: Dict[str, Any]) -> ResourceSafety:
+    """Rebuild a persisted safety section without failing the read."""
+    try:
+        return ResourceSafety(**safety_payload)
+    except Exception:
+        return ResourceSafety(status="unknown")
+
+
 def resource_contract_from_card(card: ResourceCard) -> ResourceContract:
     metadata = dict(card.metadata or {})
     title = metadata.get("title") or _node_title(card.node_id) or card.node_id
@@ -175,8 +196,8 @@ def resource_contract_from_card(card: ResourceCard) -> ResourceContract:
         personalization_basis=personalization_basis,
         generation=generation_payload,
         content_version=content_version,
-        validation=ResourceValidation(**validation_payload),
-        safety=ResourceSafety(**safety_payload),
+        validation=_lenient_validation_section(validation_payload),
+        safety=_lenient_safety_section(safety_payload),
         source_refs=source_refs,
         created_at=created_at or ResourceContract(resource_id=card.resource_id, node_id=card.node_id, resource_type=card.card_type).created_at,
     )
