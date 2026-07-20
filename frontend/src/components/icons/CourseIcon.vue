@@ -4,7 +4,10 @@
 
 <script setup>
 import { computed } from "vue";
+import IconCode from "./IconCode.vue";
+import IconCpu from "./IconCpu.vue";
 import IconDoc from "./IconDoc.vue";
+import IconGlobe from "./IconGlobe.vue";
 import IconRadar from "./IconRadar.vue";
 import IconSettings from "./IconSettings.vue";
 import IconTree from "./IconTree.vue";
@@ -19,10 +22,10 @@ const ICON_COMPONENTS = {
   algorithm: IconTree,
   book: IconDoc,
   document: IconDoc,
-  network: IconRadar,
-  python: IconDoc,
+  network: IconGlobe,
+  python: IconCode,
   settings: IconSettings,
-  system: IconSettings,
+  system: IconCpu,
   ai: IconRadar,
 };
 

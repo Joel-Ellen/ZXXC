@@ -17,7 +17,7 @@ SEED_COURSES = [
         "estimated_hours": 80.0,
         "node_count": 20,
         "tags": ["数据结构", "算法", "DSA", "面试", "LeetCode", "编程基础"],
-        "icon": "🔷",
+        "icon": "algorithm",
         "prerequisites": [],
     },
     {
@@ -31,7 +31,7 @@ SEED_COURSES = [
         "estimated_hours": 60.0,
         "node_count": 0,
         "tags": ["操作系统", "OS", "进程", "内存", "并发", "Linux"],
-        "icon": "⚙️",
+        "icon": "system",
         "prerequisites": ["data_structures"],
     },
     {
@@ -45,7 +45,7 @@ SEED_COURSES = [
         "estimated_hours": 55.0,
         "node_count": 0,
         "tags": ["网络", "TCP/IP", "HTTP", "DNS", "路由", "网络安全"],
-        "icon": "🌐",
+        "icon": "network",
         "prerequisites": [],
     },
     {
@@ -59,7 +59,7 @@ SEED_COURSES = [
         "estimated_hours": 70.0,
         "node_count": 0,
         "tags": ["机器学习", "ML", "深度学习", "神经网络", "AI", "Python"],
-        "icon": "🤖",
+        "icon": "ai",
         "prerequisites": ["data_structures", "python_programming"],
     },
     {
@@ -73,7 +73,7 @@ SEED_COURSES = [
         "estimated_hours": 40.0,
         "node_count": 0,
         "tags": ["Python", "编程", "入门", "OOP", "函数式"],
-        "icon": "🐍",
+        "icon": "python",
         "prerequisites": [],
     },
 ]

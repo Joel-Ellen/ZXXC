@@ -3,10 +3,7 @@
     <header class="retest-topbar">
       <div class="retest-topbar__inner">
         <button type="button" class="retest-back focus-ring" @click="goBack">
-          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M19 12H5" />
-            <path d="m12 19-7-7 7-7" />
-          </svg>
+          <IconArrowLeft />
           返回错题本
         </button>
         <div class="retest-heading">
@@ -29,7 +26,7 @@
       </section>
 
       <section v-else-if="error" class="retest-state retest-state--error" role="alert">
-        <div class="retest-state__icon" aria-hidden="true">!</div>
+        <div class="retest-state__icon" aria-hidden="true"><IconAlert :size="22" /></div>
         <h2>复测题加载失败</h2>
         <p>{{ error }}</p>
         <button type="button" class="retest-submit focus-ring" @click="loadQuiz">重新加载</button>
@@ -120,6 +117,8 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import ChatArea from "../components/ChatArea.vue";
+import IconAlert from "../components/icons/IconAlert.vue";
+import IconArrowLeft from "../components/icons/IconArrowLeft.vue";
 import {
   fetchSessionReviewDashboard,
   fetchSessionResources,

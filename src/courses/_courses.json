@@ -17,7 +17,7 @@
       "LeetCode",
       "编程基础"
     ],
-    "icon": "🔷",
+    "icon": "algorithm",
     "prerequisites": []
   },
   "operating_systems": {
@@ -38,7 +38,7 @@
       "并发",
       "Linux"
     ],
-    "icon": "⚙️",
+    "icon": "system",
     "prerequisites": [
       "data_structures"
     ]
@@ -61,7 +61,7 @@
       "路由",
       "网络安全"
     ],
-    "icon": "🌐",
+    "icon": "network",
     "prerequisites": []
   },
   "machine_learning": {
@@ -82,7 +82,7 @@
       "AI",
       "Python"
     ],
-    "icon": "🤖",
+    "icon": "ai",
     "prerequisites": [
       "data_structures",
       "python_programming"
@@ -105,7 +105,7 @@
       "OOP",
       "函数式"
     ],
-    "icon": "🐍",
+    "icon": "python",
     "prerequisites": []
   }
 }

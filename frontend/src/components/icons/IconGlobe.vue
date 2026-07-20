@@ -10,14 +10,9 @@
     stroke-linejoin="round"
     aria-hidden="true"
   >
-    <path d="M12 5v14" />
-    <path d="M7 10h10" />
-    <path d="M7 19h10" />
-    <circle cx="12" cy="5" r="2.5" />
-    <circle cx="7" cy="10" r="2.5" />
-    <circle cx="17" cy="10" r="2.5" />
-    <circle cx="7" cy="19" r="2.5" />
-    <circle cx="17" cy="19" r="2.5" />
+    <circle cx="12" cy="12" r="9" />
+    <path d="M3 12h18" />
+    <path d="M12 3a14 14 0 0 1 3.6 9 14 14 0 0 1-3.6 9 14 14 0 0 1-3.6-9A14 14 0 0 1 12 3z" />
   </svg>
 </template>
 

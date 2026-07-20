@@ -101,14 +101,15 @@
 
 <script setup>
 import { computed } from "vue";
-import IconChat from "./icons/IconChat.vue";
-import IconCheck from "./icons/IconCheck.vue";
-import IconDoc from "./icons/IconDoc.vue";
-import IconExpand from "./icons/IconExpand.vue";
+import IconClipboard from "./icons/IconClipboard.vue";
+import IconCode from "./icons/IconCode.vue";
+import IconMap from "./icons/IconMap.vue";
+import IconPencil from "./icons/IconPencil.vue";
 import IconQuiz from "./icons/IconQuiz.vue";
 import IconTree from "./icons/IconTree.vue";
+import IconVideo from "./icons/IconVideo.vue";
 
-const props = defineProps({
+defineProps({
   activePanel:  { type: String, default: "concept" },
   drawerOpen:   { type: Boolean, default: false },
   panelId:      { type: String, default: "workspace-sidebar-drawer" },
@@ -122,7 +123,7 @@ const contentItems = computed(() => [
     key: "concept",
     short: "概念",
     label: "概念导图",
-    icon: IconDoc,
+    icon: IconMap,
     color: "var(--learning-concept-dark)",
     softColor: "var(--learning-concept-soft)",
   },
@@ -130,7 +131,7 @@ const contentItems = computed(() => [
     key: "code",
     short: "代码",
     label: "代码示例",
-    icon: IconExpand,
+    icon: IconCode,
     color: "var(--learning-code-dark)",
     softColor: "var(--learning-code-soft)",
   },
@@ -138,7 +139,7 @@ const contentItems = computed(() => [
     key: "practice",
     short: "练习",
     label: "互动练习",
-    icon: IconCheck,
+    icon: IconPencil,
     color: "var(--learning-practice-dark)",
     softColor: "var(--learning-practice-soft)",
   },
@@ -146,7 +147,7 @@ const contentItems = computed(() => [
     key: "video",
     short: "视频",
     label: "视频摘要",
-    icon: IconChat,
+    icon: IconVideo,
     color: "var(--learning-video-dark)",
     softColor: "var(--learning-video-soft)",
   },
@@ -154,7 +155,7 @@ const contentItems = computed(() => [
     key: "quiz",
     short: "测验",
     label: "诊断测验",
-    icon: IconQuiz,
+    icon: IconClipboard,
     color: "var(--learning-quiz-dark)",
     softColor: "var(--learning-quiz-soft)",
   },

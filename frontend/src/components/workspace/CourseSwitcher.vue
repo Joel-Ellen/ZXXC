@@ -13,21 +13,11 @@
     >
       <span class="course-switcher__icon" aria-hidden="true"><IconDoc :size="16" /></span>
       <span class="course-switcher__title">{{ activeCourseTitle }}</span>
-      <svg
-        width="12"
-        height="12"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2.6"
-        stroke-linecap="round"
-        stroke-linejoin="round"
+      <IconChevronDown
+        :size="12"
         class="course-switcher__chevron"
         :class="{ 'is-open': menuOpen }"
-        aria-hidden="true"
-      >
-        <path d="m6 9 6 6 6-6" />
-      </svg>
+      />
     </button>
 
     <transition name="course-menu-fade">
@@ -77,7 +67,7 @@
           class="course-switcher__item course-switcher__item--browse focus-ring"
           @click="browseCourses"
         >
-          <span class="course-switcher__browse-mark" aria-hidden="true">+</span>
+          <span class="course-switcher__browse-mark" aria-hidden="true"><IconPlus :size="14" /></span>
           <span>选择其他课程</span>
         </button>
       </div>
@@ -95,7 +85,9 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import IconCheck from "../icons/IconCheck.vue";
+import IconChevronDown from "../icons/IconChevronDown.vue";
 import IconDoc from "../icons/IconDoc.vue";
+import IconPlus from "../icons/IconPlus.vue";
 
 const props = defineProps({
   activeCourse: { type: Object, default: null },

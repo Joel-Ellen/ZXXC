@@ -10,9 +10,7 @@
       @click="openTray"
     >
       <!-- Chat icon -->
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-      </svg>
+      <IconChat :size="22" />
       <!-- Unread dot -->
       <span v-if="hasUnread" class="fab-unread-dot" aria-hidden="true" />
     </button>
@@ -45,10 +43,8 @@
               :title="isMinimized ? '展开' : '最小化'"
               @click="toggleMinimize"
             >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                <line v-if="!isMinimized" x1="2" y1="8" x2="14" y2="8" />
-                <polyline v-else points="4,10 8,6 12,10" />
-              </svg>
+              <IconMinimize v-if="!isMinimized" :size="14" />
+              <IconChevronUp v-else :size="14" />
             </button>
             <button
               type="button"
@@ -56,10 +52,7 @@
               title="关闭"
               @click="closeTray"
             >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                <line x1="3" y1="3" x2="13" y2="13" />
-                <line x1="13" y1="3" x2="3" y2="13" />
-              </svg>
+              <IconClose :size="14" />
             </button>
           </div>
         </div>
@@ -91,6 +84,10 @@
 <script setup>
 import { ref, computed, onUnmounted } from "vue";
 import ChatArea from "./ChatArea.vue";
+import IconChat from "./icons/IconChat.vue";
+import IconChevronUp from "./icons/IconChevronUp.vue";
+import IconClose from "./icons/IconClose.vue";
+import IconMinimize from "./icons/IconMinimize.vue";
 
 const props = defineProps({
   messages:          { type: Array,   default: () => [] },

@@ -292,10 +292,7 @@
               :aria-label="activePanel === 'settings' ? '关闭显示设置' : '关闭学习控制台'"
               @click="$emit('close')"
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M18 6 6 18" />
-                <path d="M6 6l12 12" />
-              </svg>
+              <IconClose :size="18" />
             </button>
           </div>
         </aside>
@@ -309,6 +306,7 @@ import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch }
 import AgentFeedbackPanel from "./AgentFeedbackPanel.vue";
 import KnowledgeTree from "./KnowledgeTree.vue";
 import IconChat from "./icons/IconChat.vue";
+import IconClose from "./icons/IconClose.vue";
 import IconRadar from "./icons/IconRadar.vue";
 import IconSettings from "./icons/IconSettings.vue";
 import IconTree from "./icons/IconTree.vue";

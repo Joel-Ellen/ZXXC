@@ -141,7 +141,7 @@
               <dl class="mt-3 grid gap-3 text-xs text-text-secondary sm:grid-cols-2 lg:grid-cols-4">
                 <div><dt class="text-text-muted">事件</dt><dd class="mt-1 font-semibold text-text-primary">{{ entry.event_type }}</dd></div>
                 <div><dt class="text-text-muted">尝试</dt><dd class="mt-1 font-semibold text-text-primary">{{ entry.attempt_number }} · {{ entry.used_hint ? '使用提示' : '未使用提示' }}</dd></div>
-                <div><dt class="text-text-muted">掌握度</dt><dd class="mt-1 font-semibold text-text-primary">{{ percent(entry.mastery_before) }} -> {{ percent(entry.mastery_after) }}</dd></div>
+                <div><dt class="text-text-muted">掌握度</dt><dd class="mt-1 font-semibold text-text-primary">{{ percent(entry.mastery_before) }} → {{ percent(entry.mastery_after) }}</dd></div>
                 <div><dt class="text-text-muted">服务端结论</dt><dd class="mt-1 font-semibold text-text-primary">{{ entry.reason || '已验证' }}</dd></div>
               </dl>
 

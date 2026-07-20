@@ -10,10 +10,7 @@
             title="返回工作台"
             @click="goBack"
           >
-            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M19 12H5" />
-              <path d="m12 19-7-7 7-7" />
-            </svg>
+            <IconArrowLeft />
           </button>
           <div class="review-brand">
             <span class="review-brand__mark">EA</span>
@@ -42,21 +39,12 @@
 
         <section v-else-if="error" class="state-panel state-panel--error" role="alert">
           <div class="state-panel__icon state-panel__icon--error">
-            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="9" />
-              <path d="M12 8v4" />
-              <path d="M12 16h.01" />
-            </svg>
+            <IconAlert />
           </div>
           <h1>复习队列加载失败</h1>
           <p>{{ error }}</p>
           <button type="button" class="button button--primary focus-ring" :disabled="loading" @click="fetchData">
-            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M20 11a8.1 8.1 0 0 0-14-4.9L4 8" />
-              <path d="M4 4v4h4" />
-              <path d="M4 13a8.1 8.1 0 0 0 14 4.9L20 16" />
-              <path d="M20 20v-4h-4" />
-            </svg>
+            <IconRefresh />
             重新加载
           </button>
         </section>
@@ -72,19 +60,8 @@
             </div>
             <div class="review-hero__signal" :class="{ 'review-hero__signal--clear': !actionableCount }">
               <div class="signal-ring">
-                <svg v-if="actionableCount" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M12 3v4" />
-                  <path d="M12 17v4" />
-                  <path d="m4.93 4.93 2.83 2.83" />
-                  <path d="m16.24 16.24 2.83 2.83" />
-                  <path d="M3 12h4" />
-                  <path d="M17 12h4" />
-                  <path d="m4.93 19.07 2.83-2.83" />
-                  <path d="m16.24 7.76 2.83-2.83" />
-                </svg>
-                <svg v-else aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="m5 12 4 4L19 6" />
-                </svg>
+                <IconSpark v-if="actionableCount" />
+                <IconCheck v-else />
               </div>
               <div>
                 <span class="review-hero__signal-label">{{ actionableCount ? "建议先从这里开始" : "状态良好" }}</span>
@@ -96,12 +73,7 @@
           <section class="review-retest-cta" aria-labelledby="review-retest-title">
             <div class="review-retest-cta__copy">
               <div class="review-retest-cta__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M20 11a8.1 8.1 0 0 0-14-4.9L4 8" />
-                  <path d="M4 4v4h4" />
-                  <path d="M4 13a8.1 8.1 0 0 0 14 4.9L20 16" />
-                  <path d="M20 20v-4h-4" />
-                </svg>
+                <IconRefresh />
               </div>
               <div>
                 <h2 id="review-retest-title">开始重刷</h2>
@@ -115,9 +87,7 @@
                 :disabled="loading || !todayQueue.length || startingIds.length"
                 @click="startRetest('today')"
               >
-                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M8 5v14l11-7-11-7Z" />
-                </svg>
+                <IconPlay />
                 {{ startingIds.length ? "正在打开..." : "重刷今日待复习" }}
                 <span class="review-retest-cta__count">{{ todayQueue.length }}</span>
               </button>
@@ -127,9 +97,7 @@
                 :disabled="loading || !actionableCount || startingIds.length"
                 @click="startRetest('all')"
               >
-                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M4 6h16M4 12h16M4 18h10" />
-                </svg>
+                <IconMenu />
                 重刷全部待处理
                 <span class="review-retest-cta__count">{{ actionableCount }}</span>
               </button>
@@ -189,10 +157,7 @@
               </div>
               <div class="review-list-header__tools">
                 <label class="search-field">
-                  <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="11" cy="11" r="6.5" />
-                    <path d="m16 16 4.5 4.5" />
-                  </svg>
+                  <IconSearch />
                   <input v-model="searchQuery" type="search" placeholder="搜索题干、知识点" aria-label="搜索错题" />
                 </label>
                 <label class="select-field">
@@ -202,9 +167,7 @@
                     <option value="recent">最近更新</option>
                     <option value="topic">按知识点</option>
                   </select>
-                  <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="m6 9 6 6 6-6" />
-                  </svg>
+                  <IconChevronDown />
                 </label>
               </div>
             </div>
@@ -297,9 +260,7 @@
                       @click="toggleExpanded(item.review_item_id)"
                     >
                       {{ expandedIds.includes(item.review_item_id) ? "收起解析" : "查看答案与解析" }}
-                      <svg :class="{ 'text-button__icon--up': expandedIds.includes(item.review_item_id) }" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="m6 9 6 6 6-6" />
-                      </svg>
+                      <IconChevronDown :class="{ 'text-button__icon--up': expandedIds.includes(item.review_item_id) }" />
                     </button>
                     <span v-else class="review-item__footer-note">完成定向练习后会生成更完整的解析</span>
 
@@ -311,15 +272,11 @@
                       @click="startReview(item)"
                     >
                       <span v-if="startingIds.includes(item.review_item_id)" class="button-loader" aria-hidden="true" />
-                      <svg v-else aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="m9 18 6-6-6-6" />
-                      </svg>
+                      <IconChevronRight v-else />
                       {{ startingIds.includes(item.review_item_id) ? "正在准备" : item.status === "in_progress" ? "继续复习" : "开始补救" }}
                     </button>
                     <span v-else class="completed-mark">
-                      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="m5 12 4 4L19 6" />
-                      </svg>
+                      <IconCheck />
                       已完成
                     </span>
                     <button
@@ -330,12 +287,7 @@
                       :disabled="removingIds.includes(item.review_item_id)"
                       @click="requestDelete(item)"
                     >
-                      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M4 7h16" />
-                        <path d="M10 11v6M14 11v6" />
-                        <path d="M6 7l1 13h10l1-13" />
-                        <path d="M9 7V4h6v3" />
-                      </svg>
+                      <IconTrash />
                       <span>删除</span>
                     </button>
                   </div>
@@ -345,10 +297,7 @@
 
             <div v-else class="list-empty">
               <div class="list-empty__icon">
-                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" />
-                  <path d="M8 9h8M8 13h6" />
-                </svg>
+                <IconDoc />
               </div>
               <h3>{{ totalCount ? "没有符合条件的题目" : "没有错题记录" }}</h3>
               <p>{{ totalCount ? "可以调整上方筛选条件，看看其他复习任务。" : "继续学习，系统会在发现需要巩固的地方后把题目放到这里。" }}</p>
@@ -388,15 +337,10 @@
     <div v-if="deleteTarget" class="review-modal-backdrop" role="presentation" @click.self="closeDeleteDialog">
       <section class="review-modal" role="dialog" aria-modal="true" aria-labelledby="delete-review-title">
         <button type="button" class="review-modal__close icon-button focus-ring" aria-label="关闭弹窗" title="关闭弹窗" @click="closeDeleteDialog">
-          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="m7 7 10 10M17 7 7 17" />
-          </svg>
+          <IconClose />
         </button>
         <div class="review-modal__icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 3 3.8 18a1.5 1.5 0 0 0 1.3 2.2h13.8a1.5 1.5 0 0 0 1.3-2.2L12 3Z" />
-            <path d="M12 9v4M12 17h.01" />
-          </svg>
+          <IconWarning />
         </div>
         <h2 id="delete-review-title">确认删除</h2>
         <p>确定要删除这道错题吗？删除后将从错题本中移除。</p>
@@ -415,6 +359,20 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import ChatArea from "../components/ChatArea.vue";
+import IconAlert from "../components/icons/IconAlert.vue";
+import IconArrowLeft from "../components/icons/IconArrowLeft.vue";
+import IconCheck from "../components/icons/IconCheck.vue";
+import IconChevronDown from "../components/icons/IconChevronDown.vue";
+import IconChevronRight from "../components/icons/IconChevronRight.vue";
+import IconClose from "../components/icons/IconClose.vue";
+import IconDoc from "../components/icons/IconDoc.vue";
+import IconMenu from "../components/icons/IconMenu.vue";
+import IconPlay from "../components/icons/IconPlay.vue";
+import IconRefresh from "../components/icons/IconRefresh.vue";
+import IconSearch from "../components/icons/IconSearch.vue";
+import IconSpark from "../components/icons/IconSpark.vue";
+import IconTrash from "../components/icons/IconTrash.vue";
+import IconWarning from "../components/icons/IconWarning.vue";
 import apiClient from "../services/apiClient";
 import {
   deleteSessionReviewItem,

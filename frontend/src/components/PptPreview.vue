@@ -32,11 +32,7 @@
                 title="下载当前节点学习 PPT"
                 @click="emit('download')"
               >
-                <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M12 3v11" />
-                  <path d="m7 10 5 5 5-5" />
-                  <path d="M5 20h14" />
-                </svg>
+                <IconDownload :size="16" />
                 <span>{{ downloading ? "正在生成..." : "下载 PPT" }}</span>
               </button>
               <button
@@ -46,10 +42,7 @@
                 title="关闭课件预览"
                 @click="emit('close')"
               >
-                <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-                  <path d="m6 6 12 12" />
-                  <path d="m18 6-12 12" />
-                </svg>
+                <IconClose :size="18" />
               </button>
             </div>
           </header>
@@ -88,9 +81,7 @@
                 :disabled="currentIndex === 0"
                 @click="previousSlide"
               >
-                <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="m15 18-6-6 6-6" />
-                </svg>
+                <IconChevronLeft :size="20" />
               </button>
 
               <div class="ppt-preview-slide-viewport">
@@ -176,9 +167,7 @@
                 :disabled="currentIndex >= slides.length - 1"
                 @click="nextSlide"
               >
-                <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="m9 18 6-6-6-6" />
-                </svg>
+                <IconChevronRight :size="20" />
               </button>
             </main>
           </div>
@@ -190,6 +179,10 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import IconChevronLeft from "./icons/IconChevronLeft.vue";
+import IconChevronRight from "./icons/IconChevronRight.vue";
+import IconClose from "./icons/IconClose.vue";
+import IconDownload from "./icons/IconDownload.vue";
 import { CODE_LANGUAGE_LABEL, normalizeCodeLanguage } from "../utils/codeExample.js";
 import { renderMermaidDiagram } from "../utils/mermaidRuntime.js";
 

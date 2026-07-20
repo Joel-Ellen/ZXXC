@@ -45,7 +45,7 @@
 
     <div class="mindmap-footer" v-if="tips">
       <small>
-        <svg class="inline-block mr-1 align-text-bottom" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0018 8 6 6 0 006 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 018.91 14"/></svg>
+        <IconBulb class="inline-block mr-1 align-text-bottom" :size="14" />
         {{ tips }}</small>
     </div>
   </div>
@@ -64,6 +64,7 @@ import { ref, computed, watch } from 'vue'
 import { VueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
+import IconBulb from './icons/IconBulb.vue'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 

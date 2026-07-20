@@ -10,14 +10,9 @@
     stroke-linejoin="round"
     aria-hidden="true"
   >
-    <path d="M12 5v14" />
-    <path d="M7 10h10" />
-    <path d="M7 19h10" />
-    <circle cx="12" cy="5" r="2.5" />
-    <circle cx="7" cy="10" r="2.5" />
-    <circle cx="17" cy="10" r="2.5" />
-    <circle cx="7" cy="19" r="2.5" />
-    <circle cx="17" cy="19" r="2.5" />
+    <path d="M11.5 3.6a.53.53 0 0 1 1 0l1.6 4.9a2 2 0 0 0 1.4 1.4l4.9 1.6a.53.53 0 0 1 0 1l-4.9 1.6a2 2 0 0 0-1.4 1.4l-1.6 4.9a.53.53 0 0 1-1 0l-1.6-4.9a2 2 0 0 0-1.4-1.4l-4.9-1.6a.53.53 0 0 1 0-1l4.9-1.6a2 2 0 0 0 1.4-1.4z" />
+    <path d="M19 3v4" />
+    <path d="M21 5h-4" />
   </svg>
 </template>
 

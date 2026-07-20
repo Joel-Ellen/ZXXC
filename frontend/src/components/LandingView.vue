@@ -43,9 +43,7 @@
             aria-label="打开菜单"
             @click="mobileMenuOpen = true"
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
+            <IconMenu :size="18" />
           </button>
         </div>
       </div>
@@ -58,9 +56,7 @@
           <div class="mb-4 flex items-center justify-between">
             <span class="text-sm font-bold">菜单</span>
             <button type="button" class="rounded-full p-1 text-text-muted hover:text-text-primary" @click="mobileMenuOpen = false">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M18 6 6 18M6 6l12 12" />
-              </svg>
+              <IconClose :size="20" />
             </button>
           </div>
           <div class="space-y-1">
@@ -350,9 +346,7 @@
 
       <!-- Scroll hint -->
       <div class="absolute bottom-8 left-1/2 -translate-x-1/2 animate-bounce-subtle">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="text-text-muted">
-          <path d="M12 5v14M19 12l-7 7-7-7" />
-        </svg>
+        <IconArrowDown :size="24" class="text-text-muted" />
       </div>
     </section>
 
@@ -774,10 +768,7 @@
               <div class="flex flex-col items-center gap-3">
                 <div class="demo-avatar flex h-14 w-14 items-center justify-center rounded-full bg-card shadow-lg md:h-16 md:w-16">
                   <div class="demo-ring demo-ring--primary" />
-                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="relative z-10 text-text-primary">
-                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                    <circle cx="12" cy="7" r="4" />
-                  </svg>
+                  <IconUser :size="26" class="relative z-10 text-text-primary" />
                 </div>
                 <span class="text-xs font-medium text-text-secondary">学习者</span>
                 <!-- 提问气泡 -->
@@ -847,7 +838,7 @@
                   </div>
                 </div>
                 <span class="text-xs font-medium text-text-secondary">资源画布</span>
-                <span class="text-[10px] text-success -mt-2">资源装配完成 <svg class="inline-block align-text-bottom" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
+                <span class="text-[10px] text-success -mt-2">资源装配完成 <IconCheck :size="12" class="inline-block align-text-bottom" /></span>
               </div>
             </div>
 
@@ -1001,7 +992,7 @@
         <div class="grid gap-5 md:grid-cols-3">
           <div v-for="(t, idx) in testimonials" :key="t.name" class="reveal rounded-[28px] border border-subtle bg-card p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-card" :style="{ transitionDelay: `${idx * 100}ms` }">
             <div class="mb-4 flex gap-1">
-              <svg v-for="s in 5" :key="s" class="inline-block text-warning" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+              <IconStar v-for="s in 5" :key="s" :size="14" filled class="inline-block text-warning" />
             </div>
             <p class="text-sm font-light leading-relaxed text-text-secondary">{{ t.quote }}</p>
             <div class="mt-6 flex items-center gap-3">
@@ -1073,19 +1064,11 @@
                 @click="toggleFaq(idx)"
               >
                 <span class="text-base font-semibold">{{ faq.q }}</span>
-                <svg
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
+                <IconPlus
+                  :size="20"
                   class="shrink-0 text-text-muted transition-transform duration-300"
                   :class="openFaq === idx ? 'rotate-45' : ''"
-                  aria-hidden="true"
-                >
-                  <path d="M12 5v14M5 12h14" />
-                </svg>
+                />
               </button>
               <div
                 :id="`faq-answer-${idx}`"
@@ -1186,9 +1169,7 @@
             @click="scrollToTop"
           >
             回到顶部
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M12 19V5M5 12l7-7 7 7" />
-            </svg>
+            <IconArrowUp :size="14" />
           </button>
         </div>
       </div>
@@ -1199,14 +1180,24 @@
 <script setup>
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import IconCheck from "./icons/IconCheck.vue";
+import IconArrowDown from "./icons/IconArrowDown.vue";
+import IconArrowUp from "./icons/IconArrowUp.vue";
 import IconChat from "./icons/IconChat.vue";
+import IconCheck from "./icons/IconCheck.vue";
+import IconClose from "./icons/IconClose.vue";
+import IconCpu from "./icons/IconCpu.vue";
 import IconDoc from "./icons/IconDoc.vue";
 import IconExpand from "./icons/IconExpand.vue";
+import IconMap from "./icons/IconMap.vue";
+import IconMenu from "./icons/IconMenu.vue";
+import IconPlus from "./icons/IconPlus.vue";
 import IconQuiz from "./icons/IconQuiz.vue";
 import IconRadar from "./icons/IconRadar.vue";
+import IconSearch from "./icons/IconSearch.vue";
 import IconSettings from "./icons/IconSettings.vue";
+import IconStar from "./icons/IconStar.vue";
 import IconTree from "./icons/IconTree.vue";
+import IconUser from "./icons/IconUser.vue";
 import RadarCanvas from "./RadarCanvas.vue";
 
 const router = useRouter();
@@ -1240,10 +1231,10 @@ const knowledgeNodes = ["数组与链表", "栈与队列", "树与图", "动态�
 const radarDimensions = ["概念理解", "代码工程", "逻辑推理", "错题恢复", "时间管理"];
 
 const curriculumModules = [
-  { title: "线性结构", desc: "从数组、链表到栈与队列，掌握最基础的数据组织方式与复杂度分析。", icon: IconTree, accent: "primary", count: 8, tags: ["数组", "链表", "栈", "队列", "哈希表"] },
-  { title: "树与图", desc: "二叉树、平衡树、堆、图的遍历与最短路径，构建非线性思维模型。", icon: IconExpand, accent: "secondary", count: 12, tags: ["二叉树", "堆", "Trie", "图遍历", "最短路径"] },
-  { title: "算法策略", desc: "递归、分治、贪心、动态规划与回溯，系统掌握五大核心算法范式。", icon: IconSettings, accent: "tertiary", count: 10, tags: ["递归", "分治", "贪心", "DP", "回溯"] },
-  { title: "排序与搜索", desc: "从冒泡到快速排序，从二分查找到 A*，理解效率的本质差异。", icon: IconQuiz, accent: "success", count: 7, tags: ["快排", "归并", "二分", "DFS", "BFS"] },
+  { title: "线性结构", desc: "从数组、链表到栈与队列，掌握最基础的数据组织方式与复杂度分析。", icon: IconMenu, accent: "primary", count: 8, tags: ["数组", "链表", "栈", "队列", "哈希表"] },
+  { title: "树与图", desc: "二叉树、平衡树、堆、图的遍历与最短路径，构建非线性思维模型。", icon: IconTree, accent: "secondary", count: 12, tags: ["二叉树", "堆", "Trie", "图遍历", "最短路径"] },
+  { title: "算法策略", desc: "递归、分治、贪心、动态规划与回溯，系统掌握五大核心算法范式。", icon: IconCpu, accent: "tertiary", count: 10, tags: ["递归", "分治", "贪心", "DP", "回溯"] },
+  { title: "排序与搜索", desc: "从冒泡到快速排序，从二分查找到 A*，理解效率的本质差异。", icon: IconSearch, accent: "success", count: 7, tags: ["快排", "归并", "二分", "DFS", "BFS"] },
   { title: "高级专题", desc: "位运算、并查集、线段树与字符串匹配，冲刺高阶算法能力。", icon: IconRadar, accent: "warning", count: 6, tags: ["位运算", "并查集", "线段树", "KMP", "LRU"] },
   { title: "复杂度通识", desc: "时间与空间复杂度、均摊分析、NP 完全性，建立效率量化思维。", icon: IconDoc, accent: "info", count: 4, tags: ["Big O", "均摊", "P vs NP", "空间换时间"] },
 ];
@@ -1266,7 +1257,7 @@ const comparisonRows = [
 
 const bentoCards = [
   { title: "冷启动测评", desc: "5 分钟快速定位你的知识起点，生成个性化学习画像。", icon: IconQuiz },
-  { title: "多模态资源", desc: "概念导图、代码示例、视频摘要、互动练习一键装配。", icon: IconExpand },
+  { title: "多模态资源", desc: "概念导图、代码示例、视频摘要、互动练习一键装配。", icon: IconMap },
   { title: "能力雷达", desc: "五维能力实时可视化，短板一目了然。", icon: IconRadar },
   { title: "对话辅导", desc: "苏格拉底式提问，引导你自主推导出答案。", icon: IconChat },
   { title: "知识路径", desc: "递进式节点解锁，学习进度像地图一样清晰。", icon: IconTree, span: "md:col-span-2 lg:col-span-2" },
@@ -1274,9 +1265,9 @@ const bentoCards = [
 ];
 
 const workflowSteps = [
-  { title: "测评画像", desc: "通过冷启动测评与持续交互，系统构建你的专属学习画像。", icon: IconQuiz, accent: "primary" },
+  { title: "测评画像", desc: "通过冷启动测评与持续交互，系统构建你的专属学习画像。", icon: IconUser, accent: "primary" },
   { title: "路径推荐", desc: "基于画像与知识图谱，推荐最适合你当前水平的学习节点。", icon: IconTree, accent: "secondary" },
-  { title: "多模态学习", desc: "在学习托盘中对话，在资源画布中查看概念导图、代码与测验。", icon: IconDoc, accent: "tertiary" },
+  { title: "多模态学习", desc: "在学习托盘中对话，在资源画布中查看概念导图、代码与测验。", icon: IconMap, accent: "tertiary" },
   { title: "诊断提升", desc: "提交诊断测验后，能力雷达更新，系统动态调整后续路径。", icon: IconRadar, accent: "success" },
 ];
 

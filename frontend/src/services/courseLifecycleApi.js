@@ -43,7 +43,7 @@ export function normalizeCourse(record) {
     prerequisites: Array.isArray(source.prerequisites)
       ? source.prerequisites.map(asString).filter(Boolean)
       : [],
-    icon: asString(source.icon || "📘"),
+    icon: asString(source.icon || "book"),
     progress: normalizeCourseProgress(source.progress),
     completed_nodes: Math.max(0, Math.trunc(asNumber(source.completed_nodes, 0))),
     enrolled_at: asString(source.enrolled_at),

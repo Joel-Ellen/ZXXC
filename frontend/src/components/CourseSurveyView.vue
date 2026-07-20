@@ -6,10 +6,7 @@
       <header class="mb-6 flex min-w-0 items-start justify-between gap-3 sm:items-center">
         <div class="flex min-w-0 items-center gap-3">
           <div class="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-soft text-primary">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-              <circle cx="12" cy="7" r="4"/>
-            </svg>
+            <IconUser :size="18" />
           </div>
           <div class="min-w-0">
             <p class="text-[10px] font-black uppercase tracking-[0.14em] text-text-muted">智能画像构建</p>
@@ -112,7 +109,8 @@
             :disabled="!hasMultiAnswer(currentStep.id)"
             @click="advanceStep"
           >
-            确认并继续 →
+            确认并继续
+            <IconArrowRight :size="14" />
           </button>
         </div>
 
@@ -150,7 +148,8 @@
               :disabled="currentStep.required && !draftAnswerFor(currentStep.id)"
               @click="advanceStep"
             >
-              确认并继续 →
+              确认并继续
+              <IconArrowRight :size="14" />
             </button>
           </div>
         </div>
@@ -168,7 +167,7 @@
             <span class="generating-dot" /><span class="generating-dot" /><span class="generating-dot" />
           </span>
           <span v-else>
-            <svg class="inline-block mr-1 align-text-bottom" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+            <IconStar :size="14" filled class="inline-block mr-1 align-text-bottom" />
             生成个性化学习路径</span>
         </button>
       </div>
@@ -179,6 +178,9 @@
 
 <script setup>
 import { computed, ref } from "vue";
+import IconArrowRight from "./icons/IconArrowRight.vue";
+import IconStar from "./icons/IconStar.vue";
+import IconUser from "./icons/IconUser.vue";
 
 const props = defineProps({
   course:  { type: Object, default: null },

@@ -186,7 +186,7 @@
           </div>
           <div v-else class="resource-canvas__slot animate-cardIn h-full transition-all duration-300" :style="{ animationDelay: `${index * 40}ms` }">
             <div class="slot-empty group h-full rounded-xl border border-dashed border-subtle bg-card flex flex-col items-center justify-center gap-4 p-6" :style="{ '--rail-accent': slot.color }">
-              <span class="slot-empty-icon text-[2.25rem]" :style="{ animationDelay: `${index * 0.4}s` }" aria-hidden="true">{{ slot.icon }}</span>
+              <span class="slot-empty-icon" :style="{ animationDelay: `${index * 0.4}s`, color: slot.color }" aria-hidden="true"><component :is="slot.icon" :size="34" /></span>
               <div class="text-center space-y-0.5"><p class="font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted">{{ slot.label }}</p><p class="text-[11px] text-text-secondary">尚未生成</p></div>
               <button v-if="currentNode" type="button" class="btn-ripple workspace-shell-btn workspace-shell-btn--accent focus-ring px-4 py-2 text-[11px] font-semibold tracking-[0.06em]" @click="$emit('generate-card', { nodeId: currentNode, cardType: slot.type })">生成</button>
             </div>
@@ -216,7 +216,7 @@
                 <ul v-if="conceptObjectives(card).length" class="mt-8 rounded-lg bg-[#FAFCFB] py-3 px-4 space-y-2"><li v-for="(item, index) in conceptObjectives(card)" :key="'obj-'+index" class="flex gap-2"><span class="text-primary font-medium shrink-0 text-xs">{{ index + 1 }}.</span><span>{{ item }}</span></li></ul>
                 <ul v-if="conceptBullets(card).length" class="mt-8 space-y-2 pl-1"><li v-for="item in conceptBullets(card)" :key="'b-'+item" class="flex gap-2"><span class="text-text-muted shrink-0">&bull;</span><span>{{ item }}</span></li></ul>
                 <MarkdownContent v-if="conceptMermaidSource(card)" class="mt-8" :content="''" :mermaid-source="conceptMermaidSource(card)" />
-                <div v-if="conceptMisconceptions(card).length" class="mt-8 rounded-lg border border-warning-soft bg-warning-soft/30 py-3 px-4 space-y-1.5"><p class="text-xs font-semibold text-warning-dark mb-2">常见误区</p><ul class="space-y-1.5"><li v-for="item in conceptMisconceptions(card)" :key="'mis-'+item" class="text-xs flex gap-2"><span class="text-warning shrink-0">&times;</span><span>{{ item }}</span></li></ul></div>
+                <div v-if="conceptMisconceptions(card).length" class="mt-8 rounded-lg border border-warning-soft bg-warning-soft/30 py-3 px-4 space-y-1.5"><p class="text-xs font-semibold text-warning-dark mb-2">常见误区</p><ul class="space-y-1.5"><li v-for="item in conceptMisconceptions(card)" :key="'mis-'+item" class="text-xs flex gap-2"><span class="text-warning shrink-0 pt-1" aria-hidden="true"><IconClose :size="12" /></span><span>{{ item }}</span></li></ul></div>
                 <ul v-if="conceptReviewPrompts(card).length" class="mt-8 space-y-2 bg-[#FAFCFB] rounded-lg py-3 px-4"><li v-for="(item, index) in conceptReviewPrompts(card)" :key="'rev-'+index" class="flex gap-2"><span class="text-primary font-medium shrink-0 text-xs">{{ index + 1 }}.</span><span>{{ item }}</span></li></ul>
               </article>
               <article v-else-if="resourceType(card) === 'code_snippet'" class="text-sm leading-7 text-text-secondary">
@@ -228,7 +228,7 @@
                 <MarkdownContent v-if="codeExplanation(card)" class="mb-8" :content="codeExplanation(card)" />
                 <ol v-if="codeWalkthrough(card).length" class="mb-8 space-y-3 bg-[#FAFCFB] rounded-lg py-3 px-4"><li v-for="(item, index) in codeWalkthrough(card)" :key="'walk-'+index" class="flex gap-3"><span class="text-primary font-medium shrink-0 text-xs w-5">{{ index + 1 }}</span><span>{{ item }}</span></li></ol>
                 <ul v-if="codeComplexityNotes(card).length" class="mb-8 space-y-2"><li v-for="item in codeComplexityNotes(card)" :key="'cx-'+item" class="flex gap-2"><span class="text-text-muted shrink-0">&bull;</span><span>{{ item }}</span></li></ul>
-                <div v-if="codePitfalls(card).length" class="mb-8 rounded-lg border border-warning-soft bg-warning-soft/30 py-3 px-4 space-y-1.5"><p class="text-xs font-semibold text-warning-dark mb-2">常见坑点</p><ul class="space-y-1.5"><li v-for="item in codePitfalls(card)" :key="'pit-'+item" class="text-xs flex gap-2"><span class="text-warning shrink-0">!</span><span>{{ item }}</span></li></ul></div>
+                <div v-if="codePitfalls(card).length" class="mb-8 rounded-lg border border-warning-soft bg-warning-soft/30 py-3 px-4 space-y-1.5"><p class="text-xs font-semibold text-warning-dark mb-2">常见坑点</p><ul class="space-y-1.5"><li v-for="item in codePitfalls(card)" :key="'pit-'+item" class="text-xs flex gap-2"><span class="text-warning shrink-0 pt-1" aria-hidden="true"><IconWarning :size="12" /></span><span>{{ item }}</span></li></ul></div>
                 <ul v-if="codeExperiments(card).length" class="space-y-2"><li v-for="item in codeExperiments(card)" :key="'exp-'+item" class="flex gap-2"><span class="text-text-muted shrink-0">&bull;</span><span>{{ item }}</span></li></ul>
                 <CodePracticePanel
                   v-if="codePracticeAvailable(card)"
@@ -249,7 +249,7 @@
                   <p class="mt-2">{{ exercisePrompt(card) }}</p>
                 </div>
                 <ol v-if="exerciseSteps(card).length" class="mb-8 space-y-3 bg-[#FAFCFB] rounded-lg py-3 px-4"><li v-for="(step, stepIndex) in exerciseSteps(card)" :key="'step-'+stepIndex" class="flex gap-3"><span class="text-primary font-semibold shrink-0 text-xs w-5 pt-0.5">{{ stepIndex + 1 }}</span><span>{{ step }}</span></li></ol>
-                <ul v-if="exerciseCheckpoints(card).length" class="mb-8 space-y-2"><li v-for="item in exerciseCheckpoints(card)" :key="'cp-'+item" class="flex gap-2"><span class="text-success shrink-0">&check;</span><span>{{ item }}</span></li></ul>
+                <ul v-if="exerciseCheckpoints(card).length" class="mb-8 space-y-2"><li v-for="item in exerciseCheckpoints(card)" :key="'cp-'+item" class="flex gap-2"><span class="text-success shrink-0 pt-1.5" aria-hidden="true"><IconCheck :size="14" /></span><span>{{ item }}</span></li></ul>
                 <div v-if="exerciseHints(card).length" class="mb-8 rounded-lg border border-info-soft bg-info-soft/20 py-3 px-4 space-y-1.5"><p class="text-xs font-semibold text-info-dark mb-2">提示</p><ul class="space-y-1.5"><li v-for="(hint, index) in exerciseHints(card)" :key="'hint-'+index" class="text-xs flex gap-2"><span class="text-info shrink-0">{{ index + 1 }}.</span><span>{{ hint }}</span></li></ul></div>
                 <div v-if="exerciseExpectedOutcome(card) || exerciseSolutionOutline(card)" class="grid gap-8 sm:grid-cols-2"><div v-if="exerciseExpectedOutcome(card)" class="rounded-lg bg-[#FAFCFB] py-3 px-4"><h4 class="text-xs font-semibold text-text-muted mb-2">预期结果</h4><p>{{ exerciseExpectedOutcome(card) }}</p></div><div v-if="exerciseSolutionOutline(card)" class="rounded-lg bg-[#FAFCFB] py-3 px-4"><h4 class="text-xs font-semibold text-text-muted mb-2">参考思路</h4><p>{{ exerciseSolutionOutline(card) }}</p></div></div>
               </article>
@@ -258,7 +258,7 @@
                 <ul v-if="videoKeyPoints(card).length" class="mt-10 space-y-2"><li v-for="point in videoKeyPoints(card)" :key="'kp-'+point">{{ point }}</li></ul>
                 <div v-if="videoTimeline(card).length" class="mt-10 space-y-4"><div v-for="item in videoTimeline(card)" :key="'tl-'+item.label"><span class="text-xs font-medium text-text-muted">{{ item.label }}</span><p class="mt-1">{{ item.summary }}</p></div></div>
                 <div v-if="videoWatchFocus(card).length || videoReviewQuestions(card).length" class="mt-10 grid gap-8 sm:grid-cols-2"><ul v-if="videoWatchFocus(card).length" class="space-y-2"><li v-for="item in videoWatchFocus(card)" :key="'wf-'+item">{{ item }}</li></ul><ul v-if="videoReviewQuestions(card).length" class="space-y-2"><li v-for="(item, index) in videoReviewQuestions(card)" :key="'rq-'+index">{{ index + 1 }}. {{ item }}</li></ul></div>
-                <a v-if="videoUrl(card)" :href="videoUrl(card)" target="_blank" rel="noreferrer" class="inline-block mt-10 text-xs font-medium text-primary hover:underline">打开视频链接 &rarr;</a>
+                <a v-if="videoUrl(card)" :href="videoUrl(card)" target="_blank" rel="noreferrer" class="mt-10 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">打开视频链接 <IconArrowRight :size="12" /></a>
               </article>
               <article v-else-if="resourceType(card) === 'diagnostic_quiz'" class="text-sm leading-7 text-text-secondary">
                 <template v-if="quizUnavailable">
@@ -281,7 +281,7 @@
             </template>
           </div>
           <div v-else class="rounded-xl border border-dashed border-subtle/30 p-8 flex flex-col items-center justify-center gap-3">
-            <span class="text-3xl opacity-60" aria-hidden="true">{{ slot.icon }}</span>
+            <span class="opacity-60" :style="{ color: slot.color }" aria-hidden="true"><component :is="slot.icon" :size="30" /></span>
             <p class="text-xs text-text-muted">{{ slot.label }} · 尚未生成</p>
             <button v-if="currentNode" type="button" class="focus-ring rounded-lg border border-subtle px-4 py-2 text-xs text-text-muted hover:text-text-primary hover:border-primary/30 transition-colors" @click="$emit('generate-card', { nodeId: currentNode, cardType: slot.type })">生成</button>
           </div>
@@ -324,7 +324,7 @@
                 <span class="mastery-label">诊断前</span>
                 <span class="mastery-value">{{ Math.round((quizOverlayMasteryBefore ?? 0) * 100) }}%</span>
               </div>
-              <span class="mastery-arrow">&rarr;</span>
+              <span class="mastery-arrow" aria-hidden="true"><IconArrowRight :size="16" /></span>
               <div class="mastery-item" :class="{ 'mastery-up': (quizOverlayMasteryAfter ?? 0) > (quizOverlayMasteryBefore ?? 0) }">
                 <span class="mastery-label">诊断后</span>
                 <span class="mastery-value">{{ Math.round((quizOverlayMasteryAfter ?? 0) * 100) }}%</span>
@@ -379,7 +379,16 @@
 <script setup>
 import { computed, nextTick, ref, watch } from "vue";
 import CodePracticePanel from "./CodePracticePanel.vue";
+import IconArrowRight from "./icons/IconArrowRight.vue";
+import IconCheck from "./icons/IconCheck.vue";
+import IconClipboard from "./icons/IconClipboard.vue";
+import IconClose from "./icons/IconClose.vue";
+import IconCode from "./icons/IconCode.vue";
+import IconMap from "./icons/IconMap.vue";
+import IconPencil from "./icons/IconPencil.vue";
 import IconPresentation from "./icons/IconPresentation.vue";
+import IconVideo from "./icons/IconVideo.vue";
+import IconWarning from "./icons/IconWarning.vue";
 import MarkdownContent from "./MarkdownContent.vue";
 import PptPreview from "./PptPreview.vue";
 import { extractCodePreview, extractTextPreview } from "../utils/markdownPreview.js";
@@ -471,11 +480,11 @@ watch(
 
 // ── 5-type slot system ─────────────────────────────────────────────────
 const CARD_TYPES = [
-  { type: "concept_map",          label: "概念导图", filterLabel: "概念", icon: "🗺", sidebarKey: "concept",  color: "var(--learning-concept)" },
-  { type: "code_snippet",         label: "代码示例", filterLabel: "代码", icon: "💻", sidebarKey: "code",     color: "var(--learning-code)" },
-  { type: "interactive_exercise", label: "互动练习", filterLabel: "练习", icon: "✏️", sidebarKey: "practice", color: "var(--learning-practice)" },
-  { type: "video_summary",        label: "视频摘要", filterLabel: "视频", icon: "🎬", sidebarKey: "video",    color: "var(--learning-video)" },
-  { type: "diagnostic_quiz",      label: "诊断测验", filterLabel: "测验", icon: "📋", sidebarKey: "quiz",     color: "var(--learning-quiz)" },
+  { type: "concept_map",          label: "概念导图", filterLabel: "概念", icon: IconMap,       sidebarKey: "concept",  color: "var(--learning-concept)" },
+  { type: "code_snippet",         label: "代码示例", filterLabel: "代码", icon: IconCode,      sidebarKey: "code",     color: "var(--learning-code)" },
+  { type: "interactive_exercise", label: "互动练习", filterLabel: "练习", icon: IconPencil,    sidebarKey: "practice", color: "var(--learning-practice)" },
+  { type: "video_summary",        label: "视频摘要", filterLabel: "视频", icon: IconVideo,     sidebarKey: "video",    color: "var(--learning-video)" },
+  { type: "diagnostic_quiz",      label: "诊断测验", filterLabel: "测验", icon: IconClipboard, sidebarKey: "quiz",     color: "var(--learning-quiz)" },
 ];
 
 const resourceFilterItems = computed(() => [
@@ -671,9 +680,9 @@ const diagnosticStatusText = computed(() => {
     const beforePercent = Math.round((diagnostic.masteryBefore ?? 0) * 100);
     const afterPercent = Math.round((diagnostic.masteryAfter ?? 0) * 100);
     if (diagnostic.advancedToNextNode) {
-      return `上次诊断得分 ${scorePercent}% · 掌握度 ${beforePercent}% -> ${afterPercent}% · 已推进到 ${diagnostic.nextNodeTitle || "下一节点"}`;
+      return `上次诊断得分 ${scorePercent}% · 掌握度 ${beforePercent}% → ${afterPercent}% · 已推进到 ${diagnostic.nextNodeTitle || "下一节点"}`;
     }
-    return `上次诊断得分 ${scorePercent}% · 掌握度 ${beforePercent}% -> ${afterPercent}% · 继续停留当前节点`;
+    return `上次诊断得分 ${scorePercent}% · 掌握度 ${beforePercent}% → ${afterPercent}% · 继续停留当前节点`;
   }
 
   if (submittedScore.value !== null) {

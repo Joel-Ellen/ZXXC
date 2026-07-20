@@ -93,7 +93,7 @@ const diagnosticDetail = computed(() => {
   if (!props.lastDiagnostic) return "尚未提交本轮诊断";
   const beforePercent = Math.round((props.lastDiagnostic.masteryBefore ?? 0) * 100);
   const afterPercent = Math.round((props.lastDiagnostic.masteryAfter ?? 0) * 100);
-  return `${beforePercent}% -> ${afterPercent}%`;
+  return `${beforePercent}% → ${afterPercent}%`;
 });
 
 function statusClass(status) {

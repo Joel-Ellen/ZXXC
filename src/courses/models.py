@@ -24,7 +24,7 @@ class CourseRecord(BaseModel):
     estimated_hours: float = Field(default=40.0, description="预估总学时")
     node_count: int = Field(default=0, description="知识节点数量")
     tags: List[str] = Field(default_factory=list, description="搜索标签")
-    icon: str = Field(default="📚", description="课程图标 (emoji)")
+    icon: str = Field(default="book", description="课程图标语义 key (如 algorithm/system/network/ai/python/book)")
     prerequisites: List[str] = Field(default_factory=list, description="推荐前置课程 ID 列表")
 
     def to_api_dict(self) -> dict:
