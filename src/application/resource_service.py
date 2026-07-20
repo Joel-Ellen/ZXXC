@@ -293,6 +293,12 @@ def _resource_card_language_valid(card: ResourceCard, locale: str) -> bool:
         return False
     if not str(locale or "").lower().startswith("zh"):
         return True
+    if has_canonical_payload:
+        # The canonical payload is the source of truth (the body is rendered
+        # from it). Re-scanning the flattened Markdown would re-judge name-only
+        # and code-value fields without their field context and silently drop
+        # cards that generation-time validation accepted.
+        return not non_chinese_resource_fields(structured_payload)
     if not is_chinese_learning_content(card.content):
         return False
     return not non_chinese_resource_fields(structured_payload)

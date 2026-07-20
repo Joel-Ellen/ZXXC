@@ -342,7 +342,13 @@ def build_supporting_bundle_messages(
     return [{"role": "system", "content": _system_prompt()}, {"role": "user", "content": user}]
 
 
-def _bullets(values: list[Any]) -> str:
+def _bullets(values: Any) -> str:
+    # A provider may return a single string where the schema expects a list;
+    # iterating it would emit one bullet per character.
+    if isinstance(values, str):
+        values = [values]
+    if not isinstance(values, (list, tuple)):
+        values = [values] if values else []
     return "\n".join(f"- {value}" for value in values if str(value).strip())
 
 

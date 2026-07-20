@@ -40,6 +40,53 @@ def test_resource_read_boundary_rejects_legacy_python_examples() -> None:
     assert resource_service._resource_card_language_valid(python_card, "en-US") is False
 
 
+def test_resource_read_boundary_keeps_canonical_cards_with_cs_acronym_prose() -> None:
+    """A canonical card must be judged by its payload, not the flattened body.
+
+    Field-level exemptions (name-only title, code-value fields) disappear when
+    the payload is rendered to Markdown; re-scanning that body used to drop
+    cards generation-time validation had accepted, so learners saw the card
+    silently vanish (most often code_snippet).
+    """
+    payload = {
+        "language": "c",
+        "code": "int answer(void) { return 42; }",
+        "title": "二叉搜索树",
+        "scenario": "比较 BST 与 AVL 的查找路径。",
+        "explanation": "BST 最坏退化为链表，AVL 通过旋转保持平衡。",
+    }
+    card = ResourceCard(
+        resource_id="example-acronym",
+        node_id="N01",
+        card_type="code_snippet",
+        content=(
+            "## 二叉搜索树\n\n### 场景\n比较 BST 与 AVL 的查找路径。\n\n"
+            "```c\nint answer(void) { return 42; }\n```\n\n"
+            "### 原理解释\nBST 最坏退化为链表，AVL 通过旋转保持平衡。"
+        ),
+        metadata={"structured_payload": payload},
+    )
+
+    assert resource_service._resource_card_language_valid(card, "zh-CN") is True
+
+
+def test_resource_read_boundary_still_rejects_english_prose_in_canonical_payload() -> None:
+    payload = {
+        "language": "c",
+        "code": "int answer(void) { return 42; }",
+        "explanation": "We iterate over each element and accumulate the total.",
+    }
+    card = ResourceCard(
+        resource_id="example-english-prose",
+        node_id="N01",
+        card_type="code_snippet",
+        content="## 示例\n\n```c\nint answer(void) { return 42; }\n```",
+        metadata={"structured_payload": payload},
+    )
+
+    assert resource_service._resource_card_language_valid(card, "zh-CN") is False
+
+
 def test_session_resource_contract_does_not_expose_legacy_python_cards() -> None:
     state = AgentState(
         user_id="u",
